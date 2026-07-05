@@ -587,6 +587,13 @@
       await saveGroups();
       needsSave = true;
     }
+    // 이전 버전 호환: 분류 기준이 계좌 구분 없이 전체 공용이던 구버전 데이터를 첫 번째 계좌 소속으로 이전
+    if(groupSchemes.some(s=>!s.accountId)){
+      const defaultAccountId2 = accounts[0].id;
+      groupSchemes.forEach(s=>{ if(!s.accountId) s.accountId = defaultAccountId2; });
+      await saveGroupSchemes();
+      needsSave = true;
+    }
     // 이전 버전 호환: "수익률 계산에서 제외" 토글이 "현금으로 표시"로 통합됨
     companies.forEach(c=>{
       if(c.excludeFromReturn !== undefined){
@@ -1311,12 +1318,14 @@
     const scopeOptions = '<option value="all" '+(portfolioScope==='all'?'selected':'')+'>전체 계좌 합산</option>'
       + accounts.map(a=>'<option value="'+a.id+'" '+(portfolioScope===a.id?'selected':'')+'>'+esc(a.name)+'</option>').join('');
     const summary = computeSplitSummary(portfolioScope);
-    // 선택된 분류 기준이 삭제됐으면 종목별로 되돌림
-    if(portfolioBreakdown!=='ticker' && !groupSchemes.some(s=>s.id===portfolioBreakdown)) portfolioBreakdown = 'ticker';
+    // 분류 기준은 계좌별로 존재 — 지금 보고 있는 계좌(portfolioScope)의 것만 사용
+    const scopedSchemes = groupSchemes.filter(s=>s.accountId===portfolioScope);
+    // 선택된 분류 기준이 삭제됐거나 다른 계좌 것이면 종목별로 되돌림
+    if(portfolioBreakdown!=='ticker' && !scopedSchemes.some(s=>s.id===portfolioBreakdown)) portfolioBreakdown = 'ticker';
     const dist = computeAssetDistribution(portfolioScope, portfolioBreakdown);
 
     const breakdownTabs = '<button data-breakdown="ticker" class="'+(portfolioBreakdown==='ticker'?'active':'')+'" style="padding:5px 12px;">종목별</button>'
-      + groupSchemes.map(s=>'<button data-breakdown="'+s.id+'" class="'+(portfolioBreakdown===s.id?'active':'')+'" style="padding:5px 12px;">'+esc(s.name)+'</button>').join('');
+      + scopedSchemes.map(s=>'<button data-breakdown="'+s.id+'" class="'+(portfolioBreakdown===s.id?'active':'')+'" style="padding:5px 12px;">'+esc(s.name)+'</button>').join('');
 
     return '<div class="detail-header"><div><div class="detail-title-row"><span class="detail-title">전체 자산 현황</span></div><div style="font-size:12px;color:var(--text-muted);margin-top:6px;">보유 중(미실현)과 청산 완료(실현)를 나눠서 보여줘요. 금액은 원화로 환산했어요.</div></div></div>'
       + '<div style="margin-bottom:20px;display:flex;align-items:center;gap:10px;">'
@@ -1886,7 +1895,9 @@
   function renderGroupsModal(){
     if(!showGroupsModal) return '';
 
-    const schemesHtml = groupSchemes.map(scheme=>{
+    // 분류 기준은 계좌별로 존재 — 지금 "전체 자산 현황"에서 보고 있는 계좌(portfolioScope)의 것만 관리
+    const scopedSchemes = groupSchemes.filter(s=>s.accountId===portfolioScope);
+    const schemesHtml = scopedSchemes.map(scheme=>{
       const schemeGroups = groups.filter(g=>g.schemeId===scheme.id);
       const groupRows = schemeGroups.map(g=>{
         const count = companies.filter(c=>c.groupAssignments && c.groupAssignments[scheme.id]===g.id).length;
@@ -1899,7 +1910,7 @@
       }).join('');
 
       const assignOpen = groupsModalSchemeId===scheme.id;
-      const heldCompanies = companies.filter(c=>computeStats(c.id).status==='holding');
+      const heldCompanies = companies.filter(c=>c.accountId===scheme.accountId && computeStats(c.id).status==='holding');
       const assignRows = assignOpen ? (
         '<div style="margin-top:10px;max-height:260px;overflow-y:auto;border-top:1px solid var(--border-soft);padding-top:10px;">'
         + heldCompanies.map(c=>{
@@ -1929,7 +1940,7 @@
       +'</div>';
     }).join('');
 
-    const cashCandidates = companies.filter(c=>computeStats(c.id).status==='holding');
+    const cashCandidates = companies.filter(c=> (portfolioScope==='all' || c.accountId===portfolioScope) && computeStats(c.id).status==='holding');
     const cashRows = cashCandidates.map(c=>{
       return '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:5px 0;font-size:12.5px;">'
         +'<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+esc(c.name)+' <span style="color:var(--text-faint);">'+esc(c.ticker)+'</span></span>'
@@ -1942,13 +1953,19 @@
       + (cashRows || '<div class="no-trades">현재 보유 중인 종목이 없어요.</div>')
     +'</div>';
 
-    const body = '<div class="modal-sub">여러 개의 분류 기준(예: "자산 종류별 분류", "거래소별 분류")을 만들고, 각 기준 안에 그룹을 나눠서 자산 분포를 다양한 관점으로 볼 수 있어요.</div>'
+    const activeAccountName = esc((accounts.find(a=>a.id===portfolioScope)||{}).name || '');
+    const schemeAddSection = portfolioScope==='all'
+      ? '<div class="modal-sub" style="margin-top:6px;">분류 기준은 계좌별로 따로 관리돼요. 위 "범위"에서 계좌를 하나 선택하면 그 계좌의 분류 기준을 만들고 관리할 수 있어요.</div>'
+      : ('<div style="font-size:11px;color:var(--text-faint);margin:2px 0 6px 0;">"'+activeAccountName+'" 계좌의 분류 기준</div>'
+        +'<div style="display:flex;gap:8px;margin-top:6px;">'
+          +'<input type="text" id="new-scheme-name" placeholder="새 분류 기준 이름 (예: 자산 종류별 분류)" style="flex:1;background:var(--surface-raised);border:1px solid var(--border);border-radius:3px;color:var(--text);padding:8px 10px;font-size:13px;font-family:\'Noto Sans KR\',sans-serif;">'
+          +'<button class="import-btn-primary" id="scheme-add" style="padding:8px 16px;">분류 기준 추가</button>'
+        +'</div>');
+
+    const body = '<div class="modal-sub">여러 개의 분류 기준(예: "자산 종류별 분류", "거래소별 분류")을 만들고, 각 기준 안에 그룹을 나눠서 자산 분포를 다양한 관점으로 볼 수 있어요. 분류 기준은 계좌마다 따로예요.</div>'
       + cashSection
       + schemesHtml
-      + '<div style="display:flex;gap:8px;margin-top:6px;">'
-        +'<input type="text" id="new-scheme-name" placeholder="새 분류 기준 이름 (예: 자산 종류별 분류)" style="flex:1;background:var(--surface-raised);border:1px solid var(--border);border-radius:3px;color:var(--text);padding:8px 10px;font-size:13px;font-family:\'Noto Sans KR\',sans-serif;">'
-        +'<button class="import-btn-primary" id="scheme-add" style="padding:8px 16px;">분류 기준 추가</button>'
-      +'</div>'
+      + schemeAddSection
       +'<div class="import-actions"><button class="import-btn-secondary" id="groups-close-btn">닫기</button></div>';
 
     return '<div class="modal-overlay" id="groups-overlay">'
@@ -2672,12 +2689,18 @@
       companies = companies.filter(c=>c.accountId!==activeAccountId);
       trades = trades.filter(t=>!companyIdsInAccount.includes(t.companyId));
       accounts = accounts.filter(a=>a.id!==activeAccountId);
+      const deletedSchemeIds = groupSchemes.filter(s=>s.accountId===activeAccountId).map(s=>s.id);
+      groupSchemes = groupSchemes.filter(s=>s.accountId!==activeAccountId);
+      groups = groups.filter(g=>!deletedSchemeIds.includes(g.schemeId));
+      if(portfolioScope===activeAccountId) portfolioScope = 'all';
       activeAccountId = accounts[0].id;
       const firstInAccount = companies.find(c=>c.accountId===activeAccountId);
       selectedId = firstInAccount ? firstInAccount.id : null;
       await saveAccounts();
       await saveCompanies();
       await saveTrades();
+      await saveGroupSchemes();
+      await saveGroups();
       render();
     });
 
@@ -3001,7 +3024,8 @@
       const input = document.getElementById('new-scheme-name');
       const name = input.value.trim();
       if(!name){ alert('분류 기준 이름을 입력해주세요.'); return; }
-      groupSchemes.push({id:uid(), name});
+      if(portfolioScope==='all'){ alert('분류 기준은 계좌별로 만들어져요. 위에서 계좌를 하나 선택한 뒤 추가해주세요.'); return; }
+      groupSchemes.push({id:uid(), name, accountId: portfolioScope});
       await saveGroupSchemes();
       render();
     });
