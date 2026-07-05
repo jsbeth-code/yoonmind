@@ -422,6 +422,12 @@
   let activeTab = 'trades';
   let showPortfolioOverview = false;
   let portfolioScope = 'all'; // 'all' | accountId — 자산 분포 보기 범위
+  let portfolioBreakdown = 'ticker'; // 'ticker' | 'group' — 자산 분포를 종목별/그룹별 중 어느 기준으로 볼지
+  let showClosedOverview = false; // 전체 자산 현황 화면: 청산 완료 섹션 기본 접힘
+  let showClosedAcctSummary = false; // 사이드바 계좌 요약 박스: 청산 완료 섹션 기본 접힘
+  let groups = []; // [{id, name}] — 사용자가 만드는 자산 그룹 (예: "배당주", "채권" 등)
+  let showGroupsModal = false;
+  let cashModalAccountId = null; // null이면 닫힘, 아니면 그 계좌의 현금 입력 모달이 열림
   let showNewCompanyForm = false;
   let tradeType = 'buy';
   let dataReady = false;
@@ -542,6 +548,10 @@
       const lb = await storage.get('lastimportbatch');
       lastImportBatch = lb ? JSON.parse(lb.value) : null;
     }catch(e){ lastImportBatch = null; }
+    try{
+      const g = await storage.get('groups');
+      groups = g ? JSON.parse(g.value) : [];
+    }catch(e){ groups = []; }
 
     let needsSave = false;
     if(!accounts.length){
@@ -551,6 +561,9 @@
     const defaultAccountId = accounts[0].id;
     companies.forEach(c=>{
       if(!c.accountId){ c.accountId = defaultAccountId; needsSave = true; }
+    });
+    accounts.forEach(a=>{
+      if(!a.cash){ a.cash = {USD:0, JPY:0, KRW:0}; needsSave = true; }
     });
     if(needsSave){ await saveAccounts(); await saveCompanies(); }
 
@@ -576,6 +589,10 @@
   }
   async function saveFxRates(){
     try{ await storage.set('fxrates', JSON.stringify(fxRates)); }
+    catch(e){ console.error('저장 실패', e); }
+  }
+  async function saveGroups(){
+    try{ await storage.set('groups', JSON.stringify(groups)); }
     catch(e){ console.error('저장 실패', e); }
   }
   async function saveLastImportBatch(){
@@ -1083,9 +1100,15 @@
   // scope: 'all' 이면 전 계좌 합산, 아니면 특정 accountId. 보유 중(미실현) / 청산 완료(실현)를 분리해서 반환.
   function computeSplitSummary(scope){
     let heldBuyCost=0, heldValue=0, closedBuyCost=0, closedSellProceeds=0, pending=false, anyMissingPrice=false;
+    let excludedValue=0, excludedCount=0;
     companies.filter(c=> scope==='all' || c.accountId===scope).forEach(c=>{
       const s = computeCompanySplitKRW(c);
       if(s.pending) pending = true;
+      if(c.excludeFromReturn){
+        excludedValue += s.holdingValueKRW;
+        if(s.holdingQty>0) excludedCount++;
+        return; // 수익률 계산에서 제외 — 매입/평가 합산에 넣지 않음
+      }
       heldBuyCost += s.holdingBuyCostKRW;
       heldValue += s.holdingValueKRW;
       if(s.holdingQty>0 && !s.hasCurrentPrice) anyMissingPrice = true;
@@ -1096,13 +1119,36 @@
     const heldReturnPct = heldBuyCost>0 ? (heldProfit/heldBuyCost*100) : null;
     const closedProfit = closedSellProceeds - closedBuyCost;
     const closedReturnPct = closedBuyCost>0 ? (closedProfit/closedBuyCost*100) : null;
-    return {heldBuyCost, heldValue, heldProfit, heldReturnPct, closedBuyCost, closedSellProceeds, closedProfit, closedReturnPct, pending, anyMissingPrice};
+    return {heldBuyCost, heldValue, heldProfit, heldReturnPct, closedBuyCost, closedSellProceeds, closedProfit, closedReturnPct, pending, anyMissingPrice, excludedValue, excludedCount};
   }
 
   const DONUT_COLORS = ['#3fa796','#e8a93e','#e2646b','#6c8ee2','#c77dd1','#52c17e','#d1567d','#4fc3d9','#a3894f','#8b93a3'];
 
   // scope: 'all' (전 계좌 합산, 티커+통화로 묶음) 또는 특정 accountId
-  function computeAssetDistribution(scope){
+  // 계좌(scope)에 등록된 현금(USD/JPY/KRW)을 원화로 환산해서 반환
+  function computeCashBucketsKRW(scope){
+    const targetAccounts = accounts.filter(a=> scope==='all' || a.id===scope);
+    let pending = false;
+    const result = {USD:{krw:0}, JPY:{krw:0}, KRW:{krw:0}};
+    targetAccounts.forEach(a=>{
+      const cash = a.cash || {USD:0,JPY:0,KRW:0};
+      ['USD','JPY','KRW'].forEach(cur=>{
+        const amt = parseFloat(cash[cur]) || 0;
+        if(amt===0) return;
+        if(cur==='KRW'){ result[cur].krw += amt; return; }
+        const conv = convertAmount(amt, cur, 'latest', 'KRW');
+        if(conv.pending){ pending = true; return; }
+        if(conv.failed) return;
+        result[cur].krw += conv.value;
+      });
+    });
+    result.pending = pending;
+    return result;
+  }
+
+  // breakdown: 'ticker'(기본, 종목별) 또는 'group'(사용자가 만든 그룹별)
+  function computeAssetDistribution(scope, breakdown){
+    breakdown = breakdown || 'ticker';
     const targetCompanies = companies.filter(c=>{
       if(scope!=='all' && c.accountId!==scope) return false;
       return computeStats(c.id).status==='holding';
@@ -1117,11 +1163,32 @@
       if(rm.hasCurrentPrice){ value = rm.currentValue; }
       else { value = rm.totalBuyCost; approx = true; }
       if(!value || value<=0) return;
-      const key = scope==='all' ? (c.ticker+'|'+c.currency) : c.id;
-      if(!buckets[key]) buckets[key] = {name:c.name, ticker:c.ticker, value:0, approx:false};
+      let key, label, sub;
+      if(breakdown==='group'){
+        const group = groups.find(g=>g.id===c.groupId);
+        key = group ? group.id : '__none__';
+        label = group ? group.name : '미분류';
+        sub = '';
+      } else {
+        key = scope==='all' ? (c.ticker+'|'+c.currency) : c.id;
+        label = c.name;
+        sub = c.ticker;
+      }
+      if(!buckets[key]) buckets[key] = {name:label, ticker:sub, value:0, approx:false};
       buckets[key].value += value;
       if(approx) buckets[key].approx = true;
     });
+
+    const cash = computeCashBucketsKRW(scope);
+    if(cash.pending) pending = true;
+    ['USD','JPY','KRW'].forEach(cur=>{
+      const krw = cash[cur].krw;
+      if(!krw || krw<=0) return;
+      const key = 'cash|'+cur;
+      if(!buckets[key]) buckets[key] = {name:'현금 ('+cur+')', ticker:'', value:0, approx:false};
+      buckets[key].value += krw;
+    });
+
     let list = Object.values(buckets).filter(b=>b.value>0).sort((a,b)=>b.value-a.value);
     const TOP_N = 8;
     if(list.length>TOP_N){
@@ -1170,7 +1237,8 @@
       +'<div class="stat-card"><div class="stat-label">보유 중 평가금액</div><div class="stat-value mono">'+(p?'<span class="fx-note">조회 중…</span>':(summary.anyMissingPrice?'<span class="fx-note">현재가 필요</span>':fmtMoney(summary.heldValue,'KRW')))+'</div></div>'
       +'<div class="stat-card"><div class="stat-label">평가손익</div><div class="stat-value mono '+(summary.heldProfit>0?'gain':(summary.heldProfit<0?'loss':''))+'">'+(p?'<span class="fx-note">조회 중…</span>':fmtMoney(summary.heldProfit,'KRW'))+'</div></div>'
       +'<div class="stat-card"><div class="stat-label">수익률</div><div class="stat-value mono '+(summary.heldReturnPct>0?'gain':(summary.heldReturnPct<0?'loss':''))+'" style="font-size:16px;">'+(p?'<span class="fx-note">조회 중…</span>':(summary.heldReturnPct===null?'-':fmtPct(summary.heldReturnPct)))+'</div></div>'
-      +'</div>';
+      +'</div>'
+      + (summary.excludedCount>0 ? '<div style="font-size:11.5px;color:var(--text-faint);margin-top:8px;">수익률 계산에서 제외한 종목 '+summary.excludedCount+'개 · 평가금액 '+fmtMoney(summary.excludedValue,'KRW')+' (위 수치에 포함 안 됨, 자산 분포에는 포함돼요)</div>' : '');
     const closedCards = '<div class="stats-row">'
       +'<div class="stat-card"><div class="stat-label">청산 매입금액</div><div class="stat-value mono">'+(p?'<span class="fx-note">조회 중…</span>':fmtMoney(summary.closedBuyCost,'KRW'))+'</div></div>'
       +'<div class="stat-card"><div class="stat-label">청산(매도)금액</div><div class="stat-value mono">'+(p?'<span class="fx-note">조회 중…</span>':fmtMoney(summary.closedSellProceeds,'KRW'))+'</div></div>'
@@ -1179,15 +1247,15 @@
       +'</div>';
     return '<div style="font-size:12px;color:var(--accent);font-weight:600;margin-bottom:10px;">보유 중인 종목 (미실현)</div>'
       + heldCards
-      + '<div style="font-size:12px;color:var(--text-faint);font-weight:600;margin:20px 0 10px 0;">청산 완료한 종목 (실현)</div>'
-      + closedCards;
+      + '<div class="sidebar-group-label collapsible" data-toggle-closed-overview="1" style="margin:20px 0 10px 0;cursor:pointer;">청산 완료한 종목 (실현) <span class="chev">'+(showClosedOverview?'▾':'▸')+'</span></div>'
+      + (showClosedOverview ? closedCards : '');
   }
 
   function renderPortfolioOverview(){
     const scopeOptions = '<option value="all" '+(portfolioScope==='all'?'selected':'')+'>전체 계좌 합산</option>'
       + accounts.map(a=>'<option value="'+a.id+'" '+(portfolioScope===a.id?'selected':'')+'>'+esc(a.name)+'</option>').join('');
     const summary = computeSplitSummary(portfolioScope);
-    const dist = computeAssetDistribution(portfolioScope);
+    const dist = computeAssetDistribution(portfolioScope, portfolioBreakdown);
 
     return '<div class="detail-header"><div><div class="detail-title-row"><span class="detail-title">전체 자산 현황</span></div><div style="font-size:12px;color:var(--text-muted);margin-top:6px;">보유 중(미실현)과 청산 완료(실현)를 나눠서 보여줘요. 금액은 원화로 환산했어요.</div></div></div>'
       + '<div style="margin-bottom:20px;display:flex;align-items:center;gap:10px;">'
@@ -1195,7 +1263,15 @@
         + '<select id="portfolio-scope-select" style="background:var(--surface-raised);border:1px solid var(--border);border-radius:3px;color:var(--text);padding:7px 10px;font-size:13px;font-family:\'Noto Sans KR\',sans-serif;">'+scopeOptions+'</select>'
       + '</div>'
       + renderSplitSummaryGroups(summary)
-      + '<div style="margin:26px 0 16px 0;font-size:12px;color:var(--text-muted);font-weight:600;">자산 분포 (보유 중 종목 기준)</div>'
+      + '<div style="margin:26px 0 14px 0;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">'
+        + '<span style="font-size:12px;color:var(--text-muted);font-weight:600;">자산 분포</span>'
+        + '<div class="import-mode-tabs" style="margin:0;padding:3px;">'
+          +'<button data-breakdown="ticker" class="'+(portfolioBreakdown==='ticker'?'active':'')+'" style="padding:5px 12px;">종목별</button>'
+          +'<button data-breakdown="group" class="'+(portfolioBreakdown==='group'?'active':'')+'" style="padding:5px 12px;">그룹별</button>'
+        + '</div>'
+        + '<span class="fx-manual" id="open-groups-modal-link">그룹 관리</span>'
+        + '<span class="fx-manual" id="open-cash-modal-link">현금 자산 입력</span>'
+      + '</div>'
       + renderDonutChart(dist.list, dist.total, dist.pending);
   }
 
@@ -1749,6 +1825,53 @@
       +'</div>';
   }
 
+  function renderGroupsModal(){
+    if(!showGroupsModal) return '';
+    const rows = groups.map(g=>{
+      const count = companies.filter(c=>c.groupId===g.id).length;
+      return '<div class="mapping-row" style="align-items:center;flex-wrap:nowrap;">'
+        +'<input type="text" data-groupname="'+g.id+'" value="'+esc(g.name)+'" style="flex:1;background:var(--surface-raised);border:1px solid var(--border);border-radius:3px;color:var(--text);padding:8px 10px;font-size:13px;font-family:\'Noto Sans KR\',sans-serif;">'
+        +'<span style="font-size:11px;color:var(--text-faint);white-space:nowrap;padding:0 4px;">'+count+'개</span>'
+        +'<button data-groupdelete="'+g.id+'" style="background:none;border:none;color:var(--text-faint);cursor:pointer;font-size:12px;white-space:nowrap;">삭제</button>'
+        +'</div>';
+    }).join('');
+    const body = '<div class="modal-sub">종목을 원하는 그룹으로 묶어서 자산 분포를 그룹별로도 볼 수 있어요. 그룹 배정은 각 종목 상세 화면에서 할 수 있어요.</div>'
+      + (rows || '<div class="no-trades">아직 만든 그룹이 없어요.</div>')
+      + '<div style="display:flex;gap:8px;margin-top:14px;">'
+        +'<input type="text" id="new-group-name" placeholder="새 그룹 이름 (예: 배당주, 채권, 성장주)" style="flex:1;background:var(--surface-raised);border:1px solid var(--border);border-radius:3px;color:var(--text);padding:8px 10px;font-size:13px;font-family:\'Noto Sans KR\',sans-serif;">'
+        +'<button class="import-btn-primary" id="group-add" style="padding:8px 16px;">추가</button>'
+      +'</div>'
+      +'<div class="import-actions"><button class="import-btn-secondary" id="groups-close-btn">닫기</button></div>';
+    return '<div class="modal-overlay" id="groups-overlay">'
+      +'<div class="modal-box" style="max-width:520px;">'
+        +'<div class="modal-header"><h2>자산 그룹 관리</h2><button class="modal-close" id="groups-close-x">×</button></div>'
+        + body
+      +'</div>'
+      +'</div>';
+  }
+
+  function renderCashModal(){
+    if(!cashModalAccountId) return '';
+    const account = accounts.find(a=>a.id===cashModalAccountId);
+    if(!account) return '';
+    const cash = account.cash || {USD:0,JPY:0,KRW:0};
+    const accountOptions = accounts.map(a=>'<option value="'+a.id+'" '+(a.id===cashModalAccountId?'selected':'')+'>'+esc(a.name)+'</option>').join('');
+    const body = '<div class="modal-sub">이 계좌에 있는 현금(예수금)을 통화별로 입력해두면 "전체 자산 현황"의 자산 분포에 포함돼요. 수익률 계산에는 영향을 주지 않아요.</div>'
+      + '<div class="import-year-row"><label>계좌</label><select id="cash-account-select">'+accountOptions+'</select></div>'
+      + '<div class="form-row">'
+        +'<div class="fgroup"><label>달러 (USD)</label><input type="number" step="0.01" id="cash-usd" value="'+(cash.USD||0)+'"></div>'
+        +'<div class="fgroup"><label>엔화 (JPY)</label><input type="number" step="1" id="cash-jpy" value="'+(cash.JPY||0)+'"></div>'
+        +'<div class="fgroup"><label>원화 (KRW)</label><input type="number" step="1" id="cash-krw" value="'+(cash.KRW||0)+'"></div>'
+      +'</div>'
+      +'<div class="import-actions"><button class="import-btn-secondary" id="cash-close-btn">닫기</button><button class="import-btn-primary" id="cash-save">저장</button></div>';
+    return '<div class="modal-overlay" id="cash-overlay">'
+      +'<div class="modal-box" style="max-width:480px;">'
+        +'<div class="modal-header"><h2>현금 자산 입력</h2><button class="modal-close" id="cash-close-x">×</button></div>'
+        + body
+      +'</div>'
+      +'</div>';
+  }
+
   function renderBackupModal(){
     if(!showBackupModal) return '';
     const tabs = '<div class="import-mode-tabs">'
@@ -2156,10 +2279,18 @@
         stampHtml = '<div class="stamp" style="color:var(--accent);">보유중</div>';
       }
 
+      const groupOptions = '<option value="">그룹 없음</option>' + groups.map(g=>'<option value="'+g.id+'" '+(selected.groupId===g.id?'selected':'')+'>'+esc(g.name)+'</option>').join('');
+
       const header = '<div class="detail-header">'
         +'<div>'
-          +'<div class="detail-title-row"><span class="detail-title">'+esc(selected.name)+'</span><span class="detail-code mono">'+esc(selected.ticker)+'</span></div>'
-          +(selected.sector ? '<div class="detail-sector">'+esc(selected.sector)+'</div>' : '')
+          +'<div class="detail-title-row"><span class="detail-title">'+esc(selected.name)+'</span><span class="detail-code mono">'+esc(selected.ticker)+'</span>'
+            + (selected.excludeFromReturn ? '<span class="dca-tag" style="background:var(--surface-raised);color:var(--text-faint);">수익률 제외</span>' : '')
+          +'</div>'
+          +'<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:8px;">'
+            + (selected.sector ? '<div class="detail-sector" style="margin-top:0;">'+esc(selected.sector)+'</div>' : '')
+            +'<select data-companygroup="'+selected.id+'" style="background:var(--surface-raised);border:1px solid var(--border);border-radius:20px;color:var(--text-muted);padding:2px 9px;font-size:11px;font-family:\'Noto Sans KR\',sans-serif;">'+groupOptions+'</select>'
+            +'<span class="fx-manual" data-toggleexclude="'+selected.id+'" style="font-size:11px;">'+(selected.excludeFromReturn?'수익률 제외됨 · 다시 포함':'수익률 계산에서 제외')+'</span>'
+          +'</div>'
         +'</div>'
         +'<div style="display:flex;align-items:center;gap:14px;">'+stampHtml+'<button class="delete-company-btn" data-delcompany="'+selected.id+'">종목 삭제</button></div>'
         +'</div>';
@@ -2340,10 +2471,14 @@
           +'<div class="account-summary-row"><span>매입금액</span><b>'+fmtMoney(acctSummary.heldBuyCost,'KRW')+'</b></div>'
           +'<div class="account-summary-row"><span>평가금액</span><b>'+(acctSummary.anyMissingPrice?'<span class="fx-note">현재가 필요</span>':fmtMoney(acctSummary.heldValue,'KRW'))+'</b></div>'
           +'<div class="account-summary-row"><span>수익률</span><b class="'+(acctSummary.heldReturnPct===null?'':(acctSummary.heldReturnPct>=0?'gain':'loss'))+'">'+(acctSummary.heldReturnPct===null?'-':fmtPct(acctSummary.heldReturnPct))+'</b></div>'
-          +'<div class="account-summary-group-label">청산 완료</div>'
-          +'<div class="account-summary-row"><span>매입금액</span><b>'+fmtMoney(acctSummary.closedBuyCost,'KRW')+'</b></div>'
-          +'<div class="account-summary-row"><span>청산금액</span><b>'+fmtMoney(acctSummary.closedSellProceeds,'KRW')+'</b></div>'
-          +'<div class="account-summary-row"><span>수익률</span><b class="'+(acctSummary.closedReturnPct===null?'':(acctSummary.closedReturnPct>=0?'gain':'loss'))+'">'+(acctSummary.closedReturnPct===null?'-':fmtPct(acctSummary.closedReturnPct))+'</b></div>')
+          + (acctSummary.excludedCount>0 ? '<div style="font-size:10.5px;color:var(--text-faint);margin:2px 0 4px 0;">제외 '+acctSummary.excludedCount+'개 · '+fmtMoney(acctSummary.excludedValue,'KRW')+'</div>' : '')
+          +'<div class="account-summary-group-label collapsible" data-toggle-closed-acct="1" style="cursor:pointer;display:flex;justify-content:space-between;align-items:center;">청산 완료 <span class="chev">'+(showClosedAcctSummary?'▾':'▸')+'</span></div>'
+          + (showClosedAcctSummary ? (
+            '<div class="account-summary-row"><span>매입금액</span><b>'+fmtMoney(acctSummary.closedBuyCost,'KRW')+'</b></div>'
+            +'<div class="account-summary-row"><span>청산금액</span><b>'+fmtMoney(acctSummary.closedSellProceeds,'KRW')+'</b></div>'
+            +'<div class="account-summary-row"><span>수익률</span><b class="'+(acctSummary.closedReturnPct===null?'':(acctSummary.closedReturnPct>=0?'gain':'loss'))+'">'+(acctSummary.closedReturnPct===null?'-':fmtPct(acctSummary.closedReturnPct))+'</b></div>'
+          ) : '')
+        )
       )
       +'</div>';
 
@@ -2369,7 +2504,9 @@
       + renderFxBulkModal()
       + renderPriceBulkModal()
       + renderBackupModal()
-      + renderApiKeyModal();
+      + renderApiKeyModal()
+      + renderGroupsModal()
+      + renderCashModal();
 
     attachEvents();
   }
@@ -2531,6 +2668,27 @@
         selectedId = nextInAccount ? nextInAccount.id : null;
         await saveCompanies();
         await saveTrades();
+        render();
+      });
+    });
+
+    document.querySelectorAll('[data-companygroup]').forEach(el=>{
+      el.addEventListener('change', async ()=>{
+        const id = el.getAttribute('data-companygroup');
+        const company = companies.find(c=>c.id===id);
+        if(!company) return;
+        company.groupId = el.value || null;
+        await saveCompanies();
+        render();
+      });
+    });
+    document.querySelectorAll('[data-toggleexclude]').forEach(el=>{
+      el.addEventListener('click', async ()=>{
+        const id = el.getAttribute('data-toggleexclude');
+        const company = companies.find(c=>c.id===id);
+        if(!company) return;
+        company.excludeFromReturn = !company.excludeFromReturn;
+        await saveCompanies();
         render();
       });
     });
@@ -2740,6 +2898,85 @@
     if(apiKeyCloseX) apiKeyCloseX.addEventListener('click', ()=>{ showApiKeyModal=false; render(); });
     const apiKeyOverlay = document.getElementById('apikey-overlay');
     if(apiKeyOverlay) apiKeyOverlay.addEventListener('click', (e)=>{ if(e.target.id==='apikey-overlay'){ showApiKeyModal=false; render(); } });
+
+    // ---------- 자산 그룹 관리 모달 ----------
+    const openGroupsLink = document.getElementById('open-groups-modal-link');
+    if(openGroupsLink) openGroupsLink.addEventListener('click', ()=>{ showGroupsModal = true; render(); });
+    const groupAdd = document.getElementById('group-add');
+    if(groupAdd) groupAdd.addEventListener('click', async ()=>{
+      const input = document.getElementById('new-group-name');
+      const name = input.value.trim();
+      if(!name){ alert('그룹 이름을 입력해주세요.'); return; }
+      groups.push({id:uid(), name});
+      await saveGroups();
+      render();
+    });
+    document.querySelectorAll('[data-groupname]').forEach(el=>{
+      el.addEventListener('change', async ()=>{
+        const id = el.getAttribute('data-groupname');
+        const g = groups.find(x=>x.id===id);
+        if(!g) return;
+        const trimmed = el.value.trim();
+        if(!trimmed){ alert('그룹 이름을 입력해주세요.'); render(); return; }
+        g.name = trimmed;
+        await saveGroups();
+        render();
+      });
+    });
+    document.querySelectorAll('[data-groupdelete]').forEach(el=>{
+      el.addEventListener('click', async ()=>{
+        const id = el.getAttribute('data-groupdelete');
+        if(!confirm('이 그룹을 삭제할까요? 이 그룹에 속한 종목들은 "미분류"로 바뀌어요.')) return;
+        groups = groups.filter(g=>g.id!==id);
+        companies.forEach(c=>{ if(c.groupId===id) c.groupId = null; });
+        await saveGroups();
+        await saveCompanies();
+        render();
+      });
+    });
+    const groupsCloseBtn = document.getElementById('groups-close-btn');
+    if(groupsCloseBtn) groupsCloseBtn.addEventListener('click', ()=>{ showGroupsModal=false; render(); });
+    const groupsCloseX = document.getElementById('groups-close-x');
+    if(groupsCloseX) groupsCloseX.addEventListener('click', ()=>{ showGroupsModal=false; render(); });
+    const groupsOverlay = document.getElementById('groups-overlay');
+    if(groupsOverlay) groupsOverlay.addEventListener('click', (e)=>{ if(e.target.id==='groups-overlay'){ showGroupsModal=false; render(); } });
+
+    // ---------- 현금 자산 입력 모달 ----------
+    const openCashLink = document.getElementById('open-cash-modal-link');
+    if(openCashLink) openCashLink.addEventListener('click', ()=>{
+      cashModalAccountId = (portfolioScope!=='all' && accounts.some(a=>a.id===portfolioScope)) ? portfolioScope : (activeAccountId || (accounts[0] && accounts[0].id));
+      render();
+    });
+    const cashAccountSelect = document.getElementById('cash-account-select');
+    if(cashAccountSelect) cashAccountSelect.addEventListener('change', ()=>{ cashModalAccountId = cashAccountSelect.value; render(); });
+    const cashSave = document.getElementById('cash-save');
+    if(cashSave) cashSave.addEventListener('click', async ()=>{
+      const account = accounts.find(a=>a.id===cashModalAccountId);
+      if(!account) return;
+      const usd = parseFloat(document.getElementById('cash-usd').value) || 0;
+      const jpy = parseFloat(document.getElementById('cash-jpy').value) || 0;
+      const krw = parseFloat(document.getElementById('cash-krw').value) || 0;
+      account.cash = {USD:usd, JPY:jpy, KRW:krw};
+      await saveAccounts();
+      cashModalAccountId = null;
+      render();
+    });
+    const cashCloseBtn = document.getElementById('cash-close-btn');
+    if(cashCloseBtn) cashCloseBtn.addEventListener('click', ()=>{ cashModalAccountId=null; render(); });
+    const cashCloseX = document.getElementById('cash-close-x');
+    if(cashCloseX) cashCloseX.addEventListener('click', ()=>{ cashModalAccountId=null; render(); });
+    const cashOverlay = document.getElementById('cash-overlay');
+    if(cashOverlay) cashOverlay.addEventListener('click', (e)=>{ if(e.target.id==='cash-overlay'){ cashModalAccountId=null; render(); } });
+
+    // ---------- 전체 자산 현황: 그룹/종목 보기 전환, 청산 완료 접기 ----------
+    document.querySelectorAll('[data-breakdown]').forEach(el=>{
+      el.addEventListener('click', ()=>{ portfolioBreakdown = el.getAttribute('data-breakdown'); render(); });
+    });
+    const toggleClosedOverview = document.querySelector('[data-toggle-closed-overview]');
+    if(toggleClosedOverview) toggleClosedOverview.addEventListener('click', ()=>{ showClosedOverview = !showClosedOverview; render(); });
+    const toggleClosedAcct = document.querySelector('[data-toggle-closed-acct]');
+    if(toggleClosedAcct) toggleClosedAcct.addEventListener('click', ()=>{ showClosedAcctSummary = !showClosedAcctSummary; render(); });
+
     document.querySelectorAll('[data-backuptab]').forEach(el=>{
       el.addEventListener('click', ()=>{
         backupTab = el.getAttribute('data-backuptab');
