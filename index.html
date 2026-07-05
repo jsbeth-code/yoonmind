@@ -1889,9 +1889,10 @@
       }).join('');
 
       const assignOpen = groupsModalSchemeId===scheme.id;
+      const heldCompanies = companies.filter(c=>computeStats(c.id).status==='holding');
       const assignRows = assignOpen ? (
         '<div style="margin-top:10px;max-height:260px;overflow-y:auto;border-top:1px solid var(--border-soft);padding-top:10px;">'
-        + companies.map(c=>{
+        + heldCompanies.map(c=>{
             const currentGid = c.groupAssignments && c.groupAssignments[scheme.id];
             const opts = '<option value="">미분류</option>' + schemeGroups.map(g=>'<option value="'+g.id+'" '+(currentGid===g.id?'selected':'')+'>'+esc(g.name)+'</option>').join('');
             return '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:5px 0;font-size:12.5px;">'
@@ -1899,7 +1900,7 @@
               +'<select data-assigngroup="'+scheme.id+'|'+c.id+'" style="background:var(--surface-raised);border:1px solid var(--border);border-radius:3px;color:var(--text);padding:5px 8px;font-size:12px;min-width:130px;font-family:\'Noto Sans KR\',sans-serif;">'+opts+'</select>'
             +'</div>';
           }).join('')
-        + (companies.length? '' : '<div class="no-trades">등록된 종목이 없어요.</div>')
+        + (heldCompanies.length? '' : '<div class="no-trades">현재 보유 중인 종목이 없어요.</div>')
         + '</div>'
       ) : '';
 
