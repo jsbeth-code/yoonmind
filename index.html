@@ -85,6 +85,8 @@
     background:var(--surface-raised); border:1px solid var(--border-soft); border-radius:5px;
     padding:10px 12px; margin-bottom:14px;
   }
+  .account-summary-group-label{ font-size:10px; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-faint); margin:8px 0 2px 0; font-weight:600; }
+  .account-summary-group-label:first-child{ margin-top:0; }
   .account-summary-row{ display:flex; justify-content:space-between; font-size:12px; padding:2px 0; }
   .account-summary-row span{ color:var(--text-muted); }
   .account-summary-row b{ font-family:'IBM Plex Mono',monospace; font-weight:600; }
@@ -1026,33 +1028,71 @@
     return {totalBuyCost, totalSellProceeds, totalBuyQty, avgBuyPrice, currentValue, totalReturnPct, pending, anyFailed, holdingQty: st.holdingQty, hasCurrentPrice};
   }
 
-  function computeAccountSummary(accountId){
-    const list = companies.filter(c=>c.accountId===accountId);
-    let totalBuyCost=0, totalSellProceeds=0, totalCurrentValue=0, pending=false;
-    list.forEach(c=>{
-      const m = computeReturnMetrics(c.id, 'KRW');
-      if(m.pending) pending = true;
-      totalBuyCost += m.totalBuyCost;
-      totalSellProceeds += m.totalSellProceeds;
-      totalCurrentValue += m.currentValue;
+  // 한 종목의 매매 내역을 FIFO로 매칭해서, "보유 중인 몫"과 "이미 청산한 몫"의 매입/평가·매도 금액을
+  // 각 거래 당시 환율로 원화 환산해 분리한다. (같은 통화 변환 기준을 매입 시점 vs 평가 시점으로 나눠 써야
+  // 환차손익이 손익 계산에 왜곡 없이 반영됨 — computeReturnMetrics의 방식과 동일한 기준)
+  function computeCompanySplitKRW(company){
+    const cur = company.currency || 'USD';
+    const list = trades.filter(t=>t.companyId===company.id)
+      .slice()
+      .sort((a,b)=> a.date===b.date ? (a.createdAt-b.createdAt) : (a.date<b.date?-1:1));
+    let lots = [];
+    let closedBuyCost = 0, closedSellProceeds = 0, pending = false;
+    for(const t of list){
+      if(t.type==='buy'){
+        lots.push({qty:t.qty, price:t.price, date:t.date});
+      } else {
+        let remaining = t.qty;
+        while(remaining>0 && lots.length>0){
+          const lot = lots[0];
+          const matched = Math.min(lot.qty, remaining);
+          const buyConv = convertAmount(matched*lot.price, cur, lot.date, 'KRW');
+          const sellConv = convertAmount(matched*t.price, cur, t.date, 'KRW');
+          if(buyConv.pending || sellConv.pending) pending = true;
+          else if(!buyConv.failed && !sellConv.failed){
+            closedBuyCost += buyConv.value;
+            closedSellProceeds += sellConv.value;
+          }
+          lot.qty -= matched;
+          remaining -= matched;
+          if(lot.qty<=0.0000001) lots.shift();
+        }
+      }
+    }
+    const holdingQty = lots.reduce((s,l)=>s+l.qty,0);
+    let holdingBuyCostKRW = 0;
+    lots.forEach(lot=>{
+      const conv = convertAmount(lot.qty*lot.price, cur, lot.date, 'KRW');
+      if(conv.pending) pending = true;
+      else if(!conv.failed) holdingBuyCostKRW += conv.value;
     });
-    const totalReturnPct = totalBuyCost>0 ? ((totalSellProceeds+totalCurrentValue-totalBuyCost)/totalBuyCost*100) : null;
-    return {totalBuyCost, totalSellProceeds, totalCurrentValue, totalReturnPct, pending};
+    const hasCurrentPrice = !!company.currentPrice;
+    let holdingValueKRW = 0;
+    if(holdingQty>0 && hasCurrentPrice){
+      const conv = convertAmount(company.currentPrice.value*holdingQty, cur, 'latest', 'KRW');
+      if(conv.pending) pending = true;
+      else if(!conv.failed) holdingValueKRW = conv.value;
+    }
+    return {holdingQty, hasCurrentPrice, holdingBuyCostKRW, holdingValueKRW, closedBuyCost, closedSellProceeds, pending};
   }
 
-  // 모든 계좌를 합산한 총 매입/평가금액/수익금/수익률 (전체 자산 현황용)
-  function computeAllAccountsSummary(){
-    let totalBuyCost=0, totalSellProceeds=0, totalCurrentValue=0, pending=false;
-    accounts.forEach(a=>{
-      const s = computeAccountSummary(a.id);
+  // scope: 'all' 이면 전 계좌 합산, 아니면 특정 accountId. 보유 중(미실현) / 청산 완료(실현)를 분리해서 반환.
+  function computeSplitSummary(scope){
+    let heldBuyCost=0, heldValue=0, closedBuyCost=0, closedSellProceeds=0, pending=false, anyMissingPrice=false;
+    companies.filter(c=> scope==='all' || c.accountId===scope).forEach(c=>{
+      const s = computeCompanySplitKRW(c);
       if(s.pending) pending = true;
-      totalBuyCost += s.totalBuyCost;
-      totalSellProceeds += s.totalSellProceeds;
-      totalCurrentValue += s.totalCurrentValue;
+      heldBuyCost += s.holdingBuyCostKRW;
+      heldValue += s.holdingValueKRW;
+      if(s.holdingQty>0 && !s.hasCurrentPrice) anyMissingPrice = true;
+      closedBuyCost += s.closedBuyCost;
+      closedSellProceeds += s.closedSellProceeds;
     });
-    const profit = totalSellProceeds + totalCurrentValue - totalBuyCost;
-    const totalReturnPct = totalBuyCost>0 ? (profit/totalBuyCost*100) : null;
-    return {totalBuyCost, totalSellProceeds, totalCurrentValue, profit, totalReturnPct, pending};
+    const heldProfit = heldValue - heldBuyCost;
+    const heldReturnPct = heldBuyCost>0 ? (heldProfit/heldBuyCost*100) : null;
+    const closedProfit = closedSellProceeds - closedBuyCost;
+    const closedReturnPct = closedBuyCost>0 ? (closedProfit/closedBuyCost*100) : null;
+    return {heldBuyCost, heldValue, heldProfit, heldReturnPct, closedBuyCost, closedSellProceeds, closedProfit, closedReturnPct, pending, anyMissingPrice};
   }
 
   const DONUT_COLORS = ['#3fa796','#e8a93e','#e2646b','#6c8ee2','#c77dd1','#52c17e','#d1567d','#4fc3d9','#a3894f','#8b93a3'];
@@ -1119,27 +1159,39 @@
     +'</div>';
   }
 
+  function renderSplitSummaryGroups(summary){
+    const p = summary.pending;
+    const heldCards = '<div class="stats-row">'
+      +'<div class="stat-card"><div class="stat-label">보유 중 매입금액</div><div class="stat-value mono">'+(p?'<span class="fx-note">조회 중…</span>':fmtMoney(summary.heldBuyCost,'KRW'))+'</div></div>'
+      +'<div class="stat-card"><div class="stat-label">보유 중 평가금액</div><div class="stat-value mono">'+(p?'<span class="fx-note">조회 중…</span>':(summary.anyMissingPrice?'<span class="fx-note">현재가 필요</span>':fmtMoney(summary.heldValue,'KRW')))+'</div></div>'
+      +'<div class="stat-card"><div class="stat-label">평가손익</div><div class="stat-value mono '+(summary.heldProfit>0?'gain':(summary.heldProfit<0?'loss':''))+'">'+(p?'<span class="fx-note">조회 중…</span>':fmtMoney(summary.heldProfit,'KRW'))+'</div></div>'
+      +'<div class="stat-card"><div class="stat-label">수익률</div><div class="stat-value mono '+(summary.heldReturnPct>0?'gain':(summary.heldReturnPct<0?'loss':''))+'" style="font-size:16px;">'+(p?'<span class="fx-note">조회 중…</span>':(summary.heldReturnPct===null?'-':fmtPct(summary.heldReturnPct)))+'</div></div>'
+      +'</div>';
+    const closedCards = '<div class="stats-row">'
+      +'<div class="stat-card"><div class="stat-label">청산 매입금액</div><div class="stat-value mono">'+(p?'<span class="fx-note">조회 중…</span>':fmtMoney(summary.closedBuyCost,'KRW'))+'</div></div>'
+      +'<div class="stat-card"><div class="stat-label">청산(매도)금액</div><div class="stat-value mono">'+(p?'<span class="fx-note">조회 중…</span>':fmtMoney(summary.closedSellProceeds,'KRW'))+'</div></div>'
+      +'<div class="stat-card"><div class="stat-label">실현손익</div><div class="stat-value mono '+(summary.closedProfit>0?'gain':(summary.closedProfit<0?'loss':''))+'">'+(p?'<span class="fx-note">조회 중…</span>':fmtMoney(summary.closedProfit,'KRW'))+'</div></div>'
+      +'<div class="stat-card"><div class="stat-label">수익률</div><div class="stat-value mono '+(summary.closedReturnPct>0?'gain':(summary.closedReturnPct<0?'loss':''))+'" style="font-size:16px;">'+(p?'<span class="fx-note">조회 중…</span>':(summary.closedReturnPct===null?'-':fmtPct(summary.closedReturnPct)))+'</div></div>'
+      +'</div>';
+    return '<div style="font-size:12px;color:var(--accent);font-weight:600;margin-bottom:10px;">보유 중인 종목 (미실현)</div>'
+      + heldCards
+      + '<div style="font-size:12px;color:var(--text-faint);font-weight:600;margin:20px 0 10px 0;">청산 완료한 종목 (실현)</div>'
+      + closedCards;
+  }
+
   function renderPortfolioOverview(){
-    const summary = computeAllAccountsSummary();
     const scopeOptions = '<option value="all" '+(portfolioScope==='all'?'selected':'')+'>전체 계좌 합산</option>'
       + accounts.map(a=>'<option value="'+a.id+'" '+(portfolioScope===a.id?'selected':'')+'>'+esc(a.name)+'</option>').join('');
+    const summary = computeSplitSummary(portfolioScope);
     const dist = computeAssetDistribution(portfolioScope);
 
-    const summaryRow = '<div class="stats-row">'
-      +'<div class="stat-card"><div class="stat-label">누적 매수금액</div><div class="stat-value mono">'+(summary.pending?'<span class="fx-note">조회 중…</span>':fmtMoney(summary.totalBuyCost,'KRW'))+'</div></div>'
-      +'<div class="stat-card"><div class="stat-label">누적 매도(회수)금액</div><div class="stat-value mono">'+(summary.pending?'<span class="fx-note">조회 중…</span>':fmtMoney(summary.totalSellProceeds,'KRW'))+'</div></div>'
-      +'<div class="stat-card"><div class="stat-label">보유 중 평가금액</div><div class="stat-value mono">'+(summary.pending?'<span class="fx-note">조회 중…</span>':fmtMoney(summary.totalCurrentValue,'KRW'))+'</div></div>'
-      +'<div class="stat-card"><div class="stat-label">총 수익금</div><div class="stat-value mono '+(summary.profit>0?'gain':(summary.profit<0?'loss':''))+'">'+(summary.pending?'<span class="fx-note">조회 중…</span>':fmtMoney(summary.profit,'KRW'))+'</div></div>'
-      +'<div class="stat-card"><div class="stat-label">총 수익률</div><div class="stat-value mono '+(summary.totalReturnPct>0?'gain':(summary.totalReturnPct<0?'loss':''))+'" style="font-size:16px;">'+(summary.pending?'<span class="fx-note">조회 중…</span>':(summary.totalReturnPct===null?'-':fmtPct(summary.totalReturnPct)))+'</div></div>'
-      +'</div>'
-      +'<div style="font-size:11.5px;color:var(--text-faint);margin-top:4px;">누적 매수금액에는 이미 청산(매도완료)한 종목의 매수금액도 포함돼요. 그래서 "누적 매수금액 − 누적 매도금액"이 "보유 중 평가금액"보다 큰 건 정상이고, 그 차이만큼은 이미 매도로 회수된 금액이에요.</div>';
-
-    return '<div class="detail-header"><div><div class="detail-title-row"><span class="detail-title">전체 자산 현황</span></div><div style="font-size:12px;color:var(--text-muted);margin-top:6px;">모든 계좌를 원화로 환산해 합산한 값이에요.</div></div></div>'
-      + summaryRow
-      + '<div style="margin:24px 0 16px 0;display:flex;align-items:center;gap:10px;">'
-        + '<label style="font-size:13px;color:var(--text-muted);">자산 분포 보기</label>'
+    return '<div class="detail-header"><div><div class="detail-title-row"><span class="detail-title">전체 자산 현황</span></div><div style="font-size:12px;color:var(--text-muted);margin-top:6px;">보유 중(미실현)과 청산 완료(실현)를 나눠서 보여줘요. 금액은 원화로 환산했어요.</div></div></div>'
+      + '<div style="margin-bottom:20px;display:flex;align-items:center;gap:10px;">'
+        + '<label style="font-size:13px;color:var(--text-muted);">범위</label>'
         + '<select id="portfolio-scope-select" style="background:var(--surface-raised);border:1px solid var(--border);border-radius:3px;color:var(--text);padding:7px 10px;font-size:13px;font-family:\'Noto Sans KR\',sans-serif;">'+scopeOptions+'</select>'
       + '</div>'
+      + renderSplitSummaryGroups(summary)
+      + '<div style="margin:26px 0 16px 0;font-size:12px;color:var(--text-muted);font-weight:600;">자산 분포 (보유 중 종목 기준)</div>'
       + renderDonutChart(dist.list, dist.total, dist.pending);
   }
 
@@ -2267,14 +2319,18 @@
       + newAccountPanel
       + (accounts.length>1 ? '<button class="account-delete-link" id="account-delete">"'+esc((accounts.find(a=>a.id===activeAccountId)||{}).name||'')+'" 계좌 삭제</button>' : '');
 
-    const acctSummary = computeAccountSummary(activeAccountId);
+    const acctSummary = computeSplitSummary(activeAccountId);
     const acctSummaryHtml = '<div class="account-summary">'
       + (acctSummary.pending
         ? '<div class="fx-note">환율/현재가 조회 중…</div>'
-        : ('<div class="account-summary-row"><span>누적 매수</span><b>'+fmtMoney(acctSummary.totalBuyCost,'KRW')+'</b></div>'
-          +'<div class="account-summary-row"><span>누적 매도(회수)</span><b>'+fmtMoney(acctSummary.totalSellProceeds,'KRW')+'</b></div>'
-          +'<div class="account-summary-row"><span>보유 중 평가금액</span><b>'+fmtMoney(acctSummary.totalCurrentValue,'KRW')+'</b></div>'
-          +'<div class="account-summary-row"><span>수익률</span><b class="'+(acctSummary.totalReturnPct===null?'':(acctSummary.totalReturnPct>=0?'gain':'loss'))+'">'+(acctSummary.totalReturnPct===null?'-':fmtPct(acctSummary.totalReturnPct))+'</b></div>')
+        : ('<div class="account-summary-group-label">보유 중</div>'
+          +'<div class="account-summary-row"><span>매입금액</span><b>'+fmtMoney(acctSummary.heldBuyCost,'KRW')+'</b></div>'
+          +'<div class="account-summary-row"><span>평가금액</span><b>'+(acctSummary.anyMissingPrice?'<span class="fx-note">현재가 필요</span>':fmtMoney(acctSummary.heldValue,'KRW'))+'</b></div>'
+          +'<div class="account-summary-row"><span>수익률</span><b class="'+(acctSummary.heldReturnPct===null?'':(acctSummary.heldReturnPct>=0?'gain':'loss'))+'">'+(acctSummary.heldReturnPct===null?'-':fmtPct(acctSummary.heldReturnPct))+'</b></div>'
+          +'<div class="account-summary-group-label">청산 완료</div>'
+          +'<div class="account-summary-row"><span>매입금액</span><b>'+fmtMoney(acctSummary.closedBuyCost,'KRW')+'</b></div>'
+          +'<div class="account-summary-row"><span>청산금액</span><b>'+fmtMoney(acctSummary.closedSellProceeds,'KRW')+'</b></div>'
+          +'<div class="account-summary-row"><span>수익률</span><b class="'+(acctSummary.closedReturnPct===null?'':(acctSummary.closedReturnPct>=0?'gain':'loss'))+'">'+(acctSummary.closedReturnPct===null?'-':fmtPct(acctSummary.closedReturnPct))+'</b></div>')
       )
       +'</div>';
 
