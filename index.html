@@ -1910,7 +1910,7 @@
       }).join('');
 
       const assignOpen = groupsModalSchemeId===scheme.id;
-      const heldCompanies = companies.filter(c=>c.accountId===scheme.accountId && computeStats(c.id).status==='holding');
+      const heldCompanies = companies.filter(c=> (scheme.accountId==='all' || c.accountId===scheme.accountId) && computeStats(c.id).status==='holding');
       const assignRows = assignOpen ? (
         '<div style="margin-top:10px;max-height:260px;overflow-y:auto;border-top:1px solid var(--border-soft);padding-top:10px;">'
         + heldCompanies.map(c=>{
@@ -1953,16 +1953,14 @@
       + (cashRows || '<div class="no-trades">현재 보유 중인 종목이 없어요.</div>')
     +'</div>';
 
-    const activeAccountName = esc((accounts.find(a=>a.id===portfolioScope)||{}).name || '');
-    const schemeAddSection = portfolioScope==='all'
-      ? '<div class="modal-sub" style="margin-top:6px;">분류 기준은 계좌별로 따로 관리돼요. 위 "범위"에서 계좌를 하나 선택하면 그 계좌의 분류 기준을 만들고 관리할 수 있어요.</div>'
-      : ('<div style="font-size:11px;color:var(--text-faint);margin:2px 0 6px 0;">"'+activeAccountName+'" 계좌의 분류 기준</div>'
-        +'<div style="display:flex;gap:8px;margin-top:6px;">'
-          +'<input type="text" id="new-scheme-name" placeholder="새 분류 기준 이름 (예: 자산 종류별 분류)" style="flex:1;background:var(--surface-raised);border:1px solid var(--border);border-radius:3px;color:var(--text);padding:8px 10px;font-size:13px;font-family:\'Noto Sans KR\',sans-serif;">'
-          +'<button class="import-btn-primary" id="scheme-add" style="padding:8px 16px;">분류 기준 추가</button>'
-        +'</div>');
+    const scopeLabel = portfolioScope==='all' ? '전체 계좌 합산' : esc((accounts.find(a=>a.id===portfolioScope)||{}).name || '');
+    const schemeAddSection = '<div style="font-size:11px;color:var(--text-faint);margin:2px 0 6px 0;">"'+scopeLabel+'"의 분류 기준</div>'
+      +'<div style="display:flex;gap:8px;margin-top:6px;">'
+        +'<input type="text" id="new-scheme-name" placeholder="새 분류 기준 이름 (예: 자산 종류별 분류)" style="flex:1;background:var(--surface-raised);border:1px solid var(--border);border-radius:3px;color:var(--text);padding:8px 10px;font-size:13px;font-family:\'Noto Sans KR\',sans-serif;">'
+        +'<button class="import-btn-primary" id="scheme-add" style="padding:8px 16px;">분류 기준 추가</button>'
+      +'</div>';
 
-    const body = '<div class="modal-sub">여러 개의 분류 기준(예: "자산 종류별 분류", "거래소별 분류")을 만들고, 각 기준 안에 그룹을 나눠서 자산 분포를 다양한 관점으로 볼 수 있어요. 분류 기준은 계좌마다 따로예요.</div>'
+    const body = '<div class="modal-sub">여러 개의 분류 기준(예: "자산 종류별 분류", "거래소별 분류")을 만들고, 각 기준 안에 그룹을 나눠서 자산 분포를 다양한 관점으로 볼 수 있어요. 분류 기준은 "전체 계좌 합산"과 개별 계좌마다 따로 관리돼요.</div>'
       + cashSection
       + schemesHtml
       + schemeAddSection
@@ -3024,7 +3022,6 @@
       const input = document.getElementById('new-scheme-name');
       const name = input.value.trim();
       if(!name){ alert('분류 기준 이름을 입력해주세요.'); return; }
-      if(portfolioScope==='all'){ alert('분류 기준은 계좌별로 만들어져요. 위에서 계좌를 하나 선택한 뒤 추가해주세요.'); return; }
       groupSchemes.push({id:uid(), name, accountId: portfolioScope});
       await saveGroupSchemes();
       render();
