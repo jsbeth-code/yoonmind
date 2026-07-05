@@ -99,6 +99,15 @@
     font-family:'Noto Sans KR',sans-serif;
   }
   .ct-btn.active{ background:var(--accent-soft); border-color:var(--accent); color:var(--accent); }
+  .snapshot-tabs{ display:flex; gap:6px; flex-wrap:wrap; margin:14px 0 18px 0; }
+  .snapshot-tab{
+    background:var(--surface); border:1px solid var(--border-soft); color:var(--text-muted);
+    border-radius:5px; padding:6px 10px; cursor:pointer; font-size:12px; font-weight:600;
+    font-family:'Noto Sans KR',sans-serif; display:flex; align-items:center; gap:6px;
+  }
+  .snapshot-tab.active{ background:var(--amber-soft); border-color:var(--amber); color:var(--amber); }
+  .snapshot-tab-close{ color:var(--text-faint); font-size:13px; line-height:1; }
+  .snapshot-tab-close:hover{ color:var(--loss); }
   .ticker-item{
     position:relative; background:var(--surface-raised); border:1px solid var(--border-soft);
     border-radius:3px; padding:11px 12px 11px 14px; cursor:pointer;
@@ -425,6 +434,9 @@
   let portfolioBreakdown = 'ticker'; // 'ticker' 또는 분류 기준(scheme)의 id — 자산 분포를 어느 기준으로 볼지
   let portfolioCurrency = 'KRW'; // 'KRW' | 'USD' — 전체 자산 현황 화면의 표시 통화
   let expandedDistBucketKey = null; // 자산 분포 범례에서 지금 펼쳐서 구성 비율을 보고 있는 항목의 key
+  let portfolioSnapshots = []; // [{id, savedAt, scope, scopeLabel, fxRateUSD, summary, breakdowns:[{id,label,dist}]}] — 저장해 둔 시점의 전체 자산 현황
+  let viewingSnapshotId = null; // null이면 지금 이 순간(현재) 보기, 아니면 그 저장 시점을 보고 있음
+  let activeUsdRateOverride = undefined; // 저장 시점 스냅샷을 보는 동안 원/달러 변환에 쓸 고정 환율(저장 당시 환율) — undefined면 실시간 환율 사용
   let showClosedOverview = false; // 전체 자산 현황 화면: 청산 완료 섹션 기본 접힘
   let showClosedAcctSummary = false; // 사이드바 계좌 요약 박스: 청산 완료 섹션 기본 접힘
   let groupSchemes = []; // [{id, name}] — "자산 종류별 분류", "거래소별 분류" 같은 여러 분류 기준
@@ -560,6 +572,10 @@
       const g = await storage.get('groups');
       groups = g ? JSON.parse(g.value) : [];
     }catch(e){ groups = []; }
+    try{
+      const ps = await storage.get('portfoliosnapshots');
+      portfolioSnapshots = ps ? JSON.parse(ps.value) : [];
+    }catch(e){ portfolioSnapshots = []; }
 
     let needsSave = false;
     if(!accounts.length){
@@ -636,6 +652,10 @@
   }
   async function saveGroupSchemes(){
     try{ await storage.set('groupschemes', JSON.stringify(groupSchemes)); }
+    catch(e){ console.error('저장 실패', e); }
+  }
+  async function savePortfolioSnapshots(){
+    try{ await storage.set('portfoliosnapshots', JSON.stringify(portfolioSnapshots)); }
     catch(e){ console.error('저장 실패', e); }
   }
   async function saveLastImportBatch(){
@@ -1170,6 +1190,12 @@
   // 전체 자산 현황 화면은 내부적으로 항상 원화로 계산하고, 표시 직전에만 portfolioCurrency로 환산한다
   function convertKRWForDisplay(krwValue){
     if(portfolioCurrency==='KRW') return {value: krwValue, pending:false, failed:false};
+    // 저장된 시점(스냅샷)을 보는 중이면 실시간 환율이 아니라 그 시점에 고정해 둔 환율을 써야
+    // "그때의 자산 현황"이 나중에 환율이 바뀌어도 흔들리지 않는다.
+    if(activeUsdRateOverride!==undefined){
+      if(!activeUsdRateOverride) return {value:null, pending:false, failed:true};
+      return {value: krwValue / activeUsdRateOverride, pending:false, failed:false};
+    }
     const r = getEffectiveLatestRate('USD');
     if(r===undefined) return {value:null, pending:true, failed:false};
     if(r===null) return {value:null, pending:false, failed:true};
@@ -1284,6 +1310,36 @@
     return {list, total, pending};
   }
 
+  function snapshotDateStr(ts){
+    const d = new Date(ts);
+    const pad = n=>String(n).padStart(2,'0');
+    return d.getFullYear()+'.'+pad(d.getMonth()+1)+'.'+pad(d.getDate());
+  }
+  function snapshotTimeStr(ts){
+    const d = new Date(ts);
+    const pad = n=>String(n).padStart(2,'0');
+    return pad(d.getHours())+':'+pad(d.getMinutes());
+  }
+
+  // 지금 이 순간의 전체 자산 현황(요약 + 종목별/분류 기준별 자산 분포)을 그대로 굳혀서 저장한다.
+  // 현재가·환율 조회가 아직 안 끝났으면(pending) 저장하지 않고 null을 반환 — 호출한 쪽에서 안내 문구를 보여준다.
+  function buildPortfolioSnapshot(scope){
+    const summary = computeSplitSummary(scope);
+    if(summary.pending) return null;
+    const scopeLabel = scope==='all' ? '전체 계좌 합산' : ((accounts.find(a=>a.id===scope)||{}).name || '');
+    const breakdownDefs = [{id:'ticker', label:'종목별'}]
+      .concat(groupSchemes.filter(s=>s.accountId===scope).map(s=>({id:s.id, label:s.name})));
+    const breakdowns = [];
+    for(const bd of breakdownDefs){
+      const dist = computeAssetDistribution(scope, bd.id);
+      if(dist.pending) return null;
+      breakdowns.push({id:bd.id, label:bd.label, dist});
+    }
+    const rateInfo = getEffectiveLatestRate('USD');
+    const fxRateUSD = (rateInfo && typeof rateInfo.rate==='number') ? rateInfo.rate : null;
+    return {id:uid(), savedAt:Date.now(), scope, scopeLabel, fxRateUSD, summary, breakdowns};
+  }
+
   function renderDonutChart(list, total, pending){
     if(pending && !list.length) return '<div class="no-trades">현재가·환율 조회 중…</div>';
     if(!list.length || total<=0) return '<div class="no-trades">보유 중인 종목이 없어요.</div>';
@@ -1352,7 +1408,27 @@
       + (showClosedOverview ? closedCards : '');
   }
 
+  // 저장된 시점 목록을 탭으로 표시할 때 쓸 라벨(같은 날짜에 여러 개면 시간까지 붙여서 구분)
+  function renderSnapshotTabsHtml(){
+    const sorted = portfolioSnapshots.slice().sort((a,b)=>a.savedAt-b.savedAt);
+    const dateCounts = {};
+    sorted.forEach(s=>{ const d = snapshotDateStr(s.savedAt); dateCounts[d] = (dateCounts[d]||0)+1; });
+    const liveTab = '<button class="snapshot-tab '+(viewingSnapshotId===null?'active':'')+'" data-viewsnapshot="">현재</button>';
+    const savedTabs = sorted.map(s=>{
+      const d = snapshotDateStr(s.savedAt);
+      const label = dateCounts[d]>1 ? (d+' '+snapshotTimeStr(s.savedAt)) : d;
+      return '<button class="snapshot-tab '+(viewingSnapshotId===s.id?'active':'')+'" data-viewsnapshot="'+s.id+'">'
+        + esc(label) + '<span class="snapshot-tab-close" data-delsnapshot="'+s.id+'" title="이 저장 시점 삭제">×</span></button>';
+    }).join('');
+    return '<div class="snapshot-tabs">'+liveTab+savedTabs+'</div>';
+  }
+
   function renderPortfolioOverview(){
+    if(viewingSnapshotId!==null && !portfolioSnapshots.some(s=>s.id===viewingSnapshotId)) viewingSnapshotId = null;
+    if(viewingSnapshotId!==null){
+      return renderSnapshotOverview(portfolioSnapshots.find(s=>s.id===viewingSnapshotId));
+    }
+
     const scopeOptions = '<option value="all" '+(portfolioScope==='all'?'selected':'')+'>전체 계좌 합산</option>'
       + accounts.map(a=>'<option value="'+a.id+'" '+(portfolioScope===a.id?'selected':'')+'>'+esc(a.name)+'</option>').join('');
     const summary = computeSplitSummary(portfolioScope);
@@ -1366,6 +1442,7 @@
       + scopedSchemes.map(s=>'<button data-breakdown="'+s.id+'" class="'+(portfolioBreakdown===s.id?'active':'')+'" style="padding:5px 12px;">'+esc(s.name)+'</button>').join('');
 
     return '<div class="detail-header"><div><div class="detail-title-row"><span class="detail-title">전체 자산 현황</span></div><div style="font-size:12px;color:var(--text-muted);margin-top:6px;">보유 중(미실현)과 청산 완료(실현)를 나눠서 보여줘요.</div></div></div>'
+      + renderSnapshotTabsHtml()
       + '<div style="margin-bottom:20px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">'
         + '<label style="font-size:13px;color:var(--text-muted);">범위</label>'
         + '<select id="portfolio-scope-select" style="background:var(--surface-raised);border:1px solid var(--border);border-radius:3px;color:var(--text);padding:7px 10px;font-size:13px;font-family:\'Noto Sans KR\',sans-serif;">'+scopeOptions+'</select>'
@@ -1373,6 +1450,7 @@
           +'<button class="ct-btn '+(portfolioCurrency==='KRW'?'active':'')+'" data-portfoliocur="KRW">₩ 원화</button>'
           +'<button class="ct-btn '+(portfolioCurrency==='USD'?'active':'')+'" data-portfoliocur="USD">$ 달러</button>'
         +'</div>'
+        + '<span class="fx-manual" id="save-snapshot-btn" style="margin-left:auto;">📌 지금 시점 저장</span>'
       + '</div>'
       + renderSplitSummaryGroups(summary)
       + '<div style="margin:26px 0 14px 0;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">'
@@ -1382,6 +1460,33 @@
         + '<span class="fx-manual" id="open-cash-modal-link">현금 자산 입력</span>'
       + '</div>'
       + renderDonutChart(dist.list, dist.total, dist.pending);
+  }
+
+  // 저장해 둔 시점의 전체 자산 현황을 읽기 전용으로 보여준다 — 값은 이미 저장 시점에 고정된 데이터.
+  function renderSnapshotOverview(snap){
+    activeUsdRateOverride = snap.fxRateUSD;
+    const activeBreakdown = snap.breakdowns.find(b=>b.id===portfolioBreakdown) || snap.breakdowns[0];
+    const breakdownTabs = snap.breakdowns.map(b=>
+      '<button data-breakdown="'+esc(b.id)+'" class="'+(activeBreakdown.id===b.id?'active':'')+'" style="padding:5px 12px;">'+esc(b.label)+'</button>'
+    ).join('');
+    const savedAtStr = snapshotDateStr(snap.savedAt)+' '+snapshotTimeStr(snap.savedAt);
+
+    const html = '<div class="detail-header"><div><div class="detail-title-row"><span class="detail-title">전체 자산 현황</span></div><div style="font-size:12px;color:var(--text-muted);margin-top:6px;">'+esc(savedAtStr)+'에 저장한 '+esc(snap.scopeLabel)+' 스냅샷이에요. (읽기 전용)</div></div></div>'
+      + renderSnapshotTabsHtml()
+      + '<div style="margin-bottom:20px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">'
+        + '<div class="currency-toggle" style="margin:0;">'
+          +'<button class="ct-btn '+(portfolioCurrency==='KRW'?'active':'')+'" data-portfoliocur="KRW">₩ 원화</button>'
+          +'<button class="ct-btn '+(portfolioCurrency==='USD'?'active':'')+'" data-portfoliocur="USD">$ 달러</button>'
+        +'</div>'
+      + '</div>'
+      + renderSplitSummaryGroups(snap.summary)
+      + '<div style="margin:26px 0 14px 0;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">'
+        + '<span style="font-size:12px;color:var(--text-muted);font-weight:600;">자산 분포</span>'
+        + '<div class="import-mode-tabs" style="margin:0;padding:3px;">'+breakdownTabs+'</div>'
+      + '</div>'
+      + renderDonutChart(activeBreakdown.dist.list, activeBreakdown.dist.total, activeBreakdown.dist.pending);
+    activeUsdRateOverride = undefined;
+    return html;
   }
 
   function fmtShares(n){
@@ -3196,6 +3301,33 @@
     // ---------- 전체 자산 현황: 그룹/종목 보기 전환, 청산 완료 접기 ----------
     document.querySelectorAll('[data-breakdown]').forEach(el=>{
       el.addEventListener('click', ()=>{ portfolioBreakdown = el.getAttribute('data-breakdown'); render(); });
+    });
+    const saveSnapshotBtn = document.getElementById('save-snapshot-btn');
+    if(saveSnapshotBtn) saveSnapshotBtn.addEventListener('click', async ()=>{
+      const snap = buildPortfolioSnapshot(portfolioScope);
+      if(!snap){ alert('현재가·환율을 아직 불러오는 중이에요. 잠시 후 다시 시도해주세요.'); return; }
+      portfolioSnapshots.push(snap);
+      await savePortfolioSnapshots();
+      viewingSnapshotId = snap.id;
+      render();
+    });
+    document.querySelectorAll('[data-viewsnapshot]').forEach(el=>{
+      el.addEventListener('click', ()=>{
+        const id = el.getAttribute('data-viewsnapshot');
+        viewingSnapshotId = id ? id : null;
+        render();
+      });
+    });
+    document.querySelectorAll('[data-delsnapshot]').forEach(el=>{
+      el.addEventListener('click', async (e)=>{
+        e.stopPropagation();
+        const id = el.getAttribute('data-delsnapshot');
+        if(!confirm('이 저장 시점을 삭제할까요?')) return;
+        portfolioSnapshots = portfolioSnapshots.filter(s=>s.id!==id);
+        await savePortfolioSnapshots();
+        if(viewingSnapshotId===id) viewingSnapshotId = null;
+        render();
+      });
     });
     const toggleClosedOverview = document.querySelector('[data-toggle-closed-overview]');
     if(toggleClosedOverview) toggleClosedOverview.addEventListener('click', ()=>{ showClosedOverview = !showClosedOverview; render(); });
