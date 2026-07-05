@@ -2256,7 +2256,7 @@
       const dcaTag = (c.dca && c.dca.active) ? '<span class="dca-tag">정기적립</span>' : '';
       return '<div class="ticker-item status-'+st.status+(c.id===selectedId?' active':'')+'" data-select="'+c.id+'">'
         +'<div class="ticker-row1"><span class="ticker-name">'+esc(c.name)+dcaTag+'</span><span class="ticker-code">'+esc(c.ticker)+'</span></div>'
-        +'<div class="ticker-row2"><span class="ticker-sector">'+esc(c.sector||'미분류')+'</span>'+pnlHtml+'</div>'
+        +'<div class="ticker-row2"><span class="ticker-sector">'+esc(c.sector||'')+'</span>'+pnlHtml+'</div>'
         +'</div>';
     }
 
