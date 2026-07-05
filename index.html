@@ -865,7 +865,11 @@
       const date = normalizeDate(rawDate);
       let rate = parseFloat(normalizeNumber(rawRate));
       if(!/^\d{4}-\d{2}-\d{2}$/.test(date) || !rate || rate<=0){ skipped++; continue; }
-      if(currency==='JPY') rate = rate/100; // "100엔당" convention, stored per 1 JPY
+      // JPY는 두 가지 표기가 섞여 들어올 수 있어요: 한국 은행/포털 표기인 "100엔당" (보통 600~1300대)와
+      // investing.com 등 JPY/KRW 페어 원본인 "1엔당" (보통 6~15대). 값 크기로 표기 방식을 판별해서
+      // "100엔당"일 때만 100으로 나눠 1엔당 기준으로 통일한다. (그대로 나누면 investing.com 데이터가
+      // 100배 작게 저장되는 문제가 있었음)
+      if(currency==='JPY' && rate>=50) rate = rate/100;
       fxRates[fxKey(currency, date)] = rate;
       saved++;
     }
