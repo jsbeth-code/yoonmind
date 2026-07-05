@@ -621,6 +621,16 @@
       }
     });
     if(needsSave){ await saveAccounts(); await saveCompanies(); }
+    // 이전 버전 호환: 스냅샷이 계좌 하나(scope)만 저장하던 구버전 구조 -> 여러 범위를 담는 byScope 구조로 이전
+    if(portfolioSnapshots.some(s=>!s.byScope)){
+      portfolioSnapshots.forEach(s=>{
+        if(!s.byScope){
+          s.byScope = {[s.scope]: {scopeLabel: s.scopeLabel, summary: s.summary, breakdowns: s.breakdowns}};
+          delete s.scope; delete s.scopeLabel; delete s.summary; delete s.breakdowns;
+        }
+      });
+      await savePortfolioSnapshots();
+    }
 
     dataReady = true;
     activeAccountId = accounts[0].id;
@@ -1323,21 +1333,28 @@
 
   // 지금 이 순간의 전체 자산 현황(요약 + 종목별/분류 기준별 자산 분포)을 그대로 굳혀서 저장한다.
   // 현재가·환율 조회가 아직 안 끝났으면(pending) 저장하지 않고 null을 반환 — 호출한 쪽에서 안내 문구를 보여준다.
-  function buildPortfolioSnapshot(scope){
-    const summary = computeSplitSummary(scope);
-    if(summary.pending) return null;
-    const scopeLabel = scope==='all' ? '전체 계좌 합산' : ((accounts.find(a=>a.id===scope)||{}).name || '');
-    const breakdownDefs = [{id:'ticker', label:'종목별'}]
-      .concat(groupSchemes.filter(s=>s.accountId===scope).map(s=>({id:s.id, label:s.name})));
-    const breakdowns = [];
-    for(const bd of breakdownDefs){
-      const dist = computeAssetDistribution(scope, bd.id);
-      if(dist.pending) return null;
-      breakdowns.push({id:bd.id, label:bd.label, dist});
+  // 전체 계좌 합산 + 계좌별로 전부 얼려서 저장 — 스냅샷을 열어본 뒤에도 실시간 화면처럼
+  // "범위" 선택으로 계좌를 넘나들며 볼 수 있게 하기 위함.
+  function buildPortfolioSnapshot(){
+    const scopes = ['all'].concat(accounts.map(a=>a.id));
+    const byScope = {};
+    for(const scope of scopes){
+      const summary = computeSplitSummary(scope);
+      if(summary.pending) return null;
+      const scopeLabel = scope==='all' ? '전체 계좌 합산' : ((accounts.find(a=>a.id===scope)||{}).name || '');
+      const breakdownDefs = [{id:'ticker', label:'종목별'}]
+        .concat(groupSchemes.filter(s=>s.accountId===scope).map(s=>({id:s.id, label:s.name})));
+      const breakdowns = [];
+      for(const bd of breakdownDefs){
+        const dist = computeAssetDistribution(scope, bd.id);
+        if(dist.pending) return null;
+        breakdowns.push({id:bd.id, label:bd.label, dist});
+      }
+      byScope[scope] = {scopeLabel, summary, breakdowns};
     }
     const rateInfo = getEffectiveLatestRate('USD');
     const fxRateUSD = (rateInfo && typeof rateInfo.rate==='number') ? rateInfo.rate : null;
-    return {id:uid(), savedAt:Date.now(), scope, scopeLabel, fxRateUSD, summary, breakdowns};
+    return {id:uid(), savedAt:Date.now(), fxRateUSD, byScope};
   }
 
   function renderDonutChart(list, total, pending){
@@ -1463,23 +1480,31 @@
   }
 
   // 저장해 둔 시점의 전체 자산 현황을 읽기 전용으로 보여준다 — 값은 이미 저장 시점에 고정된 데이터.
+  // 실시간 화면과 마찬가지로 "범위" 선택으로 계좌를 넘나들며 볼 수 있다(스냅샷 저장 시점에 있던 계좌들 한정).
   function renderSnapshotOverview(snap){
+    const scopeKeys = Object.keys(snap.byScope);
+    const scope = scopeKeys.includes(portfolioScope) ? portfolioScope : 'all';
+    const scopeData = snap.byScope[scope];
+    const scopeOptions = scopeKeys.map(k=>'<option value="'+k+'" '+(scope===k?'selected':'')+'>'+esc(snap.byScope[k].scopeLabel)+'</option>').join('');
+
     activeUsdRateOverride = snap.fxRateUSD;
-    const activeBreakdown = snap.breakdowns.find(b=>b.id===portfolioBreakdown) || snap.breakdowns[0];
-    const breakdownTabs = snap.breakdowns.map(b=>
+    const activeBreakdown = scopeData.breakdowns.find(b=>b.id===portfolioBreakdown) || scopeData.breakdowns[0];
+    const breakdownTabs = scopeData.breakdowns.map(b=>
       '<button data-breakdown="'+esc(b.id)+'" class="'+(activeBreakdown.id===b.id?'active':'')+'" style="padding:5px 12px;">'+esc(b.label)+'</button>'
     ).join('');
     const savedAtStr = snapshotDateStr(snap.savedAt)+' '+snapshotTimeStr(snap.savedAt);
 
-    const html = '<div class="detail-header"><div><div class="detail-title-row"><span class="detail-title">전체 자산 현황</span></div><div style="font-size:12px;color:var(--text-muted);margin-top:6px;">'+esc(savedAtStr)+'에 저장한 '+esc(snap.scopeLabel)+' 스냅샷이에요. (읽기 전용)</div></div></div>'
+    const html = '<div class="detail-header"><div><div class="detail-title-row"><span class="detail-title">전체 자산 현황</span></div><div style="font-size:12px;color:var(--text-muted);margin-top:6px;">'+esc(savedAtStr)+'에 저장한 스냅샷이에요. (읽기 전용)</div></div></div>'
       + renderSnapshotTabsHtml()
       + '<div style="margin-bottom:20px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">'
+        + '<label style="font-size:13px;color:var(--text-muted);">범위</label>'
+        + '<select id="portfolio-scope-select" style="background:var(--surface-raised);border:1px solid var(--border);border-radius:3px;color:var(--text);padding:7px 10px;font-size:13px;font-family:\'Noto Sans KR\',sans-serif;">'+scopeOptions+'</select>'
         + '<div class="currency-toggle" style="margin:0;">'
           +'<button class="ct-btn '+(portfolioCurrency==='KRW'?'active':'')+'" data-portfoliocur="KRW">₩ 원화</button>'
           +'<button class="ct-btn '+(portfolioCurrency==='USD'?'active':'')+'" data-portfoliocur="USD">$ 달러</button>'
         +'</div>'
       + '</div>'
-      + renderSplitSummaryGroups(snap.summary)
+      + renderSplitSummaryGroups(scopeData.summary)
       + '<div style="margin:26px 0 14px 0;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">'
         + '<span style="font-size:12px;color:var(--text-muted);font-weight:600;">자산 분포</span>'
         + '<div class="import-mode-tabs" style="margin:0;padding:3px;">'+breakdownTabs+'</div>'
@@ -3304,7 +3329,7 @@
     });
     const saveSnapshotBtn = document.getElementById('save-snapshot-btn');
     if(saveSnapshotBtn) saveSnapshotBtn.addEventListener('click', async ()=>{
-      const snap = buildPortfolioSnapshot(portfolioScope);
+      const snap = buildPortfolioSnapshot();
       if(!snap){ alert('현재가·환율을 아직 불러오는 중이에요. 잠시 후 다시 시도해주세요.'); return; }
       portfolioSnapshots.push(snap);
       await savePortfolioSnapshots();
