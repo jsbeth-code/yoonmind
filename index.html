@@ -2119,14 +2119,23 @@
         evalHtml = '-';
       }
 
+      const pnlLabel = st.status==='holding' ? '평가손익' : '실현손익';
       let realizedHtml, realizedClass;
-      if(st.status==='closed'){
+      if(st.status==='holding'){
+        if(rm.pending){ realizedHtml = '<span class="fx-note">조회 중…</span>'; realizedClass = ''; }
+        else if(!rm.hasCurrentPrice){ realizedHtml = '<span class="fx-note">현재가 필요</span>'; realizedClass = ''; }
+        else {
+          const unrealized = rm.currentValue - rm.totalBuyCost;
+          realizedHtml = fmtMoney(unrealized, dispCur);
+          realizedClass = unrealized>0?'gain':(unrealized<0?'loss':'');
+        }
+      } else if(st.status==='closed'){
         const realizedInView = rm.totalSellProceeds - rm.totalBuyCost;
         realizedHtml = rm.pending ? '<span class="fx-note">조회 중…</span>' : fmtMoney(realizedInView, dispCur);
         realizedClass = realizedInView>0?'gain':(realizedInView<0?'loss':'');
       } else {
-        realizedHtml = st.tradeCount? viewAmountHtml(st.realizedPnL, cur, 'latest', companyViewCurrency):'-';
-        realizedClass = st.realizedPnL>0?'gain':(st.realizedPnL<0?'loss':'');
+        realizedHtml = '-';
+        realizedClass = '';
       }
 
       let statsRow = '<div class="stats-row">'
@@ -2134,7 +2143,7 @@
         +'<div class="stat-card"><div class="stat-label">평단가</div><div class="stat-value mono">'+ avgPriceHtml +'</div></div>'
         +'<div class="stat-card"><div class="stat-label">총 매입금액</div><div class="stat-value mono">'+totalBuyHtml+'</div></div>'
         +'<div class="stat-card"><div class="stat-label">'+evalLabel+'</div><div class="stat-value mono">'+evalHtml+'</div></div>'
-        +'<div class="stat-card"><div class="stat-label">실현손익</div><div class="stat-value mono '+realizedClass+'">'+ realizedHtml +'</div></div>'
+        +'<div class="stat-card"><div class="stat-label">'+pnlLabel+'</div><div class="stat-value mono '+realizedClass+'">'+ realizedHtml +'</div></div>'
         + (st.status==='holding' ? '<div class="stat-card"><div class="stat-label">현재가</div><div class="stat-value mono" style="font-size:14px;">'+currentPriceHtml+'</div></div>' : '')
         +'<div class="stat-card"><div class="stat-label">총 수익률</div><div class="stat-value mono '+(rm.totalReturnPct>0?'gain':rm.totalReturnPct<0?'loss':'')+'" style="font-size:16px;">'+returnPctHtml+'</div></div>'
         +'</div>'
