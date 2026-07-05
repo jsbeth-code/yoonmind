@@ -422,11 +422,13 @@
   let activeTab = 'trades';
   let showPortfolioOverview = false;
   let portfolioScope = 'all'; // 'all' | accountId — 자산 분포 보기 범위
-  let portfolioBreakdown = 'ticker'; // 'ticker' | 'group' — 자산 분포를 종목별/그룹별 중 어느 기준으로 볼지
+  let portfolioBreakdown = 'ticker'; // 'ticker' 또는 분류 기준(scheme)의 id — 자산 분포를 어느 기준으로 볼지
   let showClosedOverview = false; // 전체 자산 현황 화면: 청산 완료 섹션 기본 접힘
   let showClosedAcctSummary = false; // 사이드바 계좌 요약 박스: 청산 완료 섹션 기본 접힘
-  let groups = []; // [{id, name}] — 사용자가 만드는 자산 그룹 (예: "배당주", "채권" 등)
+  let groupSchemes = []; // [{id, name}] — "자산 종류별 분류", "거래소별 분류" 같은 여러 분류 기준
+  let groups = []; // [{id, schemeId, name, isCash}] — 각 분류 기준에 속한 그룹들
   let showGroupsModal = false;
+  let groupsModalSchemeId = null; // 그룹 관리 모달에서 지금 펼쳐서 보고 있는 분류 기준
   let cashModalAccountId = null; // null이면 닫힘, 아니면 그 계좌의 현금 입력 모달이 열림
   let showNewCompanyForm = false;
   let tradeType = 'buy';
@@ -549,6 +551,10 @@
       lastImportBatch = lb ? JSON.parse(lb.value) : null;
     }catch(e){ lastImportBatch = null; }
     try{
+      const gs = await storage.get('groupschemes');
+      groupSchemes = gs ? JSON.parse(gs.value) : [];
+    }catch(e){ groupSchemes = []; }
+    try{
       const g = await storage.get('groups');
       groups = g ? JSON.parse(g.value) : [];
     }catch(e){ groups = []; }
@@ -565,6 +571,22 @@
     accounts.forEach(a=>{
       if(!a.cash){ a.cash = {USD:0, JPY:0, KRW:0}; needsSave = true; }
     });
+    // 이전 버전 호환: 그룹에 분류 기준(schemeId)이 없던 구버전 데이터를 "그룹" 이름의 기본 분류 기준으로 이전
+    if(groups.length && groups.some(g=>!g.schemeId)){
+      const legacySchemeId = uid();
+      groupSchemes.push({id: legacySchemeId, name:'그룹'});
+      groups.forEach(g=>{ if(!g.schemeId) g.schemeId = legacySchemeId; });
+      companies.forEach(c=>{
+        if(c.groupId){
+          c.groupAssignments = c.groupAssignments || {};
+          c.groupAssignments[legacySchemeId] = c.groupId;
+          delete c.groupId;
+        }
+      });
+      await saveGroupSchemes();
+      await saveGroups();
+      needsSave = true;
+    }
     if(needsSave){ await saveAccounts(); await saveCompanies(); }
 
     dataReady = true;
@@ -593,6 +615,10 @@
   }
   async function saveGroups(){
     try{ await storage.set('groups', JSON.stringify(groups)); }
+    catch(e){ console.error('저장 실패', e); }
+  }
+  async function saveGroupSchemes(){
+    try{ await storage.set('groupschemes', JSON.stringify(groupSchemes)); }
     catch(e){ console.error('저장 실패', e); }
   }
   async function saveLastImportBatch(){
@@ -1146,7 +1172,16 @@
     return result;
   }
 
-  // breakdown: 'ticker'(기본, 종목별) 또는 'group'(사용자가 만든 그룹별)
+  // 어떤 분류 기준(scheme)에서든 "현금으로 취급" 그룹에 배정돼 있으면 실질적으로 현금인 종목으로 본다
+  function isCashLikeCompany(c){
+    if(!c.groupAssignments) return false;
+    return Object.keys(c.groupAssignments).some(schemeId=>{
+      const gid = c.groupAssignments[schemeId];
+      return groups.some(g=>g.id===gid && g.isCash);
+    });
+  }
+
+  // breakdown: 'ticker'(종목별) 또는 groupSchemes 중 하나의 id(그 분류 기준으로 보기)
   function computeAssetDistribution(scope, breakdown){
     breakdown = breakdown || 'ticker';
     const targetCompanies = companies.filter(c=>{
@@ -1163,9 +1198,20 @@
       if(rm.hasCurrentPrice){ value = rm.currentValue; }
       else { value = rm.totalBuyCost; approx = true; }
       if(!value || value<=0) return;
+
+      // "현금으로 취급" 그룹에 속한 종목(예: SGOV)은 어떤 보기 방식이든 현금(그 종목의 통화) 영역으로 합산
+      if(isCashLikeCompany(c)){
+        const key = 'cash|'+c.currency;
+        if(!buckets[key]) buckets[key] = {name:'현금 ('+c.currency+')', ticker:'', value:0, approx:false};
+        buckets[key].value += value;
+        if(approx) buckets[key].approx = true;
+        return;
+      }
+
       let key, label, sub;
-      if(breakdown==='group'){
-        const group = groups.find(g=>g.id===c.groupId);
+      if(breakdown!=='ticker'){
+        const assignedGroupId = c.groupAssignments && c.groupAssignments[breakdown];
+        const group = groups.find(g=>g.id===assignedGroupId);
         key = group ? group.id : '__none__';
         label = group ? group.name : '미분류';
         sub = '';
@@ -1255,7 +1301,12 @@
     const scopeOptions = '<option value="all" '+(portfolioScope==='all'?'selected':'')+'>전체 계좌 합산</option>'
       + accounts.map(a=>'<option value="'+a.id+'" '+(portfolioScope===a.id?'selected':'')+'>'+esc(a.name)+'</option>').join('');
     const summary = computeSplitSummary(portfolioScope);
+    // 선택된 분류 기준이 삭제됐으면 종목별로 되돌림
+    if(portfolioBreakdown!=='ticker' && !groupSchemes.some(s=>s.id===portfolioBreakdown)) portfolioBreakdown = 'ticker';
     const dist = computeAssetDistribution(portfolioScope, portfolioBreakdown);
+
+    const breakdownTabs = '<button data-breakdown="ticker" class="'+(portfolioBreakdown==='ticker'?'active':'')+'" style="padding:5px 12px;">종목별</button>'
+      + groupSchemes.map(s=>'<button data-breakdown="'+s.id+'" class="'+(portfolioBreakdown===s.id?'active':'')+'" style="padding:5px 12px;">'+esc(s.name)+'</button>').join('');
 
     return '<div class="detail-header"><div><div class="detail-title-row"><span class="detail-title">전체 자산 현황</span></div><div style="font-size:12px;color:var(--text-muted);margin-top:6px;">보유 중(미실현)과 청산 완료(실현)를 나눠서 보여줘요. 금액은 원화로 환산했어요.</div></div></div>'
       + '<div style="margin-bottom:20px;display:flex;align-items:center;gap:10px;">'
@@ -1265,11 +1316,8 @@
       + renderSplitSummaryGroups(summary)
       + '<div style="margin:26px 0 14px 0;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">'
         + '<span style="font-size:12px;color:var(--text-muted);font-weight:600;">자산 분포</span>'
-        + '<div class="import-mode-tabs" style="margin:0;padding:3px;">'
-          +'<button data-breakdown="ticker" class="'+(portfolioBreakdown==='ticker'?'active':'')+'" style="padding:5px 12px;">종목별</button>'
-          +'<button data-breakdown="group" class="'+(portfolioBreakdown==='group'?'active':'')+'" style="padding:5px 12px;">그룹별</button>'
-        + '</div>'
-        + '<span class="fx-manual" id="open-groups-modal-link">그룹 관리</span>'
+        + '<div class="import-mode-tabs" style="margin:0;padding:3px;">'+breakdownTabs+'</div>'
+        + '<span class="fx-manual" id="open-groups-modal-link">분류 기준 관리</span>'
         + '<span class="fx-manual" id="open-cash-modal-link">현금 자산 입력</span>'
       + '</div>'
       + renderDonutChart(dist.list, dist.total, dist.pending);
@@ -1827,24 +1875,60 @@
 
   function renderGroupsModal(){
     if(!showGroupsModal) return '';
-    const rows = groups.map(g=>{
-      const count = companies.filter(c=>c.groupId===g.id).length;
-      return '<div class="mapping-row" style="align-items:center;flex-wrap:nowrap;">'
-        +'<input type="text" data-groupname="'+g.id+'" value="'+esc(g.name)+'" style="flex:1;background:var(--surface-raised);border:1px solid var(--border);border-radius:3px;color:var(--text);padding:8px 10px;font-size:13px;font-family:\'Noto Sans KR\',sans-serif;">'
-        +'<span style="font-size:11px;color:var(--text-faint);white-space:nowrap;padding:0 4px;">'+count+'개</span>'
-        +'<button data-groupdelete="'+g.id+'" style="background:none;border:none;color:var(--text-faint);cursor:pointer;font-size:12px;white-space:nowrap;">삭제</button>'
-        +'</div>';
+
+    const schemesHtml = groupSchemes.map(scheme=>{
+      const schemeGroups = groups.filter(g=>g.schemeId===scheme.id);
+      const groupRows = schemeGroups.map(g=>{
+        const count = companies.filter(c=>c.groupAssignments && c.groupAssignments[scheme.id]===g.id).length;
+        return '<div class="mapping-row" style="align-items:center;flex-wrap:nowrap;margin-bottom:8px;">'
+          +'<input type="text" data-groupname="'+g.id+'" value="'+esc(g.name)+'" style="flex:1;background:var(--surface-raised);border:1px solid var(--border);border-radius:3px;color:var(--text);padding:7px 9px;font-size:12.5px;font-family:\'Noto Sans KR\',sans-serif;">'
+          +'<label style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--text-muted);white-space:nowrap;"><input type="checkbox" data-groupcash="'+g.id+'" '+(g.isCash?'checked':'')+'> 현금 취급</label>'
+          +'<span style="font-size:10.5px;color:var(--text-faint);white-space:nowrap;">'+count+'개</span>'
+          +'<button data-groupdelete="'+g.id+'" style="background:none;border:none;color:var(--text-faint);cursor:pointer;font-size:12px;white-space:nowrap;">삭제</button>'
+          +'</div>';
+      }).join('');
+
+      const assignOpen = groupsModalSchemeId===scheme.id;
+      const assignRows = assignOpen ? (
+        '<div style="margin-top:10px;max-height:260px;overflow-y:auto;border-top:1px solid var(--border-soft);padding-top:10px;">'
+        + companies.map(c=>{
+            const currentGid = c.groupAssignments && c.groupAssignments[scheme.id];
+            const opts = '<option value="">미분류</option>' + schemeGroups.map(g=>'<option value="'+g.id+'" '+(currentGid===g.id?'selected':'')+'>'+esc(g.name)+'</option>').join('');
+            return '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:5px 0;font-size:12.5px;">'
+              +'<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+esc(c.name)+' <span style="color:var(--text-faint);">'+esc(c.ticker)+'</span></span>'
+              +'<select data-assigngroup="'+scheme.id+'|'+c.id+'" style="background:var(--surface-raised);border:1px solid var(--border);border-radius:3px;color:var(--text);padding:5px 8px;font-size:12px;min-width:130px;font-family:\'Noto Sans KR\',sans-serif;">'+opts+'</select>'
+            +'</div>';
+          }).join('')
+        + (companies.length? '' : '<div class="no-trades">등록된 종목이 없어요.</div>')
+        + '</div>'
+      ) : '';
+
+      return '<div style="background:var(--surface);border:1px solid var(--border-soft);border-radius:5px;padding:14px 16px;margin-bottom:12px;">'
+        +'<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">'
+          +'<input type="text" data-schemename="'+scheme.id+'" value="'+esc(scheme.name)+'" style="flex:1;background:transparent;border:none;color:var(--text);font-size:14px;font-weight:600;padding:2px 0;font-family:\'Noto Sans KR\',sans-serif;">'
+          +'<button data-schemedelete="'+scheme.id+'" style="background:none;border:none;color:var(--text-faint);cursor:pointer;font-size:11.5px;white-space:nowrap;">분류 기준 삭제</button>'
+        +'</div>'
+        + (groupRows || '<div class="no-trades" style="padding:4px 0 8px 0;">아직 그룹이 없어요.</div>')
+        + '<div style="display:flex;gap:8px;margin-top:6px;">'
+          +'<input type="text" data-newgroupinput="'+scheme.id+'" placeholder="새 그룹 이름" style="flex:1;background:var(--surface-raised);border:1px solid var(--border);border-radius:3px;color:var(--text);padding:7px 9px;font-size:12.5px;font-family:\'Noto Sans KR\',sans-serif;">'
+          +'<button data-newgroupadd="'+scheme.id+'" class="import-btn-primary" style="padding:7px 14px;font-size:12px;">그룹 추가</button>'
+        +'</div>'
+        +'<div class="fx-manual" data-toggleassign="'+scheme.id+'" style="font-size:11.5px;margin-top:10px;display:inline-block;">'+(assignOpen?'종목 배정 숨기기':'종목 배정하기')+'</div>'
+        + assignRows
+      +'</div>';
     }).join('');
-    const body = '<div class="modal-sub">종목을 원하는 그룹으로 묶어서 자산 분포를 그룹별로도 볼 수 있어요. 그룹 배정은 각 종목 상세 화면에서 할 수 있어요.</div>'
-      + (rows || '<div class="no-trades">아직 만든 그룹이 없어요.</div>')
-      + '<div style="display:flex;gap:8px;margin-top:14px;">'
-        +'<input type="text" id="new-group-name" placeholder="새 그룹 이름 (예: 배당주, 채권, 성장주)" style="flex:1;background:var(--surface-raised);border:1px solid var(--border);border-radius:3px;color:var(--text);padding:8px 10px;font-size:13px;font-family:\'Noto Sans KR\',sans-serif;">'
-        +'<button class="import-btn-primary" id="group-add" style="padding:8px 16px;">추가</button>'
+
+    const body = '<div class="modal-sub">여러 개의 분류 기준(예: "자산 종류별 분류", "거래소별 분류")을 만들고, 각 기준 안에 그룹을 나눠서 자산 분포를 다양한 관점으로 볼 수 있어요. "현금 취급"으로 표시한 그룹의 종목(예: SGOV)은 어떤 보기에서도 현금 영역으로 합산돼요.</div>'
+      + schemesHtml
+      + '<div style="display:flex;gap:8px;margin-top:6px;">'
+        +'<input type="text" id="new-scheme-name" placeholder="새 분류 기준 이름 (예: 자산 종류별 분류)" style="flex:1;background:var(--surface-raised);border:1px solid var(--border);border-radius:3px;color:var(--text);padding:8px 10px;font-size:13px;font-family:\'Noto Sans KR\',sans-serif;">'
+        +'<button class="import-btn-primary" id="scheme-add" style="padding:8px 16px;">분류 기준 추가</button>'
       +'</div>'
       +'<div class="import-actions"><button class="import-btn-secondary" id="groups-close-btn">닫기</button></div>';
+
     return '<div class="modal-overlay" id="groups-overlay">'
-      +'<div class="modal-box" style="max-width:520px;">'
-        +'<div class="modal-header"><h2>자산 그룹 관리</h2><button class="modal-close" id="groups-close-x">×</button></div>'
+      +'<div class="modal-box" style="max-width:640px;">'
+        +'<div class="modal-header"><h2>분류 기준 관리</h2><button class="modal-close" id="groups-close-x">×</button></div>'
         + body
       +'</div>'
       +'</div>';
@@ -2279,8 +2363,6 @@
         stampHtml = '<div class="stamp" style="color:var(--accent);">보유중</div>';
       }
 
-      const groupOptions = '<option value="">그룹 없음</option>' + groups.map(g=>'<option value="'+g.id+'" '+(selected.groupId===g.id?'selected':'')+'>'+esc(g.name)+'</option>').join('');
-
       const header = '<div class="detail-header">'
         +'<div>'
           +'<div class="detail-title-row"><span class="detail-title">'+esc(selected.name)+'</span><span class="detail-code mono">'+esc(selected.ticker)+'</span>'
@@ -2288,7 +2370,6 @@
           +'</div>'
           +'<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:8px;">'
             + (selected.sector ? '<div class="detail-sector" style="margin-top:0;">'+esc(selected.sector)+'</div>' : '')
-            +'<select data-companygroup="'+selected.id+'" style="background:var(--surface-raised);border:1px solid var(--border);border-radius:20px;color:var(--text-muted);padding:2px 9px;font-size:11px;font-family:\'Noto Sans KR\',sans-serif;">'+groupOptions+'</select>'
             +'<span class="fx-manual" data-toggleexclude="'+selected.id+'" style="font-size:11px;">'+(selected.excludeFromReturn?'수익률 제외됨 · 다시 포함':'수익률 계산에서 제외')+'</span>'
           +'</div>'
         +'</div>'
@@ -2672,16 +2753,6 @@
       });
     });
 
-    document.querySelectorAll('[data-companygroup]').forEach(el=>{
-      el.addEventListener('change', async ()=>{
-        const id = el.getAttribute('data-companygroup');
-        const company = companies.find(c=>c.id===id);
-        if(!company) return;
-        company.groupId = el.value || null;
-        await saveCompanies();
-        render();
-      });
-    });
     document.querySelectorAll('[data-toggleexclude]').forEach(el=>{
       el.addEventListener('click', async ()=>{
         const id = el.getAttribute('data-toggleexclude');
@@ -2899,17 +2970,56 @@
     const apiKeyOverlay = document.getElementById('apikey-overlay');
     if(apiKeyOverlay) apiKeyOverlay.addEventListener('click', (e)=>{ if(e.target.id==='apikey-overlay'){ showApiKeyModal=false; render(); } });
 
-    // ---------- 자산 그룹 관리 모달 ----------
+    // ---------- 분류 기준 / 그룹 관리 모달 ----------
     const openGroupsLink = document.getElementById('open-groups-modal-link');
     if(openGroupsLink) openGroupsLink.addEventListener('click', ()=>{ showGroupsModal = true; render(); });
-    const groupAdd = document.getElementById('group-add');
-    if(groupAdd) groupAdd.addEventListener('click', async ()=>{
-      const input = document.getElementById('new-group-name');
+
+    const schemeAdd = document.getElementById('scheme-add');
+    if(schemeAdd) schemeAdd.addEventListener('click', async ()=>{
+      const input = document.getElementById('new-scheme-name');
       const name = input.value.trim();
-      if(!name){ alert('그룹 이름을 입력해주세요.'); return; }
-      groups.push({id:uid(), name});
-      await saveGroups();
+      if(!name){ alert('분류 기준 이름을 입력해주세요.'); return; }
+      groupSchemes.push({id:uid(), name});
+      await saveGroupSchemes();
       render();
+    });
+    document.querySelectorAll('[data-schemename]').forEach(el=>{
+      el.addEventListener('change', async ()=>{
+        const id = el.getAttribute('data-schemename');
+        const s = groupSchemes.find(x=>x.id===id);
+        if(!s) return;
+        const trimmed = el.value.trim();
+        if(!trimmed){ alert('이름을 입력해주세요.'); render(); return; }
+        s.name = trimmed;
+        await saveGroupSchemes();
+        render();
+      });
+    });
+    document.querySelectorAll('[data-schemedelete]').forEach(el=>{
+      el.addEventListener('click', async ()=>{
+        const schemeId = el.getAttribute('data-schemedelete');
+        if(!confirm('이 분류 기준과 그 안의 그룹들을 모두 삭제할까요? 배정된 종목들은 배정이 해제돼요.')) return;
+        groupSchemes = groupSchemes.filter(s=>s.id!==schemeId);
+        groups = groups.filter(g=>g.schemeId!==schemeId);
+        companies.forEach(c=>{ if(c.groupAssignments) delete c.groupAssignments[schemeId]; });
+        if(portfolioBreakdown===schemeId) portfolioBreakdown = 'ticker';
+        await saveGroupSchemes();
+        await saveGroups();
+        await saveCompanies();
+        render();
+      });
+    });
+
+    document.querySelectorAll('[data-newgroupadd]').forEach(el=>{
+      el.addEventListener('click', async ()=>{
+        const schemeId = el.getAttribute('data-newgroupadd');
+        const input = document.querySelector('[data-newgroupinput="'+schemeId+'"]');
+        const name = input.value.trim();
+        if(!name){ alert('그룹 이름을 입력해주세요.'); return; }
+        groups.push({id:uid(), schemeId, name, isCash:false});
+        await saveGroups();
+        render();
+      });
     });
     document.querySelectorAll('[data-groupname]').forEach(el=>{
       el.addEventListener('change', async ()=>{
@@ -2923,13 +3033,43 @@
         render();
       });
     });
+    document.querySelectorAll('[data-groupcash]').forEach(el=>{
+      el.addEventListener('change', async ()=>{
+        const id = el.getAttribute('data-groupcash');
+        const g = groups.find(x=>x.id===id);
+        if(!g) return;
+        g.isCash = el.checked;
+        await saveGroups();
+        render();
+      });
+    });
     document.querySelectorAll('[data-groupdelete]').forEach(el=>{
       el.addEventListener('click', async ()=>{
         const id = el.getAttribute('data-groupdelete');
+        const g = groups.find(x=>x.id===id);
         if(!confirm('이 그룹을 삭제할까요? 이 그룹에 속한 종목들은 "미분류"로 바뀌어요.')) return;
-        groups = groups.filter(g=>g.id!==id);
-        companies.forEach(c=>{ if(c.groupId===id) c.groupId = null; });
+        groups = groups.filter(x=>x.id!==id);
+        if(g) companies.forEach(c=>{ if(c.groupAssignments && c.groupAssignments[g.schemeId]===id) delete c.groupAssignments[g.schemeId]; });
         await saveGroups();
+        await saveCompanies();
+        render();
+      });
+    });
+    document.querySelectorAll('[data-toggleassign]').forEach(el=>{
+      el.addEventListener('click', ()=>{
+        const schemeId = el.getAttribute('data-toggleassign');
+        groupsModalSchemeId = (groupsModalSchemeId===schemeId) ? null : schemeId;
+        render();
+      });
+    });
+    document.querySelectorAll('[data-assigngroup]').forEach(el=>{
+      el.addEventListener('change', async ()=>{
+        const [schemeId, companyId] = el.getAttribute('data-assigngroup').split('|');
+        const company = companies.find(c=>c.id===companyId);
+        if(!company) return;
+        company.groupAssignments = company.groupAssignments || {};
+        if(el.value) company.groupAssignments[schemeId] = el.value;
+        else delete company.groupAssignments[schemeId];
         await saveCompanies();
         render();
       });
