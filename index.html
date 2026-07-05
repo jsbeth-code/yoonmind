@@ -1929,7 +1929,21 @@
       +'</div>';
     }).join('');
 
-    const body = '<div class="modal-sub">여러 개의 분류 기준(예: "자산 종류별 분류", "거래소별 분류")을 만들고, 각 기준 안에 그룹을 나눠서 자산 분포를 다양한 관점으로 볼 수 있어요. "현금 취급"으로 표시한 그룹의 종목(예: SGOV)은 어떤 보기에서도 현금 영역으로 합산돼요.</div>'
+    const cashCandidates = companies.filter(c=>computeStats(c.id).status==='holding');
+    const cashRows = cashCandidates.map(c=>{
+      return '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:5px 0;font-size:12.5px;">'
+        +'<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+esc(c.name)+' <span style="color:var(--text-faint);">'+esc(c.ticker)+'</span></span>'
+        +'<label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-muted);white-space:nowrap;"><input type="checkbox" data-togglecash="'+c.id+'" '+(c.isCash?'checked':'')+'> 현금으로 표시</label>'
+        +'</div>';
+    }).join('');
+    const cashSection = '<div style="background:var(--surface);border:1px solid var(--border-soft);border-radius:5px;padding:14px 16px;margin-bottom:12px;">'
+      +'<div style="font-size:14px;font-weight:600;margin-bottom:6px;">현금성 자산 지정</div>'
+      +'<div style="font-size:11.5px;color:var(--text-muted);margin-bottom:10px;">실질적으로 현금인 종목(단기채 등)을 체크하면 수익률 계산에서 빠지고, 자산 분포에서는 현금 영역으로 합산돼요.</div>'
+      + (cashRows || '<div class="no-trades">현재 보유 중인 종목이 없어요.</div>')
+    +'</div>';
+
+    const body = '<div class="modal-sub">여러 개의 분류 기준(예: "자산 종류별 분류", "거래소별 분류")을 만들고, 각 기준 안에 그룹을 나눠서 자산 분포를 다양한 관점으로 볼 수 있어요.</div>'
+      + cashSection
       + schemesHtml
       + '<div style="display:flex;gap:8px;margin-top:6px;">'
         +'<input type="text" id="new-scheme-name" placeholder="새 분류 기준 이름 (예: 자산 종류별 분류)" style="flex:1;background:var(--surface-raised);border:1px solid var(--border);border-radius:3px;color:var(--text);padding:8px 10px;font-size:13px;font-family:\'Noto Sans KR\',sans-serif;">'
@@ -2379,10 +2393,7 @@
           +'<div class="detail-title-row"><span class="detail-title">'+esc(selected.name)+'</span><span class="detail-code mono">'+esc(selected.ticker)+'</span>'
             + (selected.isCash ? '<span class="dca-tag" style="background:var(--surface-raised);color:var(--text-faint);">현금으로 표시됨</span>' : '')
           +'</div>'
-          +'<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:8px;">'
-            + (selected.sector ? '<div class="detail-sector" style="margin-top:0;">'+esc(selected.sector)+'</div>' : '')
-            +'<span class="fx-manual" data-togglecash="'+selected.id+'" style="font-size:11px;">'+(selected.isCash?'현금 표시 해제':'현금으로 표시 (SGOV 등)')+'</span>'
-          +'</div>'
+          + (selected.sector ? '<div class="detail-sector" style="margin-top:8px;">'+esc(selected.sector)+'</div>' : '')
         +'</div>'
         +'<div style="display:flex;align-items:center;gap:14px;">'+stampHtml+'<button class="delete-company-btn" data-delcompany="'+selected.id+'">종목 삭제</button></div>'
         +'</div>';
@@ -2765,11 +2776,11 @@
     });
 
     document.querySelectorAll('[data-togglecash]').forEach(el=>{
-      el.addEventListener('click', async ()=>{
+      el.addEventListener('change', async ()=>{
         const id = el.getAttribute('data-togglecash');
         const company = companies.find(c=>c.id===id);
         if(!company) return;
-        company.isCash = !company.isCash;
+        company.isCash = el.checked;
         await saveCompanies();
         render();
       });
