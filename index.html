@@ -6,6 +6,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Gowun+Batang:wght@400;700&family=Noto+Sans+KR:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <style>
   :root{
     --bg:#12161d;
@@ -473,6 +474,8 @@
   let importParsedAsLedger = false;
   let importLedgerOtherCount = 0;
   let importAccountId = null;
+  let importPdfFile = null; // {base64, name}
+  let importPdfPassword = '';
 
   const IMPORT_KEYWORDS = {
     date: ['거래일자','체결일자','거래일','체결일','날짜','일자','date','trade date'],
@@ -1724,6 +1727,72 @@
     return {rows: out, otherCount};
   }
 
+  // 토스증권 "거래내역서" PDF 전용 파서 — pdf.js가 페이지별로 돌려주는 텍스트 조각들은
+  // 원래 좌표(줄) 정보 없이 뒤섞여 나오므로, 먼저 y좌표로 같은 줄끼리 묶고 x좌표 순으로
+  // 정렬해서 pdftotext -layout 과 같은 "줄 단위 텍스트"로 재구성한 다음 그 줄들을 파싱한다.
+  function reconstructPdfLines(items){
+    const tol = 2; // 같은 줄로 볼 y좌표 오차 허용치(포인트)
+    const groups = [];
+    items.forEach(it=>{
+      if(!it.str || !it.str.trim()) return;
+      const x = it.transform[4];
+      const y = it.transform[5];
+      let g = groups.find(g=>Math.abs(g.y-y)<=tol);
+      if(!g){ g = {y, items:[]}; groups.push(g); }
+      g.items.push({x, str: it.str});
+    });
+    groups.sort((a,b)=> b.y - a.y); // PDF 좌표는 위로 갈수록 y가 커짐
+    return groups.map(g=>{
+      g.items.sort((a,b)=>a.x-b.x);
+      return g.items.map(it=>it.str).join(' ');
+    });
+  }
+
+  function parseTossPdfRows(lines){
+    const mainRe = /^(\d{4}\.\d{2}\.\d{2})\s+(구매|판매)\s+(.+?)\s+([\d,]+\.\d+)\s+([\d,]+\.?\d*)\s+([\d,]+)\s+([\d,]+)\s+([\d,]+)\s+([\d,]+)\s+([\d,]+)\s+([\d,]+)\s+([\d,]+\.?\d*)\s+([\d,]+)\s*$/;
+    const usdRe = /^\s*\(\$\s*([\d,]+\.?\d*)\)\s+\(\$\s*([\d,]+\.?\d*)\)\s+\(\$\s*([\d,]+\.?\d*)\)\s+\(\$\s*([\d,]+\.?\d*)\)\s+\(\$\s*([\d,]+\.?\d*)\)\s+\(\$\s*([\d,]+\.?\d*)\)\s+\(\$\s*([\d,]+\.?\d*)\)\s*$/;
+    const isinInlineRe = /\(([A-Z]{2}[0-9A-Z]{10})\)\s*$/;
+    const isinOnlyRe = /^\s*\(([A-Z]{2}[0-9A-Z]{10})\)\s*$/;
+
+    const rows = [];
+    let i = 0;
+    while(i < lines.length){
+      const m = mainRe.exec(lines[i]);
+      if(m){
+        const [, date, sideKo, namePart, , qty, , , priceKrw] = m;
+        let ticker = '', name = namePart.trim();
+        const im = isinInlineRe.exec(namePart);
+        if(im){ ticker = im[1]; name = namePart.slice(0, im.index).trim(); }
+
+        let j = i+1;
+        let usdPrice = '';
+        if(j < lines.length){
+          const um = usdRe.exec(lines[j]);
+          if(um){ usdPrice = um[3]; j++; }
+        }
+        if(!ticker && j < lines.length){
+          const iom = isinOnlyRe.exec(lines[j]);
+          if(iom){ ticker = iom[1]; j++; }
+        }
+
+        rows.push({
+          date: date.replace(/\./g,'-'),
+          name,
+          ticker,
+          side: sideKo==='구매' ? 'buy' : 'sell',
+          currency: usdPrice ? 'USD' : 'KRW',
+          price: (usdPrice || priceKrw).replace(/,/g,''),
+          qty: qty.replace(/,/g,''),
+          excluded: false
+        });
+        i = j;
+      } else {
+        i++;
+      }
+    }
+    return rows;
+  }
+
   function guessColumnMap(headers){
     const map = {date:-1,name:-1,ticker:-1,side:-1,price:-1,qty:-1};
     headers.forEach((h,idx)=>{
@@ -1989,6 +2058,43 @@
     }catch(e){
       console.error(e);
       importError = '파일을 읽는 데 실패했어요: ' + e.message;
+    }
+    importAnalyzing = false;
+    render();
+  }
+
+  async function analyzePdfImport(){
+    if(!importPdfFile){ importError = 'PDF 파일을 먼저 선택해주세요.'; render(); return; }
+    importAnalyzing = true; importError = null; render();
+    try{
+      if(typeof pdfjsLib === 'undefined'){ throw new Error('PDF 처리 라이브러리를 불러오지 못했어요. 잠시 후 다시 시도해주세요.'); }
+      pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+      const bytes = base64ToBytes(importPdfFile.base64);
+      let doc;
+      try{
+        doc = await pdfjsLib.getDocument({data: bytes, password: importPdfPassword || undefined}).promise;
+      }catch(e){
+        if(e && (e.name==='PasswordException' || /password/i.test(e.message||''))){
+          throw new Error('비밀번호가 없거나 올바르지 않아요. PDF 비밀번호를 입력해주세요.');
+        }
+        throw e;
+      }
+      let allLines = [];
+      for(let p=1; p<=doc.numPages; p++){
+        const page = await doc.getPage(p);
+        const content = await page.getTextContent();
+        allLines = allLines.concat(reconstructPdfLines(content.items));
+      }
+      const parsed = parseTossPdfRows(allLines);
+      if(!parsed.length){ throw new Error('거래 내역을 찾지 못했어요. 토스증권 "거래내역서" PDF 형식인지 확인해주세요.'); }
+      importRows = parsed;
+      importParsedAsLedger = true;
+      importLedgerOtherCount = 0;
+      importSummary = null;
+      importStep = 'preview';
+    }catch(e){
+      console.error(e);
+      importError = 'PDF를 읽는 데 실패했어요: ' + e.message;
     }
     importAnalyzing = false;
     render();
@@ -2324,6 +2430,7 @@
     const modeTabs = '<div class="import-mode-tabs">'
       +'<button class="'+(importMode==='csv'?'active':'')+'" data-importmode="csv">텍스트 붙여넣기</button>'
       +'<button class="'+(importMode==='excel'?'active':'')+'" data-importmode="excel">엑셀 파일 업로드</button>'
+      +'<button class="'+(importMode==='pdf'?'active':'')+'" data-importmode="pdf">PDF 업로드</button>'
       +'<button class="'+(importMode==='image'?'active':'')+'" data-importmode="image">스크린샷 업로드</button>'
       +'</div>';
 
@@ -2366,6 +2473,23 @@
           +'<div class="import-actions">'
             +'<button class="import-btn-secondary" id="import-cancel">취소</button>'
             +'<button class="import-btn-primary" id="import-analyze-excel" '+(importAnalyzing?'disabled':'')+'>분석하기</button>'
+          +'</div>';
+      } else if(importMode==='pdf'){
+        body = modeTabs
+          + accountRow
+          + '<div class="modal-sub">'
+          +'토스증권 앱에서 발급받은 "거래내역서" PDF를 그대로 업로드해주세요. 비밀번호가 걸려있으면 아래에 입력해주세요.'
+          +'</div>'
+          + (importError ? '<div class="import-error">'+esc(importError)+'</div>' : '')
+          +'<div class="import-year-row"><label>PDF 비밀번호 (있는 경우)</label><input type="password" id="import-pdf-password" value="'+esc(importPdfPassword)+'" style="width:140px;" placeholder="예: 생년월일 6자리"></div>'
+          +'<div class="image-upload-box">'
+            +'<input type="file" accept="application/pdf" id="import-pdf-file">'
+            + (importPdfFile ? '<div style="margin-top:10px;font-size:12px;color:var(--text-muted);">선택된 파일: '+esc(importPdfFile.name)+'</div>' : '')
+          +'</div>'
+          + (importAnalyzing ? '<div class="analyzing-spinner">PDF를 분석하는 중이에요…</div>' : '')
+          +'<div class="import-actions">'
+            +'<button class="import-btn-secondary" id="import-cancel">취소</button>'
+            +'<button class="import-btn-primary" id="import-analyze-pdf" '+(importAnalyzing?'disabled':'')+'>분석하기</button>'
           +'</div>';
       } else {
         body = modeTabs
@@ -2430,7 +2554,9 @@
         +'<thead><tr><th>제외</th><th>날짜</th><th>종목명</th><th>티커</th><th>구분</th><th>통화</th><th>가격(단가)</th><th>수량</th></tr></thead>'
         +'<tbody>'+rows+'</tbody></table></div>';
 
-      const hint = importParsedAsLedger
+      const hint = importMode==='pdf'
+        ? '<div class="modal-sub">PDF에서 매수/매도 거래 '+importRows.length+'건을 자동으로 뽑았어요. 값이 이상하면 표에서 직접 고쳐주세요. 기존에 없는 종목은 자동으로 새로 등록돼요.</div>'
+        : importParsedAsLedger
         ? '<div class="modal-sub">증권사 원장형 내역(3줄 구조) 또는 모바일 앱에서 복사한 주문내역 텍스트로 인식해서, 매수/매도 거래 '+importRows.length+'건을 자동으로 뽑았어요'+(importLedgerOtherCount?(' (입출금·환전 등 '+importLedgerOtherCount+'건은 매매가 아니라서 제외했어요)'):'')+'. 값이 이상하면 표에서 직접 고쳐주세요.</div>'
         : importMode==='image'
         ? '<div class="modal-sub">AI가 이미지를 읽어 자동으로 채운 표예요. "가격"은 총 결제금액 ÷ 수량으로 계산한 주당 단가예요. 잘못 읽힌 값이 있으면 직접 고쳐주세요. 기존에 없는 종목은 자동으로 새로 등록돼요.</div>'
@@ -3524,7 +3650,7 @@
     });
     const openImport = document.getElementById('open-import-modal');
     if(openImport) openImport.addEventListener('click', ()=>{
-      showImportModal = true; importStep = 'paste'; importSummary = null; importError = null; importExcelFile = null; importImageFile = null; importParsedAsLedger = false; importAccountId = activeAccountId;
+      showImportModal = true; importStep = 'paste'; importSummary = null; importError = null; importExcelFile = null; importImageFile = null; importPdfFile = null; importPdfPassword = ''; importParsedAsLedger = false; importAccountId = activeAccountId;
       render();
     });
     const importAccountSelect = document.getElementById('import-account-select');
@@ -3570,6 +3696,24 @@
     });
     const analyzeExcelBtn = document.getElementById('import-analyze-excel');
     if(analyzeExcelBtn) analyzeExcelBtn.addEventListener('click', ()=>{ analyzeExcelImport(); });
+
+    const pdfFileInput = document.getElementById('import-pdf-file');
+    if(pdfFileInput) pdfFileInput.addEventListener('change', async ()=>{
+      const file = pdfFileInput.files[0];
+      if(!file) return;
+      try{
+        const base64 = await fileToBase64(file);
+        importPdfFile = {base64, name: file.name};
+        importError = null;
+      }catch(e){
+        importError = '파일을 불러오지 못했어요.';
+      }
+      render();
+    });
+    const pdfPasswordInput = document.getElementById('import-pdf-password');
+    if(pdfPasswordInput) pdfPasswordInput.addEventListener('change', ()=>{ importPdfPassword = pdfPasswordInput.value; });
+    const analyzePdfBtn = document.getElementById('import-analyze-pdf');
+    if(analyzePdfBtn) analyzePdfBtn.addEventListener('click', ()=>{ analyzePdfImport(); });
 
     const imgFileInput = document.getElementById('import-image-file');
     if(imgFileInput) imgFileInput.addEventListener('change', async ()=>{
