@@ -446,6 +446,7 @@
   let groupsModalSchemeId = null; // 그룹 관리 모달에서 지금 펼쳐서 보고 있는 분류 기준
   let cashModalAccountId = null; // null이면 닫힘, 아니면 그 계좌의 현금 입력 모달이 열림
   let showTransferModal = false; // 선택된 종목을 다른 계좌로 이동하는 모달
+  let transferTargetAccountId = null; // 계좌 이동 모달에서 선택된 대상 계좌 (null이면 첫번째 다른 계좌)
   let showNewCompanyForm = false;
   let tradeType = 'buy';
   let dataReady = false;
@@ -1157,13 +1158,20 @@
         }
       }
     }
-    const holdingQty = lots.reduce((s,l)=>s+l.qty,0);
+    let holdingQty = lots.reduce((s,l)=>s+l.qty,0);
     let holdingBuyCostKRW = 0;
-    lots.forEach(lot=>{
-      const conv = convertAmount(lot.qty*lot.price, cur, lot.date, 'KRW');
+    if(company.holdingAdjust){
+      holdingQty = company.holdingAdjust.qty;
+      const conv = convertAmount(holdingQty*company.holdingAdjust.avgPrice, cur, 'latest', 'KRW');
       if(conv.pending) pending = true;
-      else if(!conv.failed) holdingBuyCostKRW += conv.value;
-    });
+      else if(!conv.failed) holdingBuyCostKRW = conv.value;
+    } else {
+      lots.forEach(lot=>{
+        const conv = convertAmount(lot.qty*lot.price, cur, lot.date, 'KRW');
+        if(conv.pending) pending = true;
+        else if(!conv.failed) holdingBuyCostKRW += conv.value;
+      });
+    }
     const hasCurrentPrice = !!company.currentPrice;
     let holdingValueKRW = 0;
     if(holdingQty>0 && hasCurrentPrice){
@@ -1557,12 +1565,18 @@
         pnlByTradeId[t.id] = matchedQty>0 ? pnl : null;
       }
     }
-    const holdingQty = lots.reduce((s,l)=>s+l.qty,0);
+    let holdingQty = lots.reduce((s,l)=>s+l.qty,0);
     const holdingCost = lots.reduce((s,l)=>s+l.qty*l.price,0);
-    const avgPrice = holdingQty ? holdingCost/holdingQty : 0;
+    let avgPrice = holdingQty ? holdingCost/holdingQty : 0;
+    const company = companies.find(c=>c.id===companyId);
+    const isAdjusted = !!(company && company.holdingAdjust);
+    if(isAdjusted){
+      holdingQty = company.holdingAdjust.qty;
+      avgPrice = company.holdingAdjust.avgPrice;
+    }
     const status = holdingQty>0.0000001 ? 'holding' : (list.length>0 ? 'closed' : 'none');
     const realizedPct = realizedCost>0 ? (realizedPnL/realizedCost*100) : 0;
-    return {holdingQty, avgPrice, realizedPnL, realizedPct, status, pnlByTradeId, tradeCount:list.length, list, lots};
+    return {holdingQty, avgPrice, realizedPnL, realizedPct, status, pnlByTradeId, tradeCount:list.length, list, lots, isAdjusted};
   }
 
   // 지금 보유 중인 몫에서 FIFO로 qty만큼 덜어낼 때의 평균 원가 — 계좌 이동 시 원가를 그대로 넘겨주기 위해 사용
@@ -2221,6 +2235,12 @@
       return '<div style="background:var(--surface);border:1px solid var(--border-soft);border-radius:5px;padding:14px 16px;margin-bottom:12px;">'
         +'<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">'
           +'<input type="text" data-schemename="'+scheme.id+'" value="'+esc(scheme.name)+'" style="flex:1;background:transparent;border:none;color:var(--text);font-size:14px;font-weight:600;padding:2px 0;font-family:\'Noto Sans KR\',sans-serif;">'
+          + (scheme.accountId==='all' && accounts.length ? (
+              '<select data-copyschemetarget="'+scheme.id+'" style="background:var(--surface-raised);border:1px solid var(--border);border-radius:3px;color:var(--text-muted);padding:5px 6px;font-size:11px;font-family:\'Noto Sans KR\',sans-serif;">'
+                + accounts.map(a=>'<option value="'+a.id+'">'+esc(a.name)+'</option>').join('')
+              + '</select>'
+              +'<button data-schemecopy="'+scheme.id+'" style="background:none;border:none;color:var(--accent);cursor:pointer;font-size:11.5px;white-space:nowrap;">계좌에 복사</button>'
+            ) : '')
           +'<button data-schemedelete="'+scheme.id+'" style="background:none;border:none;color:var(--text-faint);cursor:pointer;font-size:11.5px;white-space:nowrap;">분류 기준 삭제</button>'
         +'</div>'
         + (groupRows || '<div class="no-trades" style="padding:4px 0 8px 0;">아직 그룹이 없어요.</div>')
@@ -2253,7 +2273,7 @@
         +'<button class="import-btn-primary" id="scheme-add" style="padding:8px 16px;">분류 기준 추가</button>'
       +'</div>';
 
-    const body = '<div class="modal-sub">여러 개의 분류 기준(예: "자산 종류별 분류", "거래소별 분류")을 만들고, 각 기준 안에 그룹을 나눠서 자산 분포를 다양한 관점으로 볼 수 있어요. 분류 기준은 "전체 계좌 합산"과 개별 계좌마다 따로 관리돼요.</div>'
+    const body = '<div class="modal-sub">여러 개의 분류 기준(예: "자산 종류별 분류", "거래소별 분류")을 만들고, 각 기준 안에 그룹을 나눠서 자산 분포를 다양한 관점으로 볼 수 있어요. 분류 기준은 "전체 계좌 합산"과 개별 계좌마다 따로 관리돼요 — "전체 계좌 합산"에서 만든 분류 기준은 "계좌에 복사" 버튼으로 개별 계좌에도 그대로 복사해서 쓸 수 있어요.</div>'
       + cashSection
       + schemesHtml
       + schemeAddSection
@@ -2297,8 +2317,15 @@
     const otherAccounts = accounts.filter(a=>a.id!==company.accountId);
     if(!otherAccounts.length) return '';
     const accountOptions = otherAccounts.map(a=>'<option value="'+a.id+'">'+esc(a.name)+'</option>').join('');
+    const targetAccountId = transferTargetAccountId && otherAccounts.some(a=>a.id===transferTargetAccountId) ? transferTargetAccountId : otherAccounts[0].id;
+    const destCandidates = companies.filter(c=>c.accountId===targetAccountId);
+    const tickerMatch = destCandidates.find(c=>c.ticker===company.ticker && c.currency===company.currency);
+    const destOptions = '<option value="">— 새 종목으로 만들기 —</option>'
+      + destCandidates.map(c=>'<option value="'+c.id+'" '+((tickerMatch&&tickerMatch.id===c.id)?'selected':'')+'>'+esc(c.name)+(c.ticker&&c.ticker!=='-'?' ('+esc(c.ticker)+')':'')+'</option>').join('');
     const body = '<div class="modal-sub">'+esc(company.name)+' ('+esc(company.ticker)+') 보유분 중 일부 또는 전부를 실제로 주식 채로 다른 계좌로 옮긴 경우, 여기에 기록해두세요. 매수/매도로 처리되지 않고 매입 원가를 그대로 이어받아서, 손익 계산에는 영향을 주지 않아요.</div>'
       + '<div class="import-year-row"><label>이동할 계좌</label><select id="transfer-account-select">'+accountOptions+'</select></div>'
+      + '<div class="import-year-row"><label>합칠 종목</label><select id="transfer-dest-select">'+destOptions+'</select></div>'
+      + '<div class="modal-sub" style="margin-top:-6px;">대상 계좌에 티커가 달라 같은 종목인데 다르게 등록돼 있다면, 여기서 직접 골라서 합쳐주세요. 기존 보유분과 평단가가 자동으로 섞여요.</div>'
       + '<div class="form-row">'
         +'<div class="fgroup"><label>이동 수량 (보유 '+fmtShares(st.holdingQty)+'주)</label><input type="number" step="0.0001" id="transfer-qty" value="'+fmtShares(st.holdingQty)+'"></div>'
         +'<div class="fgroup"><label>이동일</label><input type="date" id="transfer-date" value="'+todayStr()+'"></div>'
@@ -2721,9 +2748,10 @@
         realizedClass = '';
       }
 
+      const adjustBadge = st.isAdjusted ? '<span class="dca-tag" style="background:rgba(232,169,62,0.15);color:var(--amber);margin-left:6px;">직접 수정됨</span>' : '';
       let statsRow = '<div class="stats-row">'
-        +'<div class="stat-card"><div class="stat-label">보유 수량</div><div class="stat-value mono">'+ fmtShares(st.holdingQty || 0) +'주</div></div>'
-        +'<div class="stat-card"><div class="stat-label">평단가</div><div class="stat-value mono">'+ avgPriceHtml +'</div></div>'
+        +'<div class="stat-card"><div class="stat-label">보유 수량 <span class="fx-manual" data-open-holding-adjust="1">✎</span></div><div class="stat-value mono">'+ fmtShares(st.holdingQty || 0) +'주'+adjustBadge+'</div></div>'
+        +'<div class="stat-card"><div class="stat-label">평단가 <span class="fx-manual" data-open-holding-adjust="1">✎</span></div><div class="stat-value mono">'+ avgPriceHtml +'</div></div>'
         +'<div class="stat-card"><div class="stat-label">총 매입금액</div><div class="stat-value mono">'+totalBuyHtml+'</div></div>'
         +'<div class="stat-card"><div class="stat-label">'+evalLabel+'</div><div class="stat-value mono">'+evalHtml+'</div></div>'
         +'<div class="stat-card"><div class="stat-label">'+pnlLabel+'</div><div class="stat-value mono '+realizedClass+'">'+ realizedHtml +'</div></div>'
@@ -2742,6 +2770,7 @@
       const header = '<div class="detail-header">'
         +'<div>'
           +'<div class="detail-title-row"><span class="detail-title">'+esc(selected.name)+'</span><span class="detail-code mono">'+esc(selected.ticker)+'</span>'
+            +'<span class="pill-edit" data-editcompanyname="'+selected.id+'" title="종목명/티커 수정">✎</span>'
             + (selected.isCash ? '<span class="dca-tag" style="background:var(--surface-raised);color:var(--text-faint);">현금으로 표시됨</span>' : '')
           +'</div>'
           + (selected.sector ? '<div class="detail-sector" style="margin-top:8px;">'+esc(selected.sector)+'</div>' : '')
@@ -3139,8 +3168,53 @@
       });
     });
 
+    document.querySelectorAll('[data-editcompanyname]').forEach(el=>{
+      el.addEventListener('click', async ()=>{
+        const id = el.getAttribute('data-editcompanyname');
+        const c = companies.find(x=>x.id===id);
+        if(!c) return;
+        const newName = prompt('종목명을 입력해주세요', c.name);
+        if(newName===null) return;
+        const trimmedName = newName.trim();
+        if(!trimmedName){ alert('종목명을 입력해주세요.'); return; }
+        const newTicker = prompt('티커/코드를 입력해주세요. 다른 계좌의 같은 종목과 티커를 똑같이 맞추면 "전체 자산 현황"에서 하나로 합쳐져서 보여요.', c.ticker);
+        if(newTicker===null) return;
+        c.name = trimmedName;
+        c.ticker = newTicker.trim() || '-';
+        await saveCompanies();
+        render();
+      });
+    });
+
+    document.querySelectorAll('[data-open-holding-adjust]').forEach(el=>{
+      el.addEventListener('click', async ()=>{
+        const c = companies.find(x=>x.id===selectedId);
+        if(!c) return;
+        const st = computeStats(c.id);
+        const qtyInput = prompt('실제 보유 수량(주)을 입력해주세요. 과거 매매 기록과 다소 안 맞아도 괜찮아요 — 지금 실제로 들고 있는 수량을 우선해요.\n(비워두고 확인을 누르면 직접 수정을 해제하고 매매 기록으로 계산한 값으로 되돌아가요)', fmtShares(st.holdingQty));
+        if(qtyInput===null) return;
+        if(qtyInput.trim()===''){
+          delete c.holdingAdjust;
+          await saveCompanies();
+          render();
+          return;
+        }
+        const qty = parseFloat(qtyInput.replace(/,/g,''));
+        if(!qty || qty<0){ alert('올바른 수량을 입력해주세요.'); return; }
+        const priceInput = prompt('평단가('+(c.currency||'USD')+')를 입력해주세요.', st.avgPrice ? String(st.avgPrice) : '');
+        if(priceInput===null) return;
+        const price = parseFloat(priceInput.replace(/,/g,''));
+        if(!price || price<=0){ alert('올바른 평단가를 입력해주세요.'); return; }
+        c.holdingAdjust = {qty, avgPrice: price};
+        await saveCompanies();
+        render();
+      });
+    });
+
     const openTransferModal = document.getElementById('open-transfer-modal');
-    if(openTransferModal) openTransferModal.addEventListener('click', ()=>{ showTransferModal = true; render(); });
+    if(openTransferModal) openTransferModal.addEventListener('click', ()=>{ showTransferModal = true; transferTargetAccountId = null; render(); });
+    const transferAccountSelect = document.getElementById('transfer-account-select');
+    if(transferAccountSelect) transferAccountSelect.addEventListener('change', ()=>{ transferTargetAccountId = transferAccountSelect.value; render(); });
     const transferCloseBtn = document.getElementById('transfer-close-btn');
     if(transferCloseBtn) transferCloseBtn.addEventListener('click', ()=>{ showTransferModal = false; render(); });
     const transferCloseX = document.getElementById('transfer-close-x');
@@ -3163,7 +3237,12 @@
         return;
       }
       const costPrice = avgCostForQty(company.id, qty);
-      let destCompany = companies.find(c=>c.accountId===targetAccountId && c.ticker===company.ticker && c.currency===company.currency);
+      const destSelectVal = document.getElementById('transfer-dest-select').value;
+      let destCompany = destSelectVal ? companies.find(c=>c.id===destSelectVal) : null;
+      if(destCompany && destCompany.currency !== company.currency){
+        alert('합칠 종목의 기준 통화('+destCompany.currency+')가 이동하는 종목의 통화('+company.currency+')와 달라요. 다른 종목을 고르거나 "새 종목으로 만들기"를 선택해주세요.');
+        return;
+      }
       if(!destCompany){
         destCompany = {id:uid(), accountId: targetAccountId, name: company.name, ticker: company.ticker, sector: company.sector||'', currency: company.currency, template:{}, memo:'', dca:null, createdAt:Date.now()};
         companies.push(destCompany);
@@ -3424,6 +3503,37 @@
         if(!trimmed){ alert('이름을 입력해주세요.'); render(); return; }
         s.name = trimmed;
         await saveGroupSchemes();
+        render();
+      });
+    });
+    document.querySelectorAll('[data-schemecopy]').forEach(el=>{
+      el.addEventListener('click', async ()=>{
+        const schemeId = el.getAttribute('data-schemecopy');
+        const scheme = groupSchemes.find(s=>s.id===schemeId);
+        if(!scheme) return;
+        const targetSelect = document.querySelector('[data-copyschemetarget="'+schemeId+'"]');
+        const targetAccountId = targetSelect ? targetSelect.value : null;
+        const targetAccount = accounts.find(a=>a.id===targetAccountId);
+        if(!targetAccount) return;
+        if(!confirm('"'+scheme.name+'" 분류 기준을 "'+targetAccount.name+'" 계좌에 복사할까요? 그룹과, 이미 배정해둔 종목의 그룹 배정도 함께 복사돼요.')) return;
+        const newScheme = {id:uid(), name:scheme.name, accountId:targetAccountId};
+        groupSchemes.push(newScheme);
+        const groupIdMap = {};
+        groups.filter(g=>g.schemeId===schemeId).forEach(g=>{
+          const newGroup = {id:uid(), schemeId:newScheme.id, name:g.name, isCash:g.isCash};
+          groups.push(newGroup);
+          groupIdMap[g.id] = newGroup.id;
+        });
+        companies.filter(c=>c.accountId===targetAccountId).forEach(c=>{
+          const assignedGid = c.groupAssignments && c.groupAssignments[schemeId];
+          if(assignedGid && groupIdMap[assignedGid]){
+            c.groupAssignments = c.groupAssignments || {};
+            c.groupAssignments[newScheme.id] = groupIdMap[assignedGid];
+          }
+        });
+        await saveGroupSchemes();
+        await saveGroups();
+        await saveCompanies();
         render();
       });
     });
