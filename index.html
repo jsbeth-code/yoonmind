@@ -447,6 +447,7 @@
   let cashModalAccountId = null; // null이면 닫힘, 아니면 그 계좌의 현금 입력 모달이 열림
   let showTransferModal = false; // 선택된 종목을 다른 계좌로 이동하는 모달
   let transferTargetAccountId = null; // 계좌 이동 모달에서 선택된 대상 계좌 (null이면 첫번째 다른 계좌)
+  let editCompanyId = null; // null이면 닫힘, 아니면 그 종목의 종목명/티커 수정 모달이 열림
   let showNewCompanyForm = false;
   let tradeType = 'buy';
   let dataReady = false;
@@ -2339,6 +2340,24 @@
       +'</div>';
   }
 
+  function renderEditCompanyModal(){
+    if(!editCompanyId) return '';
+    const c = companies.find(x=>x.id===editCompanyId);
+    if(!c) return '';
+    const body = '<div class="modal-sub">다른 계좌의 같은 종목과 티커를 똑같이 맞추면 "전체 자산 현황"에서 하나로 합쳐져서 보여요.</div>'
+      + '<div class="form-row">'
+        +'<div class="fgroup"><label>종목명</label><input type="text" id="editcompany-name" value="'+esc(c.name)+'"></div>'
+        +'<div class="fgroup"><label>티커/코드</label><input type="text" id="editcompany-ticker" value="'+esc(c.ticker)+'"></div>'
+      +'</div>'
+      +'<div class="import-actions"><button class="import-btn-secondary" id="editcompany-close-btn">닫기</button><button class="import-btn-primary" id="editcompany-save">저장</button></div>';
+    return '<div class="modal-overlay" id="editcompany-overlay">'
+      +'<div class="modal-box" style="max-width:420px;">'
+        +'<div class="modal-header"><h2>종목명/티커 수정</h2><button class="modal-close" id="editcompany-close-x">×</button></div>'
+        + body
+      +'</div>'
+      +'</div>';
+  }
+
   function renderBackupModal(){
     if(!showBackupModal) return '';
     const tabs = '<div class="import-mode-tabs">'
@@ -2995,7 +3014,8 @@
       + renderApiKeyModal()
       + renderGroupsModal()
       + renderCashModal()
-      + renderTransferModal();
+      + renderTransferModal()
+      + renderEditCompanyModal();
 
     attachEvents();
   }
@@ -3169,21 +3189,29 @@
     });
 
     document.querySelectorAll('[data-editcompanyname]').forEach(el=>{
-      el.addEventListener('click', async ()=>{
-        const id = el.getAttribute('data-editcompanyname');
-        const c = companies.find(x=>x.id===id);
-        if(!c) return;
-        const newName = prompt('종목명을 입력해주세요', c.name);
-        if(newName===null) return;
-        const trimmedName = newName.trim();
-        if(!trimmedName){ alert('종목명을 입력해주세요.'); return; }
-        const newTicker = prompt('티커/코드를 입력해주세요. 다른 계좌의 같은 종목과 티커를 똑같이 맞추면 "전체 자산 현황"에서 하나로 합쳐져서 보여요.', c.ticker);
-        if(newTicker===null) return;
-        c.name = trimmedName;
-        c.ticker = newTicker.trim() || '-';
-        await saveCompanies();
+      el.addEventListener('click', ()=>{
+        editCompanyId = el.getAttribute('data-editcompanyname');
         render();
       });
+    });
+    const editCompanyCloseBtn = document.getElementById('editcompany-close-btn');
+    if(editCompanyCloseBtn) editCompanyCloseBtn.addEventListener('click', ()=>{ editCompanyId = null; render(); });
+    const editCompanyCloseX = document.getElementById('editcompany-close-x');
+    if(editCompanyCloseX) editCompanyCloseX.addEventListener('click', ()=>{ editCompanyId = null; render(); });
+    const editCompanyOverlay = document.getElementById('editcompany-overlay');
+    if(editCompanyOverlay) editCompanyOverlay.addEventListener('click', (e)=>{ if(e.target.id==='editcompany-overlay'){ editCompanyId = null; render(); } });
+    const editCompanySave = document.getElementById('editcompany-save');
+    if(editCompanySave) editCompanySave.addEventListener('click', async ()=>{
+      const c = companies.find(x=>x.id===editCompanyId);
+      if(!c) return;
+      const name = document.getElementById('editcompany-name').value.trim();
+      const ticker = document.getElementById('editcompany-ticker').value.trim();
+      if(!name){ alert('종목명을 입력해주세요.'); return; }
+      c.name = name;
+      c.ticker = ticker || '-';
+      editCompanyId = null;
+      await saveCompanies();
+      render();
     });
 
     document.querySelectorAll('[data-open-holding-adjust]').forEach(el=>{
