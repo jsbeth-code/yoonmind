@@ -2221,13 +2221,23 @@
 
       const assignOpen = groupsModalSchemeId===scheme.id;
       const heldCompanies = companies.filter(c=> (scheme.accountId==='all' || c.accountId===scheme.accountId) && computeStats(c.id).status==='holding');
+      const bulkOpts = '<option value="">미분류</option>' + schemeGroups.map(g=>'<option value="'+g.id+'">'+esc(g.name)+'</option>').join('');
       const assignRows = assignOpen ? (
-        '<div style="margin-top:10px;max-height:260px;overflow-y:auto;border-top:1px solid var(--border-soft);padding-top:10px;">'
+        '<div style="margin-top:10px;max-height:320px;overflow-y:auto;border-top:1px solid var(--border-soft);padding-top:10px;">'
+        + (schemeGroups.length ? (
+          '<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid var(--border-soft);">'
+            +'<select data-bulktargetgroup="'+scheme.id+'" style="background:var(--surface-raised);border:1px solid var(--border);border-radius:3px;color:var(--text);padding:6px 8px;font-size:12px;min-width:120px;font-family:\'Noto Sans KR\',sans-serif;">'+bulkOpts+'</select>'
+            +'<button data-bulkapply="'+scheme.id+'" class="import-btn-primary" style="padding:6px 12px;font-size:11.5px;">체크한 종목에 적용</button>'
+            +'<span data-bulkselectall="'+scheme.id+'" class="fx-manual" style="margin-left:auto;font-size:11px;">전체 선택/해제</span>'
+          +'</div>'
+        ) : '')
         + heldCompanies.map(c=>{
             const currentGid = c.groupAssignments && c.groupAssignments[scheme.id];
             const opts = '<option value="">미분류</option>' + schemeGroups.map(g=>'<option value="'+g.id+'" '+(currentGid===g.id?'selected':'')+'>'+esc(g.name)+'</option>').join('');
             return '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:5px 0;font-size:12.5px;">'
-              +'<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+esc(c.name)+' <span style="color:var(--text-faint);">'+esc(c.ticker)+'</span></span>'
+              +'<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:flex;align-items:center;gap:6px;">'
+                +'<input type="checkbox" data-bulkcheck="'+scheme.id+'|'+c.id+'">'
+                + esc(c.name)+' <span style="color:var(--text-faint);">'+esc(c.ticker)+'</span></span>'
               +'<select data-assigngroup="'+scheme.id+'|'+c.id+'" style="background:var(--surface-raised);border:1px solid var(--border);border-radius:3px;color:var(--text);padding:5px 8px;font-size:12px;min-width:130px;font-family:\'Noto Sans KR\',sans-serif;">'+opts+'</select>'
             +'</div>';
           }).join('')
@@ -2735,7 +2745,16 @@
 
       let avgPriceHtml;
       if(st.status==='holding'){
-        avgPriceHtml = st.holdingQty ? viewAmountHtml(st.avgPrice, cur, 'latest', companyViewCurrency) : '-';
+        if(!st.holdingQty){
+          avgPriceHtml = '-';
+        } else if(companyViewCurrency==='KRW' && cur!=='KRW'){
+          // 원화 평단가는 오늘 환율로 native 평단가를 환산하면 안 되고,
+          // 보유 중인 각 매수 시점의 환율로 환산한 매입원가를 평균 내야 한다 (computeCompanySplitKRW와 동일 기준)
+          const splitKRW = computeCompanySplitKRW(selected);
+          avgPriceHtml = splitKRW.pending ? '<span class="fx-note">조회 중…</span>' : (splitKRW.holdingQty>0 ? fmtMoney(splitKRW.holdingBuyCostKRW/splitKRW.holdingQty, 'KRW') : '-');
+        } else {
+          avgPriceHtml = viewAmountHtml(st.avgPrice, cur, 'latest', companyViewCurrency);
+        }
       } else if(st.status==='closed'){
         avgPriceHtml = rm.pending ? '<span class="fx-note">조회 중…</span>' : (rm.avgBuyPrice!==null ? fmtMoney(rm.avgBuyPrice, dispCur) : '-');
       } else {
@@ -3644,6 +3663,33 @@
         company.groupAssignments = company.groupAssignments || {};
         if(el.value) company.groupAssignments[schemeId] = el.value;
         else delete company.groupAssignments[schemeId];
+        await saveCompanies();
+        render();
+      });
+    });
+    document.querySelectorAll('[data-bulkselectall]').forEach(el=>{
+      el.addEventListener('click', ()=>{
+        const schemeId = el.getAttribute('data-bulkselectall');
+        const boxes = Array.from(document.querySelectorAll('[data-bulkcheck^="'+schemeId+'|"]'));
+        const allChecked = boxes.length>0 && boxes.every(b=>b.checked);
+        boxes.forEach(b=>{ b.checked = !allChecked; });
+      });
+    });
+    document.querySelectorAll('[data-bulkapply]').forEach(el=>{
+      el.addEventListener('click', async ()=>{
+        const schemeId = el.getAttribute('data-bulkapply');
+        const targetSelect = document.querySelector('[data-bulktargetgroup="'+schemeId+'"]');
+        const targetGid = targetSelect ? targetSelect.value : '';
+        const checked = Array.from(document.querySelectorAll('[data-bulkcheck^="'+schemeId+'|"]')).filter(b=>b.checked);
+        if(!checked.length){ alert('먼저 종목을 체크해주세요.'); return; }
+        checked.forEach(b=>{
+          const companyId = b.getAttribute('data-bulkcheck').split('|')[1];
+          const company = companies.find(c=>c.id===companyId);
+          if(!company) return;
+          company.groupAssignments = company.groupAssignments || {};
+          if(targetGid) company.groupAssignments[schemeId] = targetGid;
+          else delete company.groupAssignments[schemeId];
+        });
         await saveCompanies();
         render();
       });
