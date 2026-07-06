@@ -444,6 +444,7 @@
   let showGroupsModal = false;
   let groupsModalSchemeId = null; // 그룹 관리 모달에서 지금 펼쳐서 보고 있는 분류 기준
   let cashModalAccountId = null; // null이면 닫힘, 아니면 그 계좌의 현금 입력 모달이 열림
+  let showTransferModal = false; // 선택된 종목을 다른 계좌로 이동하는 모달
   let showNewCompanyForm = false;
   let tradeType = 'buy';
   let dataReady = false;
@@ -1558,7 +1559,21 @@
     const avgPrice = holdingQty ? holdingCost/holdingQty : 0;
     const status = holdingQty>0.0000001 ? 'holding' : (list.length>0 ? 'closed' : 'none');
     const realizedPct = realizedCost>0 ? (realizedPnL/realizedCost*100) : 0;
-    return {holdingQty, avgPrice, realizedPnL, realizedPct, status, pnlByTradeId, tradeCount:list.length, list};
+    return {holdingQty, avgPrice, realizedPnL, realizedPct, status, pnlByTradeId, tradeCount:list.length, list, lots};
+  }
+
+  // 지금 보유 중인 몫에서 FIFO로 qty만큼 덜어낼 때의 평균 원가 — 계좌 이동 시 원가를 그대로 넘겨주기 위해 사용
+  function avgCostForQty(companyId, qty){
+    const st = computeStats(companyId);
+    let remaining = qty, cost = 0, matched = 0;
+    for(const lot of st.lots){
+      if(remaining<=0) break;
+      const take = Math.min(lot.qty, remaining);
+      cost += take*lot.price;
+      matched += take;
+      remaining -= take;
+    }
+    return matched>0 ? cost/matched : 0;
   }
 
   function addPeriod(dateStr, freq){
@@ -2168,6 +2183,29 @@
       +'</div>';
   }
 
+  function renderTransferModal(){
+    if(!showTransferModal) return '';
+    const company = companies.find(c=>c.id===selectedId);
+    if(!company) return '';
+    const st = computeStats(company.id);
+    const otherAccounts = accounts.filter(a=>a.id!==company.accountId);
+    if(!otherAccounts.length) return '';
+    const accountOptions = otherAccounts.map(a=>'<option value="'+a.id+'">'+esc(a.name)+'</option>').join('');
+    const body = '<div class="modal-sub">'+esc(company.name)+' ('+esc(company.ticker)+') 보유분 중 일부 또는 전부를 실제로 주식 채로 다른 계좌로 옮긴 경우, 여기에 기록해두세요. 매수/매도로 처리되지 않고 매입 원가를 그대로 이어받아서, 손익 계산에는 영향을 주지 않아요.</div>'
+      + '<div class="import-year-row"><label>이동할 계좌</label><select id="transfer-account-select">'+accountOptions+'</select></div>'
+      + '<div class="form-row">'
+        +'<div class="fgroup"><label>이동 수량 (보유 '+fmtShares(st.holdingQty)+'주)</label><input type="number" step="0.0001" id="transfer-qty" value="'+fmtShares(st.holdingQty)+'"></div>'
+        +'<div class="fgroup"><label>이동일</label><input type="date" id="transfer-date" value="'+todayStr()+'"></div>'
+      +'</div>'
+      +'<div class="import-actions"><button class="import-btn-secondary" id="transfer-close-btn">닫기</button><button class="import-btn-primary" id="transfer-confirm">이동하기</button></div>';
+    return '<div class="modal-overlay" id="transfer-overlay">'
+      +'<div class="modal-box" style="max-width:480px;">'
+        +'<div class="modal-header"><h2>계좌 이동</h2><button class="modal-close" id="transfer-close-x">×</button></div>'
+        + body
+      +'</div>'
+      +'</div>';
+  }
+
   function renderBackupModal(){
     if(!showBackupModal) return '';
     const tabs = '<div class="import-mode-tabs">'
@@ -2582,7 +2620,9 @@
           +'</div>'
           + (selected.sector ? '<div class="detail-sector" style="margin-top:8px;">'+esc(selected.sector)+'</div>' : '')
         +'</div>'
-        +'<div style="display:flex;align-items:center;gap:14px;">'+stampHtml+'<button class="delete-company-btn" data-delcompany="'+selected.id+'">종목 삭제</button></div>'
+        +'<div style="display:flex;align-items:center;gap:14px;">'+stampHtml
+          + (accounts.length>1 && st.holdingQty>0.0000001 ? '<button class="delete-company-btn" id="open-transfer-modal" style="color:var(--accent);">계좌 이동</button>' : '')
+          +'<button class="delete-company-btn" data-delcompany="'+selected.id+'">종목 삭제</button></div>'
         +'</div>';
 
       const tabs = '<div class="tabs">'
@@ -2624,14 +2664,17 @@
         let rows = st.list.slice().reverse().map(t=>{
           const pnl = st.pnlByTradeId[t.id];
           let pnlHtml = '';
-          if(t.type==='sell' && pnl!==undefined && pnl!==null){
+          if(t.type==='sell' && !t.isTransfer && pnl!==undefined && pnl!==null){
             pnlHtml = '<span class="trade-pnl" style="color:'+(pnl>=0?'var(--gain)':'var(--loss)')+'">'+ (pnl>=0?'+':'') + viewAmountHtml(pnl, cur, t.date, companyViewCurrency) +'</span>';
           }
           const dcaBadge = t.isDCA ? '<span class="dca-tag">정기적립</span>' : '';
-          return '<div class="trade-row '+t.type+'">'
+          const rowStyle = t.isTransfer ? ' style="border-left-color:var(--amber);"' : '';
+          const badgeStyle = t.isTransfer ? ' style="background:rgba(232,169,62,0.15);color:var(--amber);"' : '';
+          const badgeLabel = t.isTransfer ? '계좌 이동' : (t.type==='buy'?'매수':'매도');
+          return '<div class="trade-row '+t.type+'"'+rowStyle+'>'
             +'<div class="trade-top">'
               +'<div class="trade-left">'
-                +'<span class="trade-badge '+t.type+'">'+(t.type==='buy'?'매수':'매도')+'</span>'
+                +'<span class="trade-badge '+t.type+'"'+badgeStyle+'>'+badgeLabel+'</span>'
                 +'<span class="trade-date">'+t.date+'</span>'
                 + dcaBadge
               +'</div>'
@@ -2796,7 +2839,8 @@
       + renderBackupModal()
       + renderApiKeyModal()
       + renderGroupsModal()
-      + renderCashModal();
+      + renderCashModal()
+      + renderTransferModal();
 
     attachEvents();
   }
@@ -2958,14 +3002,55 @@
       el.addEventListener('click', async ()=>{
         const id = el.getAttribute('data-delcompany');
         if(!confirm('이 종목과 관련된 모든 매매 기록, 분석, 적립 플랜이 삭제됩니다. 계속할까요?')) return;
+        const orphanedTransferIds = trades.filter(t=>t.companyId===id && t.isTransfer).map(t=>t.transferId);
         companies = companies.filter(c=>c.id!==id);
-        trades = trades.filter(t=>t.companyId!==id);
+        trades = trades.filter(t=>t.companyId!==id && !orphanedTransferIds.includes(t.transferId));
         const nextInAccount = companies.find(c=>c.accountId===activeAccountId);
         selectedId = nextInAccount ? nextInAccount.id : null;
         await saveCompanies();
         await saveTrades();
         render();
       });
+    });
+
+    const openTransferModal = document.getElementById('open-transfer-modal');
+    if(openTransferModal) openTransferModal.addEventListener('click', ()=>{ showTransferModal = true; render(); });
+    const transferCloseBtn = document.getElementById('transfer-close-btn');
+    if(transferCloseBtn) transferCloseBtn.addEventListener('click', ()=>{ showTransferModal = false; render(); });
+    const transferCloseX = document.getElementById('transfer-close-x');
+    if(transferCloseX) transferCloseX.addEventListener('click', ()=>{ showTransferModal = false; render(); });
+    const transferOverlay = document.getElementById('transfer-overlay');
+    if(transferOverlay) transferOverlay.addEventListener('click', (e)=>{ if(e.target===transferOverlay){ showTransferModal = false; render(); } });
+    const transferConfirm = document.getElementById('transfer-confirm');
+    if(transferConfirm) transferConfirm.addEventListener('click', async ()=>{
+      const company = companies.find(c=>c.id===selectedId);
+      if(!company) return;
+      const targetAccountId = document.getElementById('transfer-account-select').value;
+      const qty = parseFloat(document.getElementById('transfer-qty').value);
+      const date = document.getElementById('transfer-date').value;
+      if(!targetAccountId){ alert('이동할 계좌를 선택해주세요.'); return; }
+      if(!date){ alert('이동일을 입력해주세요.'); return; }
+      const st = computeStats(company.id);
+      if(!qty || qty<=0){ alert('올바른 수량을 입력해주세요.'); return; }
+      if(qty > st.holdingQty + 0.0000001){
+        alert('보유 수량('+fmtShares(st.holdingQty)+'주)보다 많은 수량을 이동할 수 없어요.');
+        return;
+      }
+      const costPrice = avgCostForQty(company.id, qty);
+      let destCompany = companies.find(c=>c.accountId===targetAccountId && c.ticker===company.ticker && c.currency===company.currency);
+      if(!destCompany){
+        destCompany = {id:uid(), accountId: targetAccountId, name: company.name, ticker: company.ticker, sector: company.sector||'', currency: company.currency, template:{}, memo:'', dca:null, createdAt:Date.now()};
+        companies.push(destCompany);
+      }
+      const fromAccount = accounts.find(a=>a.id===company.accountId);
+      const toAccount = accounts.find(a=>a.id===targetAccountId);
+      const transferId = uid();
+      trades.push({id:uid(), companyId:company.id, type:'sell', date, price:costPrice, qty, reason:(toAccount?(toAccount.name+' 계좌로 이동'):'계좌 이동'), isDCA:false, createdAt:Date.now(), isTransfer:true, transferId, counterAccountId:targetAccountId});
+      trades.push({id:uid(), companyId:destCompany.id, type:'buy', date, price:costPrice, qty, reason:(fromAccount?(fromAccount.name+' 계좌에서 이동'):'계좌 이동'), isDCA:false, createdAt:Date.now(), isTransfer:true, transferId, counterAccountId:company.accountId});
+      showTransferModal = false;
+      await saveCompanies();
+      await saveTrades();
+      render();
     });
 
     document.querySelectorAll('[data-togglecash]').forEach(el=>{
@@ -3028,7 +3113,13 @@
     document.querySelectorAll('[data-deltrade]').forEach(el=>{
       el.addEventListener('click', async ()=>{
         const id = el.getAttribute('data-deltrade');
-        trades = trades.filter(t=>t.id!==id);
+        const target = trades.find(t=>t.id===id);
+        if(target && target.isTransfer && target.transferId){
+          if(!confirm('계좌 이동 기록이에요. 삭제하면 이동 양쪽 계좌의 기록이 함께 삭제돼요. 계속할까요?')) return;
+          trades = trades.filter(t=>t.transferId!==target.transferId);
+        } else {
+          trades = trades.filter(t=>t.id!==id);
+        }
         await saveTrades();
         render();
       });
