@@ -1032,26 +1032,28 @@
   async function applyPriceBulkData(accountId, text){
     const lines = text.split(/\r?\n/).map(l=>l.trim()).filter(l=>l.length>0);
     let updated = 0, skipped = 0;
+    const failedLines = [];
     for(const line of lines){
       const delim = line.includes('\t') ? '\t' : ',';
       const idx = line.indexOf(delim);
-      if(idx===-1){ skipped++; continue; }
+      if(idx===-1){ skipped++; failedLines.push(line); continue; }
       const key = line.slice(0, idx).trim();
       const rawPrice = line.slice(idx+delim.length).trim();
       const price = parseFloat(normalizeNumber(rawPrice));
-      if(!key || !price || price<=0){ skipped++; continue; }
+      if(!key || !price || price<=0){ skipped++; failedLines.push(line); continue; }
+      const normKey = key.toLowerCase().replace(/\s+/g,'');
       const company = companies.find(c=>
         c.accountId===accountId && (
-          (c.ticker && c.ticker.toLowerCase()===key.toLowerCase()) ||
-          (c.name && c.name.toLowerCase()===key.toLowerCase())
+          (c.ticker && c.ticker.toLowerCase().replace(/\s+/g,'')===normKey) ||
+          (c.name && c.name.toLowerCase().replace(/\s+/g,'')===normKey)
         )
       );
-      if(!company){ skipped++; continue; }
+      if(!company){ skipped++; failedLines.push(line); continue; }
       company.currentPrice = {value: price, asOf: todayStr(), fetchedAt: Date.now()};
       updated++;
     }
     await saveCompanies();
-    return {updated, skipped};
+    return {updated, skipped, failedLines};
   }
 
   function setPriceImageStatus(msg, isError){
@@ -2430,7 +2432,9 @@
       + imageSection
       +'<div class="modal-sub" style="margin-top:'+(priceBulkMode==='image'?'0':'0')+';">'+(priceBulkMode==='image'?'분석 결과 (직접 수정 가능):':'티커,현재가 형식으로 한 줄에 하나씩:')+'</div>'
       +'<textarea class="import-textarea" id="pricebulk-paste" placeholder="예시)\nAAPL,215.30\nTSLA,435.35\nSLV,34.20"></textarea>'
-      + (priceBulkSummary ? '<div class="import-summary"><b>'+priceBulkSummary.updated+'개 종목 갱신</b>'+(priceBulkSummary.skipped?(' · 매칭 실패/형식 오류 '+priceBulkSummary.skipped+'개'):'')+'</div>' : '')
+      + (priceBulkSummary ? '<div class="import-summary"><b>'+priceBulkSummary.updated+'개 종목 갱신</b>'+(priceBulkSummary.skipped?(' · 매칭 실패/형식 오류 '+priceBulkSummary.skipped+'개'):'')
+          + (priceBulkSummary.failedLines && priceBulkSummary.failedLines.length ? '<div style="margin-top:6px;color:var(--text-faint);font-size:11px;">매칭 안 된 줄: '+priceBulkSummary.failedLines.map(esc).join(' · ')+'<br>해당 종목이 이 계좌에 등록돼 있는지, 종목명/티커 철자가 같은지 확인해주세요.</div>' : '')
+        +'</div>' : '')
       +'<div class="import-actions">'
         +'<button class="import-btn-secondary" id="pricebulk-cancel">닫기</button>'
         +'<button class="import-btn-primary" id="pricebulk-save">저장</button>'
