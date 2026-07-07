@@ -444,6 +444,7 @@
   let activeUsdRateOverride = undefined; // 저장 시점 스냅샷을 보는 동안 원/달러 변환에 쓸 고정 환율(저장 당시 환율) — undefined면 실시간 환율 사용
   let showClosedOverview = false; // 전체 자산 현황 화면: 청산 완료 섹션 기본 접힘
   let showClosedAcctSummary = false; // 사이드바 계좌 요약 박스: 청산 완료 섹션 기본 접힘
+  let acctSummaryCurrency = 'KRW'; // 사이드바 계좌 요약 박스: 원화/달러 토글
   let groupSchemes = []; // [{id, name}] — "자산 종류별 분류", "거래소별 분류" 같은 여러 분류 기준
   let groups = []; // [{id, schemeId, name, isCash}] — 각 분류 기준에 속한 그룹들
   let showGroupsModal = false;
@@ -785,6 +786,11 @@
       // 날짜가 바뀌면(cached.onDate!==todayStr()) 자동으로 재시도된다. 실패를 그냥 null로만
       // 저장하면 날짜 비교를 못 해서 한 번 실패한 뒤로 영영 재시도가 안 되는 문제가 있었다.
       fxRates[key] = {rate: result, onDate: todayStr()};
+    } else if(result===null){
+      // 과거 날짜도 마찬가지 — 실패를 그냥 null로 저장하면 (네트워크 문제로 실패한 것이든
+      // 아직 데이터가 없는 것이든) 영영 재시도가 안 된다. 날짜를 같이 저장해서 하루 지나면
+      // 다시 시도해보게 한다. 성공한 값은 기존처럼 순수 숫자로 저장(getMostRecentFxDate 호환).
+      fxRates[key] = {rate: null, onDate: todayStr()};
     } else {
       fxRates[key] = result;
     }
@@ -807,7 +813,12 @@
       if(cached.onDate !== todayStr()){ ensureFxRate(currency, date); return undefined; }
       return cached.rate;
     }
-    return cached;
+    if(typeof cached === 'number') return cached; // 성공해서 저장된 값
+    // 실패 기록(신규 형식 {rate:null,onDate} 또는 예전 버전이 남긴 순수 null) — 날짜가
+    // 바뀌었으면 다시 시도, 오늘 이미 시도해봤으면 실패로 확정해 수동 입력을 유도한다.
+    const failedOnDate = (cached && typeof cached==='object') ? cached.onDate : null;
+    if(failedOnDate !== todayStr()){ ensureFxRate(currency, date); return undefined; }
+    return null;
   }
 
   // Finds the most recent historical rate we have on file for a currency (from bulk-imported data, say).
@@ -1256,9 +1267,10 @@
 
   const DONUT_COLORS = ['#3fa796','#e8a93e','#e2646b','#6c8ee2','#c77dd1','#52c17e','#d1567d','#4fc3d9','#a3894f','#8b93a3'];
 
-  // 전체 자산 현황 화면은 내부적으로 항상 원화로 계산하고, 표시 직전에만 portfolioCurrency로 환산한다
-  function convertKRWForDisplay(krwValue){
-    if(portfolioCurrency==='KRW') return {value: krwValue, pending:false, failed:false};
+  // 전체 자산 현황 화면은 내부적으로 항상 원화로 계산하고, 표시 직전에만 targetCurrency로 환산한다
+  function convertKRWForDisplay(krwValue, targetCurrency){
+    targetCurrency = targetCurrency || portfolioCurrency;
+    if(targetCurrency==='KRW') return {value: krwValue, pending:false, failed:false};
     // 저장된 시점(스냅샷)을 보는 중이면 실시간 환율이 아니라 그 시점에 고정해 둔 환율을 써야
     // "그때의 자산 현황"이 나중에 환율이 바뀌어도 흔들리지 않는다.
     if(activeUsdRateOverride!==undefined){
@@ -1271,10 +1283,16 @@
     return {value: krwValue / r.rate, pending:false, failed:false};
   }
   function fmtPortfolioMoney(krwValue){
-    const conv = convertKRWForDisplay(krwValue);
+    const conv = convertKRWForDisplay(krwValue, portfolioCurrency);
     if(conv.pending) return '<span class="fx-note">환율 조회 중…</span>';
     if(conv.failed) return '<span class="fx-note">환율 조회 실패</span>';
     return fmtMoney(conv.value, portfolioCurrency);
+  }
+  function fmtAcctMoney(krwValue){
+    const conv = convertKRWForDisplay(krwValue, acctSummaryCurrency);
+    if(conv.pending) return '<span class="fx-note">환율 조회 중…</span>';
+    if(conv.failed) return '<span class="fx-note">환율 조회 실패</span>';
+    return fmtMoney(conv.value, acctSummaryCurrency);
   }
 
   // 계좌(scope)에 등록된 현금(USD/JPY/KRW)을 원화로 환산해서 반환
@@ -3078,18 +3096,23 @@
       + (accounts.length>1 ? '<button class="account-delete-link" id="account-delete">"'+esc((accounts.find(a=>a.id===activeAccountId)||{}).name||'')+'" 계좌 삭제</button>' : '');
 
     const acctSummary = computeSplitSummary(activeAccountId);
+    const acctCurToggle = '<div class="currency-toggle" style="margin:0 0 8px 0;">'
+        +'<button class="ct-btn '+(acctSummaryCurrency==='KRW'?'active':'')+'" data-acctcur="KRW">₩ 원화</button>'
+        +'<button class="ct-btn '+(acctSummaryCurrency==='USD'?'active':'')+'" data-acctcur="USD">$ 달러</button>'
+      +'</div>';
     const acctSummaryHtml = '<div class="account-summary">'
+      + acctCurToggle
       + (acctSummary.pending
         ? '<div class="fx-note">환율/현재가 조회 중…</div>'
         : ('<div class="account-summary-group-label">보유 중</div>'
-          +'<div class="account-summary-row"><span>매입금액</span><b>'+fmtMoney(acctSummary.heldBuyCost,'KRW')+'</b></div>'
-          +'<div class="account-summary-row"><span>평가금액</span><b>'+(acctSummary.anyMissingPrice?'<span class="fx-note">현재가 필요</span>':fmtMoney(acctSummary.heldValue,'KRW'))+'</b></div>'
+          +'<div class="account-summary-row"><span>매입금액</span><b>'+fmtAcctMoney(acctSummary.heldBuyCost)+'</b></div>'
+          +'<div class="account-summary-row"><span>평가금액</span><b>'+(acctSummary.anyMissingPrice?'<span class="fx-note">현재가 필요</span>':fmtAcctMoney(acctSummary.heldValue))+'</b></div>'
           +'<div class="account-summary-row"><span>수익률</span><b class="'+(acctSummary.heldReturnPct===null?'':(acctSummary.heldReturnPct>=0?'gain':'loss'))+'">'+(acctSummary.heldReturnPct===null?'-':fmtPct(acctSummary.heldReturnPct))+'</b></div>'
-          + (acctSummary.excludedCount>0 ? '<div style="font-size:10.5px;color:var(--text-faint);margin:2px 0 4px 0;">현금 표시 '+acctSummary.excludedCount+'개 · '+fmtMoney(acctSummary.excludedValue,'KRW')+'</div>' : '')
+          + (acctSummary.excludedCount>0 ? '<div style="font-size:10.5px;color:var(--text-faint);margin:2px 0 4px 0;">현금 표시 '+acctSummary.excludedCount+'개 · '+fmtAcctMoney(acctSummary.excludedValue)+'</div>' : '')
           +'<div class="account-summary-group-label collapsible" data-toggle-closed-acct="1" style="cursor:pointer;display:flex;justify-content:space-between;align-items:center;">청산 완료 <span class="chev">'+(showClosedAcctSummary?'▾':'▸')+'</span></div>'
           + (showClosedAcctSummary ? (
-            '<div class="account-summary-row"><span>매입금액</span><b>'+fmtMoney(acctSummary.closedBuyCost,'KRW')+'</b></div>'
-            +'<div class="account-summary-row"><span>청산금액</span><b>'+fmtMoney(acctSummary.closedSellProceeds,'KRW')+'</b></div>'
+            '<div class="account-summary-row"><span>매입금액</span><b>'+fmtAcctMoney(acctSummary.closedBuyCost)+'</b></div>'
+            +'<div class="account-summary-row"><span>청산금액</span><b>'+fmtAcctMoney(acctSummary.closedSellProceeds)+'</b></div>'
             +'<div class="account-summary-row"><span>수익률</span><b class="'+(acctSummary.closedReturnPct===null?'':(acctSummary.closedReturnPct>=0?'gain':'loss'))+'">'+(acctSummary.closedReturnPct===null?'-':fmtPct(acctSummary.closedReturnPct))+'</b></div>'
           ) : '')
         )
@@ -3882,6 +3905,9 @@
     if(toggleClosedAcct) toggleClosedAcct.addEventListener('click', ()=>{ showClosedAcctSummary = !showClosedAcctSummary; render(); });
     document.querySelectorAll('[data-portfoliocur]').forEach(el=>{
       el.addEventListener('click', ()=>{ portfolioCurrency = el.getAttribute('data-portfoliocur'); render(); });
+    });
+    document.querySelectorAll('[data-acctcur]').forEach(el=>{
+      el.addEventListener('click', ()=>{ acctSummaryCurrency = el.getAttribute('data-acctcur'); render(); });
     });
     document.querySelectorAll('[data-distexpand]').forEach(el=>{
       el.addEventListener('click', ()=>{
