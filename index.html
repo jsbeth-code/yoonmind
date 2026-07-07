@@ -487,7 +487,7 @@
     date: ['거래일자','체결일자','거래일','체결일','날짜','일자','date','trade date'],
     name: ['종목명','종목','name','상품명','종목이름'],
     ticker: ['종목코드','티커','코드','symbol','ticker'],
-    side: ['거래구분','매매구분','구분','side','type','매수매도'],
+    side: ['거래구분','매매구분','구분','side','type','매수매도','거래명','거래종류'],
     price: ['체결가','단가','가격','price','체결단가','거래단가'],
     qty: ['체결수량','수량','거래수량','qty','quantity']
   };
@@ -781,7 +781,10 @@
     }catch(e){ /* network blocked or API unreachable — leave as failed */ }
 
     if(date==='latest'){
-      fxRates[key] = result===null ? null : {rate: result, onDate: todayStr()};
+      // 실패해도 오늘 날짜와 함께 저장해야 "오늘은 이미 시도해봤다"를 구분할 수 있고,
+      // 날짜가 바뀌면(cached.onDate!==todayStr()) 자동으로 재시도된다. 실패를 그냥 null로만
+      // 저장하면 날짜 비교를 못 해서 한 번 실패한 뒤로 영영 재시도가 안 되는 문제가 있었다.
+      fxRates[key] = {rate: result, onDate: todayStr()};
     } else {
       fxRates[key] = result;
     }
@@ -830,15 +833,18 @@
     if(currency==='KRW') return {rate:1, isFallback:false, asOfDate: todayStr()};
     const key = fxKey(currency, 'latest');
     const cached = fxRates[key];
-    if(cached && cached.onDate===todayStr()){
+    // cached는 성공 시 {rate, onDate}, 실패해도 {rate:null, onDate}(오늘 이미 시도해봄을 기록).
+    // 예전 버전에서 저장된 순수 null 값(구버전 실패 기록)은 onDate가 없어서 아래에서 바로 재시도된다.
+    const triedToday = !!(cached && cached.onDate===todayStr());
+    if(triedToday && cached.rate){
       return {rate: cached.rate, isFallback:false, asOfDate: cached.onDate};
     }
-    if(cached===undefined || (cached && cached.onDate!==todayStr())){
+    if(!triedToday){
       ensureFxRate(currency, 'latest'); // fire-and-forget; UI falls back below in the meantime
     }
     const fallback = getMostRecentFxDate(currency);
     if(fallback) return {rate: fallback.rate, isFallback:true, asOfDate: fallback.date};
-    if(cached===null) return null;
+    if(triedToday && !cached.rate) return null;
     return undefined;
   }
 
