@@ -415,6 +415,10 @@
   const currentPriceFetching = new Set();
   let companyViewCurrency = 'native'; // 'native' | 'KRW' — toggle for the selected company's figures
   let showClosedGroup = false; // sidebar: closed/sold-out positions collapsed by default
+  let sidebarPage = {holding:0, closed:0, notrade:0}; // sidebar: current page per group when paginated
+  let sidebarExpanded = {holding:false, closed:false, notrade:false}; // sidebar: "전체 보기"로 페이지 나누기를 끈 그룹
+  let tradeListPage = 0; // 매매 기록 탭: 현재 페이지
+  let tradeListExpanded = false; // 매매 기록 탭: "전체 보기"
   let showFxBulkModal = false;
   let fxBulkCurrency = 'USD';
   let fxBulkSummary = null;
@@ -1110,21 +1114,31 @@
     const st = computeStats(companyId);
     const list = trades.filter(t=>t.companyId===companyId);
     let totalBuyCost = 0, totalSellProceeds = 0, totalBuyQty = 0, pending = false, anyFailed = false;
-    list.forEach(t=>{
-      const cur = t.currency || (company?company.currency:'USD') || 'USD';
-      const conv = convertAmount(t.price*t.qty, cur, t.date, targetCurrency);
-      if(conv.pending){ pending = true; return; }
-      if(conv.failed){ anyFailed = true; return; }
-      if(t.type==='buy'){ totalBuyCost += conv.value; totalBuyQty += t.qty; }
-      else totalSellProceeds += conv.value;
-    });
-    if(company && company.holdingAdjust){
-      // 보유 수량/평단가를 직접 수정한 경우, 매입금액도 그 값 기준으로 다시 계산해야
-      // 과거 거래 총합(예: 전량 매도 후 재매수한 이력 포함)이 아니라 "지금 들고 있는 몫"의 매입금액이 된다
-      const adjCur = company.currency || 'USD';
-      const conv = convertAmount(company.holdingAdjust.qty*company.holdingAdjust.avgPrice, adjCur, 'latest', targetCurrency);
-      if(conv.pending) pending = true;
-      else if(!conv.failed) totalBuyCost = conv.value;
+    const cur = company ? (company.currency||'USD') : 'USD';
+    if(st.status==='holding'){
+      // 보유 중일 때는 "지금 들고 있는 몫"의 매입원가만 매입금액에 넣는다 — 예전에 일부를 팔았던 이력까지
+      // 합치면(= 전체 매수 총합) 이미 청산한 몫의 원가까지 끼어들어서 평가손익/수익률이 왜곡된다.
+      if(company && company.holdingAdjust){
+        const conv = convertAmount(company.holdingAdjust.qty*company.holdingAdjust.avgPrice, cur, 'latest', targetCurrency);
+        if(conv.pending) pending = true;
+        else if(!conv.failed) totalBuyCost = conv.value;
+      } else {
+        st.lots.forEach(lot=>{
+          const conv = convertAmount(lot.qty*lot.price, cur, lot.date, targetCurrency);
+          if(conv.pending) pending = true;
+          else if(!conv.failed) totalBuyCost += conv.value;
+        });
+      }
+      totalBuyQty = st.holdingQty;
+    } else {
+      list.forEach(t=>{
+        const tcur = t.currency || cur;
+        const conv = convertAmount(t.price*t.qty, tcur, t.date, targetCurrency);
+        if(conv.pending){ pending = true; return; }
+        if(conv.failed){ anyFailed = true; return; }
+        if(t.type==='buy'){ totalBuyCost += conv.value; totalBuyQty += t.qty; }
+        else totalSellProceeds += conv.value;
+      });
     }
     let currentValue = 0, hasCurrentPrice = !!(company && company.currentPrice);
     if(st.holdingQty>0 && hasCurrentPrice){
@@ -1555,7 +1569,7 @@
     const pnlByTradeId = {};
     for(const t of list){
       if(t.type==='buy'){
-        lots.push({qty:t.qty, price:t.price});
+        lots.push({qty:t.qty, price:t.price, date:t.date});
       } else {
         let remaining = t.qty;
         let costTotal = 0;
@@ -2679,6 +2693,26 @@
         +'</div>';
     }
 
+    const SIDEBAR_PAGE_SIZE = 10;
+    function renderPagedList(items, renderFn, groupKey){
+      if(!items.length) return '';
+      if(sidebarExpanded[groupKey] || items.length<=SIDEBAR_PAGE_SIZE){
+        const collapseLink = items.length>SIDEBAR_PAGE_SIZE
+          ? '<div class="fx-manual" data-sidebarcollapse="'+groupKey+'" style="font-size:11px;text-align:center;margin:4px 0;">접어서 '+SIDEBAR_PAGE_SIZE+'개씩 보기</div>' : '';
+        return items.map(renderFn).join('') + collapseLink;
+      }
+      const totalPages = Math.ceil(items.length/SIDEBAR_PAGE_SIZE);
+      const page = Math.min(sidebarPage[groupKey]||0, totalPages-1);
+      const pageItems = items.slice(page*SIDEBAR_PAGE_SIZE, page*SIDEBAR_PAGE_SIZE+SIDEBAR_PAGE_SIZE);
+      const pagerHtml = '<div style="display:flex;align-items:center;justify-content:space-between;padding:6px 2px 2px;font-size:11px;color:var(--text-faint);">'
+          +'<button data-sidebarpage="'+groupKey+'|prev" '+(page===0?'disabled':'')+' style="background:none;border:1px solid var(--border);border-radius:3px;color:var(--text-muted);padding:3px 8px;cursor:pointer;font-family:inherit;">‹ 이전</button>'
+          +'<span>'+(page+1)+' / '+totalPages+'</span>'
+          +'<button data-sidebarpage="'+groupKey+'|next" '+(page===totalPages-1?'disabled':'')+' style="background:none;border:1px solid var(--border);border-radius:3px;color:var(--text-muted);padding:3px 8px;cursor:pointer;font-family:inherit;">다음 ›</button>'
+        +'</div>'
+        +'<div class="fx-manual" data-sidebarexpand="'+groupKey+'" style="font-size:11px;text-align:center;margin-top:2px;">전체 '+items.length+'개 펼쳐보기</div>';
+      return pageItems.map(renderFn).join('') + pagerHtml;
+    }
+
     const holdingCompanies = [], closedCompanies = [], noTradeCompanies = [];
     companies.filter(c=>c.accountId===activeAccountId).forEach(c=>{
       const st = computeStats(c.id);
@@ -2688,9 +2722,9 @@
     });
 
     let sidebarItems = ''
-      + (holdingCompanies.length ? '<div class="sidebar-group-label">보유중 · '+holdingCompanies.length+'</div>' + holdingCompanies.map(renderTickerItem).join('') : '')
-      + (closedCompanies.length ? '<div class="sidebar-group-label collapsible" data-toggle-closed="1">청산 완료 · '+closedCompanies.length+' <span class="chev">'+(showClosedGroup?'▾':'▸')+'</span></div>' + (showClosedGroup ? closedCompanies.map(renderTickerItem).join('') : '') : '')
-      + (noTradeCompanies.length ? '<div class="sidebar-group-label">거래 기록 없음 · '+noTradeCompanies.length+'</div>' + noTradeCompanies.map(renderTickerItem).join('') : '');
+      + (holdingCompanies.length ? '<div class="sidebar-group-label">보유중 · '+holdingCompanies.length+'</div>' + renderPagedList(holdingCompanies, renderTickerItem, 'holding') : '')
+      + (closedCompanies.length ? '<div class="sidebar-group-label collapsible" data-toggle-closed="1">청산 완료 · '+closedCompanies.length+' <span class="chev">'+(showClosedGroup?'▾':'▸')+'</span></div>' + (showClosedGroup ? renderPagedList(closedCompanies, renderTickerItem, 'closed') : '') : '')
+      + (noTradeCompanies.length ? '<div class="sidebar-group-label">거래 기록 없음 · '+noTradeCompanies.length+'</div>' + renderPagedList(noTradeCompanies, renderTickerItem, 'notrade') : '');
 
     let newCompanyPanel = '';
     if(showNewCompanyForm){
@@ -2757,9 +2791,8 @@
           avgPriceHtml = '-';
         } else if(companyViewCurrency==='KRW' && cur!=='KRW'){
           // 원화 평단가는 오늘 환율로 native 평단가를 환산하면 안 되고,
-          // 보유 중인 각 매수 시점의 환율로 환산한 매입원가를 평균 내야 한다 (computeCompanySplitKRW와 동일 기준)
-          const splitKRW = computeCompanySplitKRW(selected);
-          avgPriceHtml = splitKRW.pending ? '<span class="fx-note">조회 중…</span>' : (splitKRW.holdingQty>0 ? fmtMoney(splitKRW.holdingBuyCostKRW/splitKRW.holdingQty, 'KRW') : '-');
+          // 보유 중인 각 매수 시점의 환율로 환산한 매입원가를 평균 내야 한다 — rm.totalBuyCost가 이미 그렇게 계산됨
+          avgPriceHtml = rm.pending ? '<span class="fx-note">조회 중…</span>' : (rm.totalBuyQty>0 ? fmtMoney(rm.totalBuyCost/rm.totalBuyQty, 'KRW') : '-');
         } else {
           avgPriceHtml = viewAmountHtml(st.avgPrice, cur, 'latest', companyViewCurrency);
         }
@@ -2866,7 +2899,24 @@
           +'<button class="submit-trade-btn" id="t-submit">'+ (tradeType==='buy'?'매수 기록 추가':'매도 기록 추가') +'</button>'
           +'</div>';
 
-        let rows = st.list.slice().reverse().map(t=>{
+        const TRADE_PAGE_SIZE = 10;
+        const sortedTrades = st.list.slice().reverse();
+        let tradePagerHtml = '';
+        let pageTrades = sortedTrades;
+        if(!tradeListExpanded && sortedTrades.length>TRADE_PAGE_SIZE){
+          const totalTradePages = Math.ceil(sortedTrades.length/TRADE_PAGE_SIZE);
+          const tp = Math.min(tradeListPage, totalTradePages-1);
+          pageTrades = sortedTrades.slice(tp*TRADE_PAGE_SIZE, tp*TRADE_PAGE_SIZE+TRADE_PAGE_SIZE);
+          tradePagerHtml = '<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 2px;font-size:12px;color:var(--text-faint);">'
+              +'<button data-tradepage="prev" '+(tp===0?'disabled':'')+' style="background:none;border:1px solid var(--border);border-radius:3px;color:var(--text-muted);padding:5px 10px;cursor:pointer;font-family:inherit;">‹ 이전</button>'
+              +'<span>'+(tp+1)+' / '+totalTradePages+'</span>'
+              +'<button data-tradepage="next" '+(tp===totalTradePages-1?'disabled':'')+' style="background:none;border:1px solid var(--border);border-radius:3px;color:var(--text-muted);padding:5px 10px;cursor:pointer;font-family:inherit;">다음 ›</button>'
+            +'</div>'
+            +'<div class="fx-manual" data-tradeexpand="1" style="font-size:11px;text-align:center;">전체 '+sortedTrades.length+'건 펼쳐보기</div>';
+        } else if(sortedTrades.length>TRADE_PAGE_SIZE){
+          tradePagerHtml = '<div class="fx-manual" data-tradecollapse="1" style="font-size:11px;text-align:center;padding:8px 2px;">접어서 '+TRADE_PAGE_SIZE+'개씩 보기</div>';
+        }
+        let rows = pageTrades.map(t=>{
           const pnl = st.pnlByTradeId[t.id];
           let pnlHtml = '';
           if(t.type==='sell' && !t.isTransfer && pnl!==undefined && pnl!==null){
@@ -2894,7 +2944,7 @@
         }).join('');
         if(!rows) rows = '<div class="no-trades">아직 매매 기록이 없어요.</div>';
 
-        tabContent = form + '<div class="trade-list">'+rows+'</div>';
+        tabContent = form + '<div class="trade-list">'+rows+'</div>' + tradePagerHtml;
       } else {
         // DCA tab
         const plan = selected.dca;
@@ -3081,6 +3131,27 @@
       showClosedGroup = !showClosedGroup;
       render();
     });
+    document.querySelectorAll('[data-sidebarpage]').forEach(el=>{
+      el.addEventListener('click', ()=>{
+        const [groupKey, dir] = el.getAttribute('data-sidebarpage').split('|');
+        sidebarPage[groupKey] = (sidebarPage[groupKey]||0) + (dir==='next'?1:-1);
+        render();
+      });
+    });
+    document.querySelectorAll('[data-sidebarexpand]').forEach(el=>{
+      el.addEventListener('click', ()=>{
+        sidebarExpanded[el.getAttribute('data-sidebarexpand')] = true;
+        render();
+      });
+    });
+    document.querySelectorAll('[data-sidebarcollapse]').forEach(el=>{
+      el.addEventListener('click', ()=>{
+        const groupKey = el.getAttribute('data-sidebarcollapse');
+        sidebarExpanded[groupKey] = false;
+        sidebarPage[groupKey] = 0;
+        render();
+      });
+    });
     const accountAddToggle = document.getElementById('account-add-toggle');
     if(accountAddToggle) accountAddToggle.addEventListener('click', ()=>{
       showNewAccountForm = !showNewAccountForm;
@@ -3167,6 +3238,8 @@
         activeTab = 'trades';
         companyViewCurrency = 'native';
         showPortfolioOverview = false;
+        tradeListPage = 0;
+        tradeListExpanded = false;
         render();
       });
     });
@@ -3329,8 +3402,18 @@
     });
 
     document.querySelectorAll('[data-tab]').forEach(el=>{
-      el.addEventListener('click', ()=>{ activeTab = el.getAttribute('data-tab'); render(); });
+      el.addEventListener('click', ()=>{ activeTab = el.getAttribute('data-tab'); tradeListPage = 0; tradeListExpanded = false; render(); });
     });
+    document.querySelectorAll('[data-tradepage]').forEach(el=>{
+      el.addEventListener('click', ()=>{
+        tradeListPage += el.getAttribute('data-tradepage')==='next' ? 1 : -1;
+        render();
+      });
+    });
+    const tradeExpandLink = document.querySelector('[data-tradeexpand]');
+    if(tradeExpandLink) tradeExpandLink.addEventListener('click', ()=>{ tradeListExpanded = true; render(); });
+    const tradeCollapseLink = document.querySelector('[data-tradecollapse]');
+    if(tradeCollapseLink) tradeCollapseLink.addEventListener('click', ()=>{ tradeListExpanded = false; tradeListPage = 0; render(); });
 
     document.querySelectorAll('[data-field]').forEach(el=>{
       el.addEventListener('blur', async ()=>{
