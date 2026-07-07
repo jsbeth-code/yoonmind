@@ -852,6 +852,10 @@
   // Returns {value} on success, {pending:true} while loading, or {failed:true} if lookup failed.
   function convertAmount(nativeAmount, currency, date, targetCurrency){
     if(targetCurrency==='native' || currency==='KRW') return {value: nativeAmount};
+    // 오늘 날짜 거래는 "latest"와 동일하게 취급한다 — 프랑크푸르터 API가 당일 환율을
+    // 아직 발표하지 않아 정확한 날짜로는 조회가 실패해도, latest 쪽은 어제 환율로
+    // 안전하게 대체되고 날짜가 바뀌면 자동 재시도되는 로직을 그대로 재사용할 수 있다.
+    if(date===todayStr()) date = 'latest';
     if(date==='latest'){
       const r = getEffectiveLatestRate(currency);
       if(r===undefined) return {pending:true};
@@ -878,6 +882,7 @@
     if(currency==='KRW' || targetCurrency==='native'){
       return fmtMoney(nativeAmount, currency);
     }
+    if(date===todayStr()) date = 'latest'; // convertAmount와 동일한 이유로 오늘 날짜는 latest로 통일
     if(date==='latest'){
       const r = getEffectiveLatestRate(currency);
       const attr = 'data-fxmanual="'+currency+'|latest"';
