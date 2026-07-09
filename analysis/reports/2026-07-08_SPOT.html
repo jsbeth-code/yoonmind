@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>Spotify (SPOT) 종합 투자 분석 보고서</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    font-family: "Noto Sans CJK KR", "Noto Sans KR", sans-serif;
+    font-size: 10.5pt; line-height: 1.65; color: #1a2332; margin: 0;
+  }
+  .page { padding: 0 8mm; }
+  h1 { font-size: 21pt; color: #0e6b3d; margin: 0 0 4px 0; line-height:1.3; }
+  h2 { font-size: 14pt; color: #0e6b3d; border-bottom: 2.5px solid #1db954; padding-bottom: 5px; margin-top: 30px; }
+  h3 { font-size: 11.5pt; color: #14824a; margin-top: 20px; margin-bottom: 8px; }
+  .subtitle { color: #5a6b80; font-size: 11pt; margin-bottom: 2px; }
+  .meta { color: #8494a8; font-size: 9pt; margin-bottom: 24px; }
+  table { border-collapse: collapse; width: 100%; margin: 12px 0; font-size: 9.5pt; }
+  th { background: #0b4a2b; color: #fff; padding: 7px 9px; text-align: left; font-weight: 700; }
+  td { border: 1px solid #d5dde8; padding: 6px 9px; vertical-align: top; }
+  tr:nth-child(even) td { background: #f0faf4; }
+  .verdict-box { background: #0b4a2b; color: #fff; border-radius: 10px; padding: 18px 22px; margin: 18px 0; }
+  .verdict-box .rating { font-size: 17pt; font-weight: 800; color: #7ff0a8; }
+  .warn { background: #fff7e8; border-left: 4px solid #e8a020; padding: 10px 14px; margin: 12px 0; font-size: 9.5pt;}
+  .info { background: #edf9f1; border-left: 4px solid #1db954; padding: 10px 14px; margin: 12px 0; font-size: 9.5pt;}
+  ul, ol { padding-left: 20px; }
+  li { margin-bottom: 4px; }
+  .small { font-size: 8.5pt; color: #6b7a8e; }
+  .kpi-row { display: flex; gap: 10px; margin: 14px 0; }
+  .kpi { flex: 1; background: #edf9f1; border: 1px solid #c4e9d2; border-radius: 8px; padding: 10px 12px; text-align: center; }
+  .kpi .v { font-size: 13pt; font-weight: 800; color: #0b4a2b; }
+  .kpi .l { font-size: 8.5pt; color: #5a6b80; }
+  .pagebreak { page-break-before: always; }
+</style>
+</head>
+<body>
+<div class="page">
+
+<h1>Spotify (SPOT)<br>종합 투자 분석 보고서</h1>
+<div class="subtitle">글로벌 음악 스트리밍 1위 — 흑자 전환은 끝났고, 이제 밸류에이션과 로열티 천장이 문제</div>
+<div class="meta">작성일: 2026년 7월 8일 | 분석 프레임: 섹터 / 뉴스 / 기업 / 재무 / 기술적·퀀트 / 종합판단 | 상장: NYSE | 현재가 약 $486 | 회계보고: 유로(EUR) 기준</div>
+
+<div class="verdict-box">
+  <div style="font-size:9pt; color:#a8d8bc; margin-bottom:4px;">종합 투자의견 (최종 판단 전문가)</div>
+  <div class="rating">Spotify (SPOT) — 보유 (HOLD)</div>
+  <div style="margin-top:8px; font-size:10pt;">
+    구독형·반복 매출의 방어적 수요 + FCF 흑자 전환(TTM €3.2B) + 시장 1위(MAU 761M·점유율 32%)는 매력. 그러나 사용자님 기준(합리적 밸류 + 하방 방어력)에서 ① 선행 PER 약 35배로 엔터 업종(17배)의 <b>2배 프리미엄</b>, ② 프리미엄 매출의 <b>~70%가 음원 로열티</b>로 나가 3대 레이블(유니버설·소니·워너)이 마진 천장을 통제, ③ 고점($785)에서 -38% 조정으로 장기 추세는 아직 약세, ④ 창업자 Daniel Ek의 CEO 이임(공동 CEO 체제) 전환 리스크가 걸림. <b>흑자 전환 스토리는 이미 상당 부분 주가에 반영</b>. 보유 유지, 신규는 눌림목 분할 한정. 컨센서스는 Buy·목표가 $599(+20%)로 본 의견보다 낙관적.
+  </div>
+</div>
+
+<div class="kpi-row">
+  <div class="kpi"><div class="v">€4.53B</div><div class="l">1Q26 매출 (+8%, +14% 환율중립)</div></div>
+  <div class="kpi"><div class="v">33.0%</div><div class="l">1Q26 총이익률 (분기 최고)</div></div>
+  <div class="kpi"><div class="v">761M</div><div class="l">MAU (+12% YoY)</div></div>
+  <div class="kpi"><div class="v">293M</div><div class="l">프리미엄 구독자 (+9%)</div></div>
+  <div class="kpi"><div class="v">€3.2B</div><div class="l">TTM 잉여현금흐름</div></div>
+</div>
+
+<h2>Part 1. 섹터 분석 — 음악 스트리밍의 구조</h2>
+<h3>1-1. 시장 구조와 지위</h3>
+<p>글로벌 녹음음악 시장은 2025년 $296억을 넘었고 그중 약 2/3가 스트리밍입니다. 이 시장에서 <b>Spotify는 유료 구독자 기준 점유율 약 32%(31.7%)로 압도적 1위</b> — 프리미엄 구독자 293M, MAU 761M. 경쟁 서열은 Spotify(293M) → YouTube Music(~125M+) → Apple Music(~100M 추정) → Amazon Music(~80~85M) 순. Spotify의 MAU 761M은 Apple Music 유료 기반의 5~7배로, <b>순수 청취자 규모와 데이터에서 독보적</b>입니다.</p>
+<h3>1-2. 해자와 그 한계</h3>
+<ul>
+<li><b>해자</b>: ① 규모의 경제(콘텐츠 협상력), ② 추천 알고리즘·플레이리스트·개인화 데이터, ③ 청취 습관 락인(전환비용), ④ 무료→유료 전환 퍼널.</li>
+<li><b>구조적 한계(핵심)</b>: 콘텐츠(음원)를 소유하지 못하고 3대 레이블(Universal·Sony·Warner)에서 라이선스. <b>프리미엄 매출의 약 70%가 로열티로 유출</b>, 2025년 레이블에 $110억+ 지급(단일 소매기업 역사상 최대). 즉 <b>공급자(레이블)가 가격결정력을 쥐고 있어 총이익률이 구조적으로 ~30%대에 갇힘</b> — Visa(60%)·NVDA(75%)와 근본적으로 다른 "남의 성(城)에서 장사하는" 구조.</li>
+</ul>
+<h3>1-3. 장기 전망 — 마진 확장의 진짜 동력</h3>
+<p>주가 논리는 "구독자 수"에서 "<b>총이익률 확장</b>"으로 이동했습니다. 동력은 ① <b>오디오북</b>(스트림당 로열티가 아닌 타이틀당 정액 라이선스 → 청취해도 로열티 부담↓), ② 팟캐스트 수익화, ③ 광고, ④ 가격 인상(3년 연속). 오디오북이 음악 대비 마진 구조가 훨씬 우월해, 청취 믹스가 오디오북으로 이동할수록 마진이 오르는 구조가 실증되고 있습니다.</p>
+
+<div class="pagebreak"></div>
+
+<h2>Part 2. 뉴스 분석 (최근 12개월)</h2>
+<ul>
+<li><b>2026.1.1 — Daniel Ek CEO 이임, 공동 CEO 체제</b>: 창업자 Ek가 약 20년 만에 CEO에서 물러나 <b>Executive Chairman(집행 의장)</b>으로 이동, 자본배분·방향성에 집중. Gustav Söderström·Alex Norström 공동 CEO 체제. <i>해석: "유럽식 의장" 역할로 완전 이탈은 아니나, 창업자 주도 문화의 전환은 실행 리스크. 시장은 대체로 우호적으로 소화.</i></li>
+<li><b>2026 Q1 — 미국 프리미엄 가격 인상($12.99+)</b>: 3년 연속 인상. 인상에도 낮은 이탈률(churn) → <b>가격결정력 입증</b>. <i>해석: ARPU·매출·마진에 긍정. Ek는 "천천히 올려 고객 유지가 낫다"며 점진적 인상 기조.</i></li>
+<li><b>1Q26 실적(기록적 마진)</b>: 매출 €4.53B(+8%, 환율중립 +14%), 영업이익 €715M(영업마진 15.8%, 가이던스 상회), 총이익률 33.0%(분기 최고), MAU 761M(+12%, 가이던스 상회). <i>해석: 마진 확장 스토리 실증. 단, 광고 매출은 -5%로 부진.</i></li>
+<li><b>2026.6 — "Reserved" 콘서트 티켓 우선권 출시(Live Nation 제휴)</b>: 프리미엄 구독자에게 티켓 우선 예매. <i>해석: 슈퍼팬 수익화·라이브 생태계 확장 시도. 별도 슈퍼팬 티어는 지연/보류.</i></li>
+<li><b>MLC 소송(€410M 잠재 노출)</b>: Mechanical Licensing Collective가 2025.10 수정 제소 — Spotify가 오디오북 번들 티어를 부당 평가해 로열티를 과소 지급했다는 주장. <i>해석: 오디오북發 마진 확장 전략의 법적 리스크. 마진 개선의 정당성 자체가 쟁점.</i></li>
+</ul>
+
+<h2>Part 3. 기업 분석 (Analyst View)</h2>
+<h3>3-1. 비즈니스 모델과 해자</h3>
+<p>무료(광고)→프리미엄(구독) 퍼널의 프리미엄(freemium) 모델. 매출의 대부분이 <b>반복적 구독 매출</b>이라 경기 방어력이 상대적으로 양호(월 $12는 불황에도 잘 안 끊는 "값싼 습관"). 다만 앞서 지적한 대로 <b>콘텐츠 원가(로열티)를 통제하지 못해 총이익률이 구조적으로 제한</b>됩니다. 성장은 ① 신흥국 MAU 확대, ② 가격 인상, ③ 오디오북·광고 등 고마진 인접 영역으로의 믹스 이동에 의존.</p>
+<h3>3-2. 경영진 — Ek → 공동 CEO 체제</h3>
+<p>Daniel Ek(창업자)가 2026.1 Executive Chairman으로 이동, 자본배분·전략 총괄. 실무는 Söderström(제품·기술)·Norström(비즈니스) 공동 CEO. 두 사람 모두 오래 근무한 내부 인사라 급격한 전략 변화 가능성은 낮으나, <b>창업자 카리스마의 부재와 공동 CEO 구조의 의사결정 효율</b>은 지켜봐야 할 리스크. Ek가 완전히 손을 뗀 것은 아니라는 점은 완충.</p>
+<h3>3-3. 밸류에이션과 타 애널리스트 견해 비판</h3>
+<ul>
+<li><b>현재 멀티플</b>: <b>선행 PER 약 35배</b>. 미국 엔터테인먼트 업종 평균(17배)의 약 2배. 절대·상대 모두 프리미엄.</li>
+<li><b>컨센서스</b>: 20~40명 기준 <b>Buy</b>, 목표가 중앙값 $599~608(현재가 대비 +20% 내외), 최고 $727·최저 $395로 편차 큼. AI 제품 로드맵·수익화 도구·장기 재무목표를 근거로 목표가 상향 중.</li>
+<li><b>비판 1 — "저평가" 논리(강세)의 취약점</b>: TIKR 등은 "마진 확장이 진짜 스토리라 저평가"라 주장. 영업이익 급증으로 PEG를 보면 35배가 정당화될 수 있는 것은 사실이나, 이는 <b>마진 확장이 계속된다는 전제</b>에 의존. 로열티 70% 구조상 총이익률 상단은 30%대 중반으로 <b>천장이 낮고</b>, 오디오북 믹스 효과도 MLC 소송으로 불확실.</li>
+<li><b>비판 2 — 목표가 편차($395~727)</b>가 시사하듯 시장도 "성장의 지속성"에 합의하지 못함. 광고 -5%·구독자 증가율 둔화(북미 프리미엄 구독자 감소 보도)는 성장의 질에 물음표.</li>
+<li><b>균형</b>: Spotify는 "훌륭한 소비자 프랜차이즈"이나, <b>공급자(레이블)가 마진 상단을 쥔 채 프리미엄 밸류에이션을 받는</b> 구조. 밸류에이션이 완벽한 실행을 이미 반영.</li>
+</ul>
+
+<div class="pagebreak"></div>
+
+<h2>Part 4. 재무 분석</h2>
+<ul>
+<li><b>손익</b>: 1Q26 매출 €4.53B(+8%, 환율중립 +14%), 영업이익 €715M(영업마진 15.8%), 총이익률 33.0%(기록). 프리미엄 매출 +10%, 광고 매출 -5%.</li>
+<li><b>2Q26 가이던스</b>: 매출 ~€4.8B(+15%), MAU 778M, 구독자 299M, 영업이익 €630M(영업마진 약 13% 수준). 총이익률은 33%대 지속 전망.</li>
+<li><b>현금흐름(핵심 전환)</b>: <b>FCF가 2022년 €21M → 2025년 €2.9B로 폭발</b>, 1Q26 단일 분기 €824M, TTM €3.2B. "현금 소각 기업 → 현금창출 기업" 전환 완료. 이는 실적의 질을 뒷받침.</li>
+<li><b>재무구조</b>: 현금·단기투자 €8.8B, 사실상 순현금·저부채. 재무 리스크 낮음.</li>
+<li><b>배당</b>: 무배당(성장·자사주 재투자 우선). 배당 방어력은 없음.</li>
+<li><b>장래 전망</b>: 가격 인상 + 오디오북·광고 믹스 + MAU 성장이 매출·마진을 견인. 관건은 ① 총이익률이 30%대 중반 천장을 넘을 수 있는가(레이블 재협상·오디오북 확대), ② MLC 소송(€410M) 결과. 장기 EPS 고성장은 가능하나 <b>마진 천장이 상방을 제한</b>.</li>
+</ul>
+
+<h2>Part 5. 기술적·퀀트 분석</h2>
+<div class="warn"><b>데이터 한계 고지</b>: 이 환경은 가격 API 직접 접근이 차단되어 공개 기술분석 페이지 공표치를 종합했으며, 소스 간 기준일이 달라 수치가 혼재합니다. 매매 전 HTS 차트에서 재확인하세요.</div>
+<ul>
+<li><b>가격 위치</b>: 약 $486. 52주 레인지 $405~785 — <b>고점 대비 약 -38% 조정</b>. 저점($405)보다는 위. 열광 국면은 이미 식은 상태.</li>
+<li><b>추세</b>: 20일 EMA $470.65·50일 EMA $476.15를 <b>아래에서 재돌파</b>(초기 회복 신호)했으나, 200일 EMA $528.71은 현재가보다 $43 높아 <b>장기 추세는 여전히 약세(200일선 하회)</b>. 단기 회복 vs 장기 약세의 혼조.</li>
+<li><b>모멘텀</b>: 일간 RSI 약 55.5 — 완만한 강세, 과열 아님. 상방 여지 존재하나 추세 전환 미확정.</li>
+<li><b>변동성</b>: 일간 ATR $18.52로 하루 $15~20 스윙이 정상. 실적·소송 헤드라인에 갭 변동 큰 고변동성 종목.</li>
+<li><b>매매 타이밍 제안</b>:
+  <ul>
+  <li>50일선($476) 위 유지가 회복 시나리오의 전제 — 이탈 시 회복 논리 약화.</li>
+  <li>1차 매수: $455~476 (EMA20/50 지지 재확인 시). 2차: $405~425 (52주 저점 부근).</li>
+  <li>손절 기준: $400 (52주 저점 이탈) 종가.</li>
+  <li>목표가: 1차 $510(볼린저 상단), 2차 $528(200일선 회복), 확장 $599(컨센서스). 200일선 회복이 추세 전환의 관문.</li>
+  <li>다음 촉매: 2Q26 실적(구독자·마진) + MLC 소송 진행.</li>
+  </ul>
+</li>
+</ul>
+
+<h2>Part 6. 종합 결론</h2>
+<div class="verdict-box">
+  <div class="rating">투자의견: 보유 (HOLD) — 매수/매도가 아닌 이유</div>
+  <div style="margin-top:10px; font-size:10pt;">
+  <b>매수가 아닌 이유 (사용자 기준 적용)</b>: ① 선행 PER 35배로 엔터 업종의 2배 프리미엄 — 사용자님이 감점하는 고밸류, ② 프리미엄 매출 70%가 로열티로 나가 <b>레이블이 마진 천장을 통제</b>(자기 성이 아님) → 하방·상방 모두 남에게 의존, ③ MLC 소송(€410M)이 마진 확장 전략의 정당성을 위협, ④ 200일선 하회의 장기 약세 추세 + 광고 부진·북미 구독자 둔화, ⑤ 창업자 Ek 이임 전환 리스크.<br><br>
+  <b>매도가 아닌 이유</b>: ① 구독형 반복 매출의 <b>방어적 수요</b>(불황에도 잘 안 끊는 습관) — 사용자님 방어력 선호에 부합하는 면, ② 시장 1위(MAU 761M·32%)의 규모·데이터 해자, ③ <b>FCF 흑자 전환(TTM €3.2B)</b>의 구조적 질 개선, ④ 가격결정력 입증(3년 연속 인상, 낮은 churn), ⑤ 순현금·저부채, ⑥ 컨센서스 Buy·+20% 상방. 흑자 전환의 초입에서 1위 프랜차이즈를 파는 것은 시기상조.<br><br>
+  <b>정리</b>: Spotify는 방어적 구독 수요라는 점에서 NVDA·STRL 같은 테마주보다는 사용자님 성향에 가깝지만, <b>레이블이 마진을 쥔 구조 + 35배 프리미엄</b>이 "합리적 밸류 + 하방 방어" 기준을 완전히 충족하진 못함. 보유 중이면 유지, 신규는 눌림목($455~476, 나아가 $405~425) 분할로 리스크 관리.<br><br>
+  <b>포지셔닝 제안</b>: 200일선($528) 회복 전까지는 추세 미확정 — 추격보다 분할·저가 매수. 사용자 성향상 방어적 코어는 Visa·Duke가 우선, Spotify는 성장 위성 포지션.
+  </div>
+</div>
+<h3>시나리오별 대응</h3>
+<table>
+<tr><th>시나리오</th><th>권장 대응</th></tr>
+<tr><td>오디오북·가격인상으로 마진 지속 확장</td><td>35배 정당화 — 200일선 회복 시 편입 확대, 목표 $599</td></tr>
+<tr><td>MLC 소송 패소 / 레이블 재협상 불리</td><td>마진 천장 확인 → 프리미엄 디스카운트, 비중 축소</td></tr>
+<tr><td>구독자 성장 둔화 지속 (북미 감소)</td><td>성장 프리미엄 약화 — 밸류에이션 부담 부각, 관망</td></tr>
+<tr><td>사용자 성향(방어+밸류) 최우선</td><td>방어적 코어는 Visa·Duke 우선. SPOT은 밸류 부담·마진 천장으로 위성 한정</td></tr>
+</table>
+
+<h3 style="margin-top:26px;">주요 출처</h3>
+<p class="small">
+Spotify IR·6-K (1Q26 실적, 가이던스) · IFPI Global Music Report 2026 · Variety·Music Business Worldwide (가격 인상, Ek 이임, Reserved) · CNBC (Ek → 공동 CEO) · 24/7 Wall St.·TIKR·Alphastreet (FCF 전환·마진 확장) · stockanalysis.com·Simply Wall St (밸류에이션·목표가) · Barchart·Investing.com·Cryptonomist (기술적 지표) · MLC 소송 보도 외.<br><br>
+본 보고서는 정보 제공 목적이며 투자 권유가 아닙니다. 모든 투자 판단과 책임은 투자자 본인에게 있습니다. 기술적 지표는 소스 간 기준일 불일치가 있어 매매 전 재확인 필요. 유료 리서치(모틀리풀·시킹알파·코이핀) 자료 제공 시 교차검증 업데이트 가능.
+</p>
+
+</div>
+</body>
+</html>
