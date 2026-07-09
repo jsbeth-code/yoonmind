@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>NVIDIA (NVDA) 종합 투자 분석 보고서</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    font-family: "Noto Sans CJK KR", "Noto Sans KR", sans-serif;
+    font-size: 10.5pt; line-height: 1.65; color: #1a2332; margin: 0;
+  }
+  .page { padding: 0 8mm; }
+  h1 { font-size: 21pt; color: #1f6b2e; margin: 0 0 4px 0; line-height:1.3; }
+  h2 { font-size: 14pt; color: #1f6b2e; border-bottom: 2.5px solid #3fa758; padding-bottom: 5px; margin-top: 30px; }
+  h3 { font-size: 11.5pt; color: #256b30; margin-top: 20px; margin-bottom: 8px; }
+  .subtitle { color: #5a6b80; font-size: 11pt; margin-bottom: 2px; }
+  .meta { color: #8494a8; font-size: 9pt; margin-bottom: 24px; }
+  table { border-collapse: collapse; width: 100%; margin: 12px 0; font-size: 9.5pt; }
+  th { background: #16401f; color: #fff; padding: 7px 9px; text-align: left; font-weight: 700; }
+  td { border: 1px solid #d5dde8; padding: 6px 9px; vertical-align: top; }
+  tr:nth-child(even) td { background: #f1f8f3; }
+  .verdict-box { background: #16401f; color: #fff; border-radius: 10px; padding: 18px 22px; margin: 18px 0; }
+  .verdict-box .rating { font-size: 17pt; font-weight: 800; color: #b6f0c4; }
+  .warn { background: #fff7e8; border-left: 4px solid #e8a020; padding: 10px 14px; margin: 12px 0; font-size: 9.5pt;}
+  .info { background: #eef7f0; border-left: 4px solid #3fa758; padding: 10px 14px; margin: 12px 0; font-size: 9.5pt;}
+  ul, ol { padding-left: 20px; }
+  li { margin-bottom: 4px; }
+  .small { font-size: 8.5pt; color: #6b7a8e; }
+  .kpi-row { display: flex; gap: 10px; margin: 14px 0; }
+  .kpi { flex: 1; background: #eef7f0; border: 1px solid #c9e6d1; border-radius: 8px; padding: 10px 12px; text-align: center; }
+  .kpi .v { font-size: 13pt; font-weight: 800; color: #16401f; }
+  .kpi .l { font-size: 8.5pt; color: #5a6b80; }
+  .pagebreak { page-break-before: always; }
+</style>
+</head>
+<body>
+<div class="page">
+
+<h1>NVIDIA (NVDA)<br>종합 투자 분석 보고서</h1>
+<div class="subtitle">AI 반도체의 절대군주 — "싸 보이는 밸류에이션"이 곧 리스크 신호인 역설</div>
+<div class="meta">작성일: 2026년 7월 8일 | 분석 프레임: 섹터 / 뉴스 / 기업 / 재무 / 기술적·퀀트 / 종합판단 | 상장: NASDAQ | 현재가 약 $201.68 | 회계연도: 1월 결산(현재 FY27 진행)</div>
+
+<div class="verdict-box">
+  <div style="font-size:9pt; color:#a8d8b4; margin-bottom:4px;">종합 투자의견 (최종 판단 전문가)</div>
+  <div class="rating">NVIDIA (NVDA) — 보유 (HOLD)</div>
+  <div style="margin-top:8px; font-size:10pt;">
+    기업의 질(90%+ 점유율, CUDA 락인, FCF $96.7B, 순현금)은 <b>역사상 최고 수준의 반도체 프랜차이즈</b>. 선행 PER도 약 20배로 S&P500 평균 근처까지 압축돼 표면상 저렴. 그러나 사용자님 기준의 핵심(테마 의존 감점 + 하방 방어력)에서 NVDA는 <b>매출의 ~93%가 데이터센터, 4개 고객이 매출 61%, $800B 규모 순환출자(circular financing) 생태계의 진앙</b>이라는 극단적 집중을 안고 있음. "선행 PER 20배"는 시장이 <b>피크 실적(peak earnings) 가능성을 반영</b>한 결과 — AI capex가 정상화되면 이익(E)과 멀티플(P)이 동시에 무너지는 이중 위험. 따라서 <b>보유 중이면 유지, 신규 진입은 이 리스크를 인지한 소액·분할만</b>. 컨센서스는 Strong Buy·목표가 $300+(+50%)로 본 의견보다 훨씬 낙관적.
+  </div>
+</div>
+
+<div class="kpi-row">
+  <div class="kpi"><div class="v">$81.6B</div><div class="l">FQ1'27 매출 (+85% YoY)</div></div>
+  <div class="kpi"><div class="v">$75.2B</div><div class="l">FQ1'27 데이터센터 (+92%)</div></div>
+  <div class="kpi"><div class="v">$91B</div><div class="l">FQ2'27 매출 가이던스</div></div>
+  <div class="kpi"><div class="v">75%</div><div class="l">총이익률 (non-GAAP)</div></div>
+  <div class="kpi"><div class="v">$96.7B</div><div class="l">FY26 잉여현금흐름</div></div>
+</div>
+
+<h2>Part 1. 섹터 분석 — AI 가속기라는 신(新)금맥</h2>
+<h3>1-1. 시장 구조: 사실상 독점</h3>
+<p>AI 학습·추론용 가속기(GPU) 시장에서 NVIDIA는 <b>약 80~92% 점유율의 사실상 독점</b>입니다. 핵심 해자는 하드웨어가 아니라 <b>CUDA 소프트웨어 생태계</b> — 20년간 축적된 개발자·라이브러리·프레임워크 락인으로, 경쟁사가 칩 성능을 따라잡아도 소프트웨어 전환비용이 진입을 막습니다. 연간 아키텍처 갱신(Blackwell → Vera Rubin → Rubin Ultra → Feynman)으로 성능 우위를 지속 확대. 2026년 고사양 GPU 출하의 70%+가 Blackwell.</p>
+<h3>1-2. 경쟁 구도와 진짜 위협</h3>
+<table>
+<tr><th>경쟁 축</th><th>현황</th><th>위협도</th></tr>
+<tr><td>AMD (MI350X 등)</td><td>2025년 Instinct 매출 $7~8B, 점유율 5~7%</td><td>중 — 존재하나 CUDA 격차 큼</td></tr>
+<tr><td>하이퍼스케일러 커스텀 실리콘</td><td>Google TPU, AWS Trainium, Broadcom ASIC — 기가와트급 양산 진입</td><td><b>높음</b> — 최대 고객이 곧 최대 경쟁자</td></tr>
+<tr><td>추론(inference) 경제성</td><td>추론 단가 하락 시 GPU 과투자 논란</td><td>중~높음</td></tr>
+</table>
+<p>가장 큰 구조적 위협은 AMD가 아니라 <b>고객(하이퍼스케일러)의 내재화</b>입니다. NVDA 매출의 절반 이상을 차지하는 빅테크가 자체 칩을 gigawatt 규모로 양산하기 시작 — "플랫폼 리스크"를 NVDA가 떠안는 구조.</p>
+<h3>1-3. 섹터 리스크 — AI capex 지속가능성 (핵심)</h3>
+<ul>
+<li><b>capex 규모</b>: 5대 클라우드·AI 기업의 2026년 합산 capex 가이던스 $635~690B(2024년의 2배+), 이 중 ~75%가 AI 인프라.</li>
+<li><b>지속가능성 경고</b>: Big4의 잉여현금흐름이 2026년 최대 90% 급감, Amazon FCF 적자 전환 전망. Morgan Stanley는 하이퍼스케일러 부채 발행이 $400B 초과 예상.</li>
+<li><b>순환출자(circular financing)</b>: NVDA→OpenAI 투자→OpenAI가 Oracle 등 클라우드에 수천억 약정→클라우드가 NVDA GPU 구매로 순환. 2026년 이 웹의 규모가 <b>$800B 이상</b>으로 추산. AI가 기대에 못 미치면 연쇄 손실 + 반독점 규제 표적 위험.</li>
+<li><b>수요-매출 괴리</b>: 기업 AI 도입은 넓으나(80~90%가 일부 기능 사용) 얕음(40% 미만만 파일럿 넘어 확장). 과잉 구축 시 클라우드 ROI 훼손 → GPU 발주 둔화 가능.</li>
+</ul>
+
+<div class="pagebreak"></div>
+
+<h2>Part 2. 뉴스 분석 (최근 12개월)</h2>
+<ul>
+<li><b>중국 수출 규제 롤러코스터</b>: 2025.4 미국이 H20 칩까지 라이선스 요구 → NVDA는 FQ1'26에 $4.5B 재고 상각 + FQ2 $8B 매출 상실. Jensen Huang은 "중국 AI칩 점유율이 95%→0으로 갔고 규제가 역효과"라고 비판. 2025.7 트럼프 행정부가 H20 재개 허용으로 반전, GTC 2026에서 H200 중국 주문 재개·생산 재가동 발표. <i>해석: 지정학 리스크가 실적에 실제로 수십억 달러 영향 — 변동성의 상수.</i></li>
+<li><b>FQ1'27 실적(사상 최대)</b>: 매출 $81.6B(+85%), 데이터센터 $75.2B(+92%), non-GAAP EPS $1.87, 총이익률 75%. FQ2'27 가이던스 $91B(±2%). <i>해석: Blackwell 300 ramp + InfiniBand·Spectrum-X·NVLink 수요. 성장은 여전히 폭발적.</i></li>
+<li><b>주주환원 강화</b>: 분기배당 $0.01→$0.25로 대폭 인상, 자사주 매입 한도 <b>$80B 추가</b> 승인. <i>해석: 현금창출이 압도적이라 성장주에서 성장+환원 병행 국면 진입.</i></li>
+<li><b>순환출자·AI 버블 논쟁 부상</b>: NVDA-OpenAI-Oracle 자금 루프가 2026년 언론·규제의 집중 조명. <i>해석: 밸류에이션 디스카운트(선행 PER 압축)의 심리적 배경.</i></li>
+<li><b>Rubin 지연</b>: HBM4 검증·CX8→CX9 전환·전력 문제로 Rubin 출하가 지연, 2026 고사양 비중이 29%→22%로 하향. Blackwell이 공백을 메움. <i>해석: 로드맵 실행 리스크의 신호이나 치명적이진 않음.</i></li>
+</ul>
+
+<h2>Part 3. 기업 분석 (Analyst View)</h2>
+<h3>3-1. 비즈니스 모델과 해자</h3>
+<p>NVDA는 GPU 하드웨어 + CUDA 소프트웨어 + 네트워킹(InfiniBand·NVLink)의 <b>풀스택 AI 인프라 플랫폼</b>입니다. 해자는 ① CUDA 생태계 락인(가장 강력), ② 연간 아키텍처 갱신의 R&D 속도, ③ 75% 총이익률이 방증하는 가격결정력. 다만 매출의 <b>~93%가 데이터센터 단일 부문</b>이고 특정 소수 고객에 집중 — 해자는 깊으나 <b>수요 기반이 극도로 좁음</b>. 이것이 사용자님 "수요 동력 분산" 선호와 정면 충돌하는 지점.</p>
+<h3>3-2. CEO — Jensen Huang</h3>
+<p>1993년 창업, 30년+ 재임한 창업자 CEO. GPU를 게임용에서 AI 컴퓨팅 표준으로 전환시킨 비전과 실행력은 역대 최고 반열. 연간 아키텍처 로드맵을 규율 있게 집행하고 지정학(중국·미국)을 능란하게 항해. 창업자 리스크(집중된 의사결정)는 있으나 현재까지는 강력한 자산. 경영진 프리미엄이 정당화되는 사례.</p>
+<h3>3-3. 밸류에이션과 타 애널리스트 견해 비판</h3>
+<ul>
+<li><b>현재 멀티플</b>: 후행 PER 약 30배, <b>선행 PER 약 19.8~21.7배</b>. Goldman Sachs는 "S&P500 평균 근처, 5년 평균 72배 대비 크게 낮아 매력적"이라 평가.</li>
+<li><b>컨센서스</b>: 38~74명 기준 압도적 <b>Strong Buy</b>(74 Buy·1 Hold·0 Sell), 평균 목표가 약 $300~310(현재가 대비 +50% 내외).</li>
+<li><b>비판 1 — "싸다"는 논리의 함정</b>: 선행 PER 20배가 낮은 이유는 시장이 <b>현재 이익을 사이클 정점(peak)으로 의심</b>하기 때문. 경기민감·초집중 종목의 낮은 PER은 종종 "값싼 함정(value trap)"의 전형 — capex가 꺾이면 E가 급감하고 멀티플도 재하향되는 <b>이중 압박</b>. Goldman의 "21.7배 저렴" 논리는 이익의 지속성을 무결점으로 가정.</li>
+<li><b>비판 2 — 목표가 $300+의 낙관</b>: 순환출자·고객 내재화·capex 지속가능성을 낙관 시나리오가 충분히 할인하지 않음. 74명 중 매도 0명이라는 극단적 낙관 자체가 역발상 관점에선 경계 신호.</li>
+<li><b>균형(강세 측 반론)</b>: 반대로 AI가 진짜 산업혁명이라면 20배는 역사적 저가이고, CUDA 해자는 최소 수년 지속되며, $96.7B FCF·순현금은 어떤 조정도 견딤. 즉 이 종목은 "밸류에이션 논쟁"이 아니라 <b>"AI capex 사이클의 지속 기간"에 대한 순수 베팅</b>.</li>
+</ul>
+
+<div class="pagebreak"></div>
+
+<h2>Part 4. 재무 분석</h2>
+<ul>
+<li><b>손익</b>: FY26 매출 $215.9B(+66%), 순이익 $120.1B(+65%). 총이익률 71.1%, 영업이익률 60.4%, 순이익률 55.6% — 반도체 기업으로는 비현실적 수준의 수익성.</li>
+<li><b>최근 분기</b>: FQ1'27 매출 $81.6B(+85%), 데이터센터 $75.2B(+92%), non-GAAP 총이익률 75%. FQ2'27 가이던스 $91B(±2%).</li>
+<li><b>현금흐름</b>: FY26 영업현금흐름 $102.7B, <b>FCF $96.7B</b>. 자본지출 대비 압도적 현금창출.</li>
+<li><b>재무구조</b>: 순현금 약 $54.1B(현금성 자산이 부채 크게 상회). 어떤 침체도 견딜 요새형 대차대조표.</li>
+<li><b>주주환원</b>: 배당 $0.01→$0.25 인상 + $80B 자사주 매입 한도 추가. 배당수익률 자체는 낮으나 매입 규모가 큼.</li>
+<li><b>고객 집중(핵심 리스크)</b>: 상위 5개 클라우드·하이퍼스케일러가 매출 50%+, 두 고객이 36%, <b>4개 고객이 각 10%+ = 합산 61%</b>. FQ1'27부터 ACIE(AI클라우드·산업·기업·소버린) 버킷으로 다변화 시도(하이퍼스케일러:ACIE ≈ 50:50)는 긍정 신호.</li>
+<li><b>장래 전망</b>: 단기(FY27) 실적 가시성은 Blackwell 백로그로 높음. 관건은 FY28 이후 하이퍼스케일러 capex의 지속 여부와 고객 내재화 속도. 이익의 <b>절대 규모가 정점 근처일 수 있다는 점</b>이 최대 불확실성.</li>
+</ul>
+
+<h2>Part 5. 기술적·퀀트 분석</h2>
+<div class="warn"><b>데이터 한계 고지</b>: 이 환경은 가격 API 직접 접근이 차단되어 공개 기술분석 페이지 공표치를 종합했으며, 소스 간 기준일이 달라 수치가 혼재합니다(RSI 39~48 범위 등). 매매 전 HTS 차트에서 재확인하세요.</div>
+<ul>
+<li><b>가격 위치</b>: $201.68. 200일 이평 약 $190.32 위(중장기 매수 신호)이나, 20일 EMA $207·50일 EMA $205.86 아래 — <b>단기 조정·이평 하회 국면</b>. 중장기 상승추세 안에서 단기 되돌림.</li>
+<li><b>추세</b>: 현재가 &gt; 200일선 &gt; ... 단기선들이 현재가 위에 있어 <b>단기 약세·중기 강세의 혼조</b>. 완전한 정배열 회복은 미완.</li>
+<li><b>모멘텀</b>: RSI(14) 약 39~48 — 중립~약한 과매도. 과열은 완전히 해소된 상태. MACD는 소스별 혼재(시그널선 상회=강세 vs TradingView 종합 매도).</li>
+<li><b>변동성</b>: 초대형주지만 실적·중국 규제·AI 심리에 갭 변동이 큰 고베타 종목. 이벤트 드리븐 변동성 상수.</li>
+<li><b>매매 타이밍 제안</b>:
+  <ul>
+  <li>단기 반등 추격 자제. 1차 매수: $185~192 (200일선 지지 확인 구간). 2차: $165~175 (심리적 지지 + 갭 메움).</li>
+  <li>손절 기준: $178 (200일선 종가 이탈).</li>
+  <li>목표가: 1차 $240, 2차 $300(컨센서스) — 단 AI capex 사이클 지속 전제.</li>
+  <li>다음 촉매: FQ2'27 실적(8월) + 하이퍼스케일러 capex 가이던스 + 중국 H200 물량.</li>
+  </ul>
+</li>
+</ul>
+
+<h2>Part 6. 종합 결론</h2>
+<div class="verdict-box">
+  <div class="rating">투자의견: 보유 (HOLD) — 매수/매도가 아닌 이유</div>
+  <div style="margin-top:10px; font-size:10pt;">
+  <b>매수가 아닌 이유 (사용자 기준 적용)</b>: ① 매출 ~93%가 데이터센터, 4개 고객이 61% — <b>사용자님이 감점하는 "테마·고객 초집중"의 극단적 표본</b>, ② 낮은 선행 PER(20배)은 저평가가 아니라 <b>시장이 피크 실적을 의심</b>하는 신호일 수 있음(값싼 함정 리스크), ③ $800B 순환출자 생태계 + 하이퍼스케일러 capex 지속가능성(FCF 90% 급감 전망)이 사업의 근간을 위협, ④ 고객 내재화(TPU·Trainium·ASIC)라는 구조적 침식.<br><br>
+  <b>매도가 아닌 이유</b>: ① CUDA 락인·90% 점유율은 수년 내 무너질 성질이 아님, ② $96.7B FCF·순현금·75% 총이익률의 요새형 재무, ③ 밸류에이션이 버블 국면(72배)이 아닌 20배로 이미 상당히 압축, ④ 컨센서스 Strong Buy(매도 0명), 단기 촉매 부재 — 이 프랜차이즈를 20배에 파는 것은 시기상조.<br><br>
+  <b>정리</b>: NVDA는 "훌륭한 기업"이라는 데 이견이 없으나, <b>사용자님의 투자 철학(테마 의존 감점 + 하방 방어력 우선)에는 부합하지 않는 종목</b>. 역설적으로 밸류에이션이 싸 보이는 것 자체가 이 종목의 사이클·집중 리스크를 시장이 가격에 반영한 결과. 보유 중이면 우량 코어로 유지하되, 신규는 리스크를 인지한 소액·분할로 제한.<br><br>
+  <b>포지셔닝 제안</b>: 신규 진입 시 $185~192 1차, $165~175 2차 분할, 손절 $178. AI capex 균열 신호(하이퍼스케일러 가이던스 하향, 순환출자 파열) 발생 시 비중 축소. 사용자 성향상 이 종목은 "코어"보다 "위성(satellite)" 포지션이 적합.
+  </div>
+</div>
+<h3>시나리오별 대응</h3>
+<table>
+<tr><th>시나리오</th><th>권장 대응</th></tr>
+<tr><td>AI capex 슈퍼사이클 지속 (강세)</td><td>20배 선행 PER은 역사적 저가 — 눌림목 보유 확대, 목표 $300</td></tr>
+<tr><td>하이퍼스케일러 capex 둔화 / 순환출자 파열</td><td>이익·멀티플 이중 압박 — 비중 축소, 이 시나리오가 HOLD 판단의 핵심 근거</td></tr>
+<tr><td>고객 내재화 가속 (TPU·ASIC 점유율 상승)</td><td>장기 점유율 훼손 신호 — 구조적 재평가, 성장 프리미엄 하향</td></tr>
+<tr><td>사용자 성향(방어+분산) 최우선</td><td>NVDA는 기준 부합도 낮음(STRL과 유사) — 위성 포지션·소액 한정 권고. 방어적 코어는 Visa·Duke가 적합</td></tr>
+</table>
+
+<h3 style="margin-top:26px;">주요 출처</h3>
+<p class="small">
+NVIDIA IR·8-K (FQ1'27·FY26 실적, 가이던스, 배당·자사주) · TrendForce (Blackwell/Rubin 출하) · Goldman Sachs (선행 PER 코멘트) · Bloomberg·Fortune (순환출자, capex) · Futurum·Morgan Stanley (capex 지속가능성) · Silicon Analysts (AMD 비교) · stockanalysis.com·MacroTrends (밸류에이션·재무) · Investing.com·Barchart·Trendlyne (기술적 지표) · Qz·Built In (중국 수출 규제) 외.<br><br>
+본 보고서는 정보 제공 목적이며 투자 권유가 아닙니다. 모든 투자 판단과 책임은 투자자 본인에게 있습니다. 기술적 지표는 소스 간 기준일 불일치가 있어 매매 전 재확인 필요. 유료 리서치(모틀리풀·시킹알파·코이핀) 자료 제공 시 교차검증 업데이트 가능.
+</p>
+
+</div>
+</body>
+</html>
