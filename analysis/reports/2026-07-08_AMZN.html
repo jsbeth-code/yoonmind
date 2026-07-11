@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>Amazon (AMZN) 종합 투자 분석 보고서</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    font-family: "Noto Sans CJK KR", "Noto Sans KR", sans-serif;
+    font-size: 10.5pt; line-height: 1.65; color: #1a2332; margin: 0;
+  }
+  .page { padding: 0 8mm; }
+  h1 { font-size: 21pt; color: #b8560a; margin: 0 0 4px 0; line-height:1.3; }
+  h2 { font-size: 14pt; color: #b8560a; border-bottom: 2.5px solid #ff9900; padding-bottom: 5px; margin-top: 30px; }
+  h3 { font-size: 11.5pt; color: #9c4a08; margin-top: 20px; margin-bottom: 8px; }
+  .subtitle { color: #5a6b80; font-size: 11pt; margin-bottom: 2px; }
+  .meta { color: #8494a8; font-size: 9pt; margin-bottom: 24px; }
+  table { border-collapse: collapse; width: 100%; margin: 12px 0; font-size: 9.5pt; }
+  th { background: #232f3e; color: #fff; padding: 7px 9px; text-align: left; font-weight: 700; }
+  td { border: 1px solid #dcd9d3; padding: 6px 9px; vertical-align: top; }
+  tr:nth-child(even) td { background: #fbf6ef; }
+  .verdict-box { background: #232f3e; color: #fff; border-radius: 10px; padding: 18px 22px; margin: 18px 0; }
+  .verdict-box .rating { font-size: 17pt; font-weight: 800; color: #ff9900; }
+  .warn { background: #fff7e8; border-left: 4px solid #e8a020; padding: 10px 14px; margin: 12px 0; font-size: 9.5pt;}
+  .info { background: #fff4e6; border-left: 4px solid #ff9900; padding: 10px 14px; margin: 12px 0; font-size: 9.5pt;}
+  ul, ol { padding-left: 20px; }
+  li { margin-bottom: 4px; }
+  .small { font-size: 8.5pt; color: #6b7a8e; }
+  .kpi-row { display: flex; gap: 10px; margin: 14px 0; }
+  .kpi { flex: 1; background: #fff4e6; border: 1px solid #f0dcc0; border-radius: 8px; padding: 10px 12px; text-align: center; }
+  .kpi .v { font-size: 13pt; font-weight: 800; color: #232f3e; }
+  .kpi .l { font-size: 8.5pt; color: #5a6b80; }
+  .pagebreak { page-break-before: always; }
+</style>
+</head>
+<body>
+<div class="page">
+
+<h1>Amazon (AMZN)<br>종합 투자 분석 보고서</h1>
+<div class="subtitle">리테일·AWS·광고의 3엔진 컴파운더 — 마진은 사상 최고, FCF는 95% 증발</div>
+<div class="meta">작성일: 2026년 7월 8일 | 분석 프레임: 섹터 / 뉴스 / 기업 / 재무 / 기술적·퀀트 / 종합판단 | 상장: NASDAQ | 현재가 약 $243 | 시가총액 약 $2.6조</div>
+
+<div class="verdict-box">
+  <div style="font-size:9pt; color:#c8b8a0; margin-bottom:4px;">종합 투자의견 (최종 판단 전문가)</div>
+  <div class="rating">Amazon (AMZN) — 매수 (BUY)</div>
+  <div style="margin-top:8px; font-size:10pt;">
+    사용자님 기준(수요 분산)에 부합하는 <b>3개 엔진(리테일·AWS·광고) 컴파운더</b>. ① AWS(+28%, 15분기 만에 최고 성장)·광고(TTM $70B+, 마진 70%+)·리테일(로봇으로 북미 마진 9%로 구조적 확장)의 <b>다각화</b>, ② Trainium3 자체 칩으로 AI 수직통합, ③ 규율형 CEO(Jassy)의 효율 개선. 다만 ① capex $200B 급증으로 <b>FCF가 $26B→$1.2B로 95% 증발</b>(ROI 미검증)이 최대 리스크, ② 선행 PER 약 29배로 GOOGL보다 비싸고 순마진(11%)은 낮음, ③ AWS가 3대 클라우드 중 <b>가장 느린 성장</b>(GCP 63%·Azure 40% 대비 28%). 컨센서스 Buy(매도 0명)·목표가 $313(+27%). <b>같은 빅테크라면 밸류·마진·FCF에서 GOOGL이 근소 우위</b>이나 AMZN도 매수급.
+  </div>
+</div>
+
+<div class="kpi-row">
+  <div class="kpi"><div class="v">$181.5B</div><div class="l">1Q26 매출 (+17% YoY)</div></div>
+  <div class="kpi"><div class="v">13.1%</div><div class="l">1Q26 영업마진 (사상 최고)</div></div>
+  <div class="kpi"><div class="v">$37.6B</div><div class="l">AWS 매출 (+28%)</div></div>
+  <div class="kpi"><div class="v">37.7%</div><div class="l">AWS 영업마진</div></div>
+  <div class="kpi"><div class="v">$1.2B</div><div class="l">TTM FCF (-95% YoY)</div></div>
+</div>
+
+<h2>Part 1. 섹터 분석 — 리테일·클라우드·광고의 교차</h2>
+<h3>1-1. 사업 구조: 세 개의 엔진</h3>
+<p>Amazon은 ① <b>이커머스/리테일</b>(세계 최대 온라인 스토어 + 물류, 매출 비중 최대이나 저마진), ② <b>AWS</b>(세계 1위 클라우드, 그룹 영업이익의 대부분·고마진), ③ <b>광고</b>(TTM $70B+, 마진 70%+의 고속 성장 신엔진)로 구성됩니다. 여기에 구독(Prime), 물류(FBA), 디바이스, Leo 위성 등이 부가. <b>수요 동력이 소비·기업IT·광고로 분산</b>돼 단일 테마 의존이 아니라는 점에서 사용자님 선호에 부합.</p>
+<h3>1-2. 해자</h3>
+<ul>
+<li><b>AWS</b>: 30% 클라우드 점유 1위. 전환비용·규모·서비스 폭(SageMaker 등)이 해자. Trainium3(3nm, 전세대 4배 성능)로 AI 원가·NVDA 의존 통제 — 2026 중반까지 물량 거의 소진.</li>
+<li><b>리테일/물류</b>: 세계 최대 풀필먼트 네트워크 + 로봇(Proteus)으로 <b>북미 리테일 마진 5.6%→9.0% 구조적 확장</b>. 당일배송·자동화가 원가를 낮춤.</li>
+<li><b>광고</b>: 구매 의도 데이터 기반 검색광고(Sponsored Products +23%)로 Google·Meta에 이은 3대 디지털 광고. 마진 70%+로 전사 수익성 견인.</li>
+</ul>
+<h3>1-3. 리스크 (경제·경쟁·자본)</h3>
+<ul>
+<li><b>capex ROI(최대 리스크)</b>: 2026 capex ~$200B(AI·칩·로봇·위성). 투자가 이익·현금으로 회수되는 시점 불확실 → FCF 급감.</li>
+<li><b>클라우드 상대 열위</b>: AWS는 규모 1위이나 성장률 28%로 GCP(63%)·Azure(40%)에 뒤짐 — 장기 점유율 잠식 우려.</li>
+<li><b>리테일 경기민감</b>: 소비재 노출로 경기·소비 둔화 시 리테일 부문 타격(빅테크 중 상대적으로 경기민감).</li>
+<li><b>규제·노동</b>: 반독점(마켓플레이스 관행)·노조·물류 노동 이슈 상존.</li>
+</ul>
+
+<div class="pagebreak"></div>
+
+<h2>Part 2. 뉴스 분석 (최근 12개월)</h2>
+<ul>
+<li><b>1Q26 실적(마진 사상 최고)</b>: 매출 $181.5B(+17%), 영업이익 $23.9B(<b>영업마진 13.1% 사상 최고</b>). AWS $37.6B(+28%, 15분기 만에 최고), 연환산 런레이트 $150B, AWS AI 매출 연환산 $15B. <i>해석: AWS 재가속 + 마진 개선. 그러나 발표 후 주가는 capex 부담으로 소폭 하락.</i></li>
+<li><b>FCF 붕괴</b>: TTM 잉여현금흐름이 $26B→<b>$1.2B로 95% 급감</b>(1분기 capex $43.2B). <i>해석: "종이 이익은 좋으나 현금은 전부 재투자". 시장이 가장 주시하는 지표. AI ROI 검증 전까지 FCF는 눌림.</i></li>
+<li><b>리테일 마진 구조 개선</b>: 로봇(Proteus)·당일배송으로 북미 리테일 마진 5.6%→9.0%. <i>해석: 저마진 리테일의 수익성 개선은 밸류에이션 재평가 요인.</i></li>
+<li><b>Project Dawn(구조조정)</b>: Jassy가 <b>1.6만 명 본사 인력 감축</b>으로 관료제 축소, "Day 1" 복귀 추진. <i>해석: 규율·효율 강화 신호. 마진 개선의 배경.</i></li>
+<li><b>Trainium3 출시</b>: 3nm 공정, 전세대 4배 성능, 2026 중반까지 물량 거의 소진. <i>해석: AI 원가 자립 + NVDA 의존 축소 + AWS AI 경쟁력.</i></li>
+<li><b>광고 $70B 돌파</b>: Sponsored Products +23%, 에이전틱 커머스·AI 광고툴이 견인. <i>해석: 고마진 광고가 전사 수익성의 숨은 동력.</i></li>
+</ul>
+
+<h2>Part 3. 기업 분석 (Analyst View)</h2>
+<h3>3-1. 비즈니스 모델과 해자</h3>
+<p>"저마진 리테일로 고객을 모으고, 고마진 AWS·광고로 돈을 번다"는 구조. 실질 이익의 대부분은 <b>AWS(영업마진 37.7%) + 광고(70%+)</b>에서 나오며, 리테일은 규모·물류·Prime 락인으로 방어. 3개 엔진의 조합이 <b>수요 다각화 + 이익 다각화</b>를 동시에 제공. 핵심 질문은 "$200B capex가 AWS·AI 매출로 회수되는가"이며, AWS 재가속(28%)·AI 런레이트($15B)는 초기 긍정 신호이나 FCF 회수는 미검증.</p>
+<h3>3-2. CEO — Andy Jassy</h3>
+<p>AWS를 세계 1위로 키운 뒤 2021년 Bezos에게서 CEO 승계. "규율 있는 빌더(disciplined builder)"로, 실험적 확장보다 <b>마진·효율·자본배분 규율</b>에 집중(Project Dawn 감원, 저수익 사업 정리). Bezos의 그늘에서 벗어나 독자 리더십 확립. 사용자님이 선호하는 "규율형 경영"에 부합.</p>
+<h3>3-3. 밸류에이션과 타 애널리스트 견해 비판</h3>
+<ul>
+<li><b>현재 멀티플</b>: 후행 PER 약 28~29배, <b>선행 PER 약 29배</b>. GOOGL(24~27배)보다 다소 비싸고, 순이익률(연 11.2% 영업)도 GOOGL(37.9% 순)보다 낮음. 단 Amazon은 감가상각·재투자로 이익이 보수적으로 계상되는 특성(현금창출력 대비 저평가 논리).</li>
+<li><b>컨센서스</b>: 41~66명 기준 <b>Buy</b>(62 Buy·4 Hold·0 Sell), 평균 목표가 약 $313(현재가 대비 +27%), TD Cowen $340(+39%).</li>
+<li><b>비판 1 — FCF를 무시하는 강세론</b>: "FCF 95% 급감을 시장이 눈감았다"는 지적(24/7 Wall St.). 강세론은 capex를 "미래 AWS 매출의 선투자"로 정당화하나, <b>ROI가 확인되기 전까지는 신뢰의 영역</b>. capex가 계속 증가하면 FCF 회복이 지연될 수 있음.</li>
+<li><b>비판 2 — AWS 성장 열위</b>: 목표가 $340대는 AWS 재가속의 지속을 가정하나, AWS는 여전히 3대 클라우드 중 <b>가장 느린 성장</b>. GCP·Azure가 점유율을 잠식하는 구도라면 장기 프리미엄이 약화.</li>
+<li><b>균형</b>: Amazon은 "이익의 질(AWS·광고)"과 "성장의 재투자(capex)"가 팽팽한 종목. 밸류에이션은 합리적 범위이나 GOOGL 대비 상대 매력은 근소 열위.</li>
+</ul>
+
+<div class="pagebreak"></div>
+
+<h2>Part 4. 재무 분석</h2>
+<ul>
+<li><b>손익</b>: 1Q26 매출 $181.5B(+17%), 영업이익 $23.9B(영업마진 13.1% 기록). FY25 영업마진 11.2%. AWS 영업마진 37.7%, 광고 TTM $70B+(마진 70%+).</li>
+<li><b>2Q26 가이던스</b>: 매출 $194~199B, 영업이익 $20~24B.</li>
+<li><b>현금흐름(핵심 리스크)</b>: capex 1분기 $43.2B, 연간 ~$200B. <b>TTM FCF가 $26B→$1.2B로 95% 급감</b>. AI 인프라·칩·로봇·Leo 위성에 대규모 투입. FCF 회복 시점이 밸류에이션의 관건.</li>
+<li><b>재무구조</b>: 현금 $86.8B vs 장기부채 $65.6B(사실상 순현금 근접). 시총 $2.6~3.0조 대비 총부채 $407B — 파산 위험 극히 낮은 요새형.</li>
+<li><b>배당</b>: 무배당(전량 재투자). 배당 방어력 없음.</li>
+<li><b>장래 전망</b>: AWS 재가속($150B 런레이트)·광고($70B+)·리테일 마진 개선(로봇)이 이익을 견인. capex가 언제 FCF로 전환되는가가 핵심. 3개 엔진의 이익 다각화로 절대 이익 성장 가시성은 높으나, <b>FCF 정상화 없이는 밸류에이션 상방 제한</b>.</li>
+</ul>
+
+<h2>Part 5. 기술적·퀀트 분석</h2>
+<div class="warn"><b>데이터 한계 고지</b>: 이 환경은 가격 API 직접 접근이 차단되어 공개 기술분석 페이지 공표치를 종합했으며, 소스 간 기준일이 달라 수치가 혼재합니다. 매매 전 HTS 차트에서 재확인하세요.</div>
+<ul>
+<li><b>가격 위치</b>: 약 $243. 단기 박스권 $240(지지)~$250(저항)에서 <b>횡보·조정 국면</b>. 50일 이평 $254.60 아래 = 단기 약세.</li>
+<li><b>추세</b>: 20일 이평 $239.68 위(단기 매수)이나 50일선 $254.60 아래(중기 약세) — <b>혼조·통합(consolidation)</b>. GOOGL이 신고가 근처인 것과 대조적으로 AMZN은 되돌림·바닥 다지기.</li>
+<li><b>모멘텀</b>: RSI(14) 약 48~49 — <b>중립</b>. 과열/과매도 아님. 방향성 부재의 횡보.</li>
+<li><b>변동성</b>: 초대형주 표준 변동성. 실적·capex 헤드라인에 갭 변동. 뉴스 심리도 혼조(50% mixed).</li>
+<li><b>매매 타이밍 제안</b>:
+  <ul>
+  <li>박스권 하단 매수 유리. 1차 매수: $235~243 (박스 지지). 2차: $215~225 (직전 저점대).</li>
+  <li>손절 기준: $210 (중기 지지 이탈) 종가.</li>
+  <li>목표가: 1차 $255(50일선 회복), 2차 $290, 확장 $313~340(컨센서스, FCF 정상화 전제).</li>
+  <li>다음 촉매: 2Q26 실적(AWS 성장·capex·FCF) + AI ROI 지표.</li>
+  </ul>
+</li>
+</ul>
+
+<h2>Part 6. 종합 결론</h2>
+<div class="verdict-box">
+  <div class="rating">투자의견: 매수 (BUY) — 강력매수/보유가 아닌 이유</div>
+  <div style="margin-top:10px; font-size:10pt;">
+  <b>매수 근거</b>: ① 리테일·AWS·광고의 <b>3엔진 다각화</b>로 사용자님 "테마 비의존" 기준에 부합, ② AWS 재가속(+28%, 15분기 최고)·광고($70B, 70% 마진)·리테일 마진 구조 개선(로봇 9%)의 다중 성장, ③ Trainium3 자체 칩의 AI 수직통합, ④ 규율형 CEO(Jassy)의 효율 경영 + 요새형 재무, ⑤ 현재가가 박스권 하단·RSI 중립으로 진입 부담 낮음.<br><br>
+  <b>강력매수가 아닌 이유</b>: ① capex $200B 급증으로 <b>FCF가 95% 증발($26B→$1.2B)</b> — ROI 미검증이 최대 불확실성, ② 선행 PER 29배로 GOOGL(24~27배)보다 비싸고 순마진도 낮음, ③ AWS가 3대 클라우드 중 <b>가장 느린 성장</b>(상대 열위), ④ 리테일 경기민감성.<br><br>
+  <b>보유가 아닌 이유</b>: 밸류에이션이 합리적 범위이고 3엔진 이익 다각화·AWS 재가속·마진 개선이 진행 중이라, 단순 보유로 방치하기엔 상방이 큼. 컨센서스도 Buy·매도 0명·+27% 목표.<br><br>
+  <b>포지셔닝 제안</b>: 박스권 하단 <b>$235~243 1차, $215~225 2차 분할 매수</b>. FCF 정상화 신호(capex 정점 통과, AWS AI 매출 가속)가 재평가 촉매. 사용자 성향상 다각화 대형주로 코어 편입 가능하나, <b>같은 빅테크 코어라면 밸류·마진·FCF·클라우드 성장에서 GOOGL을 근소 우선</b> 고려.
+  </div>
+</div>
+<h3>GOOGL vs AMZN 직접 비교 (사용자 기준)</h3>
+<table>
+<tr><th>항목</th><th>Alphabet (GOOGL)</th><th>Amazon (AMZN)</th></tr>
+<tr><td>선행 PER</td><td>약 24~27배 (더 쌈)</td><td>약 29배</td></tr>
+<tr><td>수익성</td><td>순이익률 37.9% (높음)</td><td>영업마진 11~13%</td></tr>
+<tr><td>클라우드 성장</td><td>+63% (빠름)</td><td>AWS +28% (느림, 규모 1위)</td></tr>
+<tr><td>FCF 상태</td><td>마진 압축(21%→9.2%)</td><td>95% 급감($26B→$1.2B, 더 심함)</td></tr>
+<tr><td>수요 다각화</td><td>검색·유튜브·클라우드·Waymo</td><td>리테일·AWS·광고 (경기민감 리테일 포함)</td></tr>
+<tr><td>진입 타이밍</td><td>52주 고점 근처(부담)</td><td>박스권 하단(유리)</td></tr>
+<tr><td>종합</td><td>밸류·마진·FCF 우위</td><td>진입가·리테일 마진 개선·박스 하단 매력</td></tr>
+</table>
+
+<h3 style="margin-top:22px;">시나리오별 대응</h3>
+<table>
+<tr><th>시나리오</th><th>권장 대응</th></tr>
+<tr><td>AWS AI 매출 가속 + capex 정점 통과 → FCF 정상화</td><td>재평가 촉매 — 보유 확대, 목표 $313→$340</td></tr>
+<tr><td>capex 지속 증가 + AWS 성장 둔화</td><td>FCF 회복 지연 — 비중 관리, 이 시나리오가 강력매수 아닌 핵심 이유</td></tr>
+<tr><td>소비 둔화 (리테일 타격)</td><td>리테일 경기민감 노출 — AWS·광고 방어력 확인 후 분할 매수</td></tr>
+<tr><td>사용자 성향(방어+밸류+분산) 최우선</td><td>다각화 코어 후보이나 GOOGL을 근소 우선. AMZN은 박스 하단 분할로 병행 편입</td></tr>
+</table>
+
+<h3 style="margin-top:26px;">주요 출처</h3>
+<p class="small">
+Amazon IR·8-K (1Q26 실적, AWS, capex) · CNBC·Futurum (AWS 실적) · 24/7 Wall St. (FCF 95% 급감) · Bloomberg (Jassy 리더십) · Businesstats·Statista (클라우드 점유율) · LongYield (3엔진 컴파운더) · stockanalysis.com·Simply Wall St (밸류에이션·목표가) · Investing.com·Barchart·Trendlyne (기술적 지표) · MacroTrends (FCF 이력) 외.<br><br>
+본 보고서는 정보 제공 목적이며 투자 권유가 아닙니다. 모든 투자 판단과 책임은 투자자 본인에게 있습니다. 기술적 지표는 소스 간 기준일 불일치가 있어 매매 전 재확인 필요. 유료 리서치(모틀리풀·시킹알파·코이핀) 자료 제공 시 교차검증 업데이트 가능.
+</p>
+
+</div>
+</body>
+</html>
