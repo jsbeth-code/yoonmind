@@ -73,6 +73,7 @@ MACD, RSI, 하이킨애시, 이동평균(50/200일, 골든/데드크로스), 변
 
 ## 보고서 생성 (PDF)
 
+0. **작성일은 반드시 실제 오늘 날짜를 쓸 것** — `date +%F` (예: 2026-07-14)로 오늘 날짜를 먼저 가져와서, ① 보고서 본문의 "작성일" 메타줄, ② 파일명 접두사(`YYYY-MM-DD_`), ③ Gmail 제목·본문 날짜, ④ 커밋 메시지에 **모두 동일한 실제 날짜**를 넣는다. 날짜를 하드코딩하지 말 것(과거에 전부 7/8로 잘못 찍힌 전례 있음). 세션이 며칠에 걸쳐 이어져도 각 보고서는 그날의 실제 날짜로 찍혀야 한다.
 1. `analysis/templates/report_template.html` 을 복사해 내용 채움 (스크래치패드 디렉토리에서 작업)
 2. 한글 폰트 확인: `fc-list | grep -i cjk` 에 Noto CJK 없으면 `apt-get install -y fonts-noto-cjk` (이 환경에서 검증됨. Google Fonts/jsdelivr/GitHub 릴리스 다운로드는 프록시 차단됨)
 3. PDF 변환: `analysis/scripts/build_pdf.sh <input.html> <output.pdf>` 사용 (headless chromium)
