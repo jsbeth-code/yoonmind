@@ -94,6 +94,7 @@ MACD, RSI, 하이킨애시, 이동평균(50/200일, 골든/데드크로스), 변
 
 0. **작성일은 반드시 실제 오늘 날짜를 쓸 것** — `date +%F` (예: 2026-07-14)로 오늘 날짜를 먼저 가져와서, ① 보고서 본문의 "작성일" 메타줄, ② 파일명 접두사(`YYYY-MM-DD_`), ③ Gmail 제목·본문 날짜, ④ 커밋 메시지에 **모두 동일한 실제 날짜**를 넣는다. 날짜를 하드코딩하지 말 것(과거에 전부 7/8로 잘못 찍힌 전례 있음). 세션이 며칠에 걸쳐 이어져도 각 보고서는 그날의 실제 날짜로 찍혀야 한다.
 1. `analysis/templates/report_template.html` 을 복사해 내용 채움 (스크래치패드 디렉토리에서 작업)
+1-b. **사용자가 채팅에 붙여넣은 차트/이미지를 보고서에 삽입하려면** — 붙여넣은 이미지는 디스크 파일로 저장되지 않지만, 대화 로그(`/root/.claude/projects/<...>/<session>.jsonl`)에 base64로 들어있다. 파이썬으로 그 jsonl을 파싱해 `type=="image"` 블록의 `source.data`(base64)를 디코드→PNG 저장(PIL로 webp→png 변환)한 뒤, 가장 큰/최근 이미지(차트는 대개 2000px 내외 가로형, 내가 만든 PDF 렌더 확인용 PNG는 ~60KB 세로형이라 구분됨)를 골라 `<img src="data:image/png;base64,...">`로 보고서에 인라인 삽입한다. PDF 용량을 위해 가로 1400px로 리사이즈. (검증됨 — GOOGL 보고서에 HTS 차트 삽입 성공.)
 2. 한글 폰트 확인: `fc-list | grep -i cjk` 에 Noto CJK 없으면 `apt-get install -y fonts-noto-cjk` (이 환경에서 검증됨. Google Fonts/jsdelivr/GitHub 릴리스 다운로드는 프록시 차단됨)
 3. PDF 변환: `analysis/scripts/build_pdf.sh <input.html> <output.pdf>` 사용 (headless chromium)
 4. 검증: `apt-get update && apt-get install -y poppler-utils` 후 `pdftoppm -png -r 50` 으로 1~2페이지 렌더링해 한글 깨짐/레이아웃 확인
