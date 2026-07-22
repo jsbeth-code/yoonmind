@@ -1,0 +1,887 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>포트폴리오 적립 트래커</title>
+<style>
+  :root {
+    --paper: #eef0ea;
+    --paper-raised: #f8f9f4;
+    --paper-sunken: #e4e7dd;
+    --ink: #1b2420;
+    --ink-soft: #4b564f;
+    --ink-faint: #7c887f;
+    --rule: #c7cdbf;
+    --rule-strong: #9aa693;
+    --accent: #0f6e5c;
+    --accent-soft: #d7e6dd;
+    --gold: #a9762f;
+    --gold-soft: #ece1cc;
+    --up: #2f7d55;
+    --down: #b6432f;
+    --shadow: 0 1px 2px rgba(27,36,32,0.06), 0 6px 20px rgba(27,36,32,0.05);
+    --focus: 0 0 0 3px rgba(15,110,92,0.25);
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper: #12171a; --paper-raised: #1a2124; --paper-sunken: #0e1213;
+      --ink: #e7ece6; --ink-soft: #a9b3aa; --ink-faint: #78847c;
+      --rule: #313b37; --rule-strong: #46524c;
+      --accent: #4fbf9e; --accent-soft: #1c3630;
+      --gold: #d3a259; --gold-soft: #33291a;
+      --up: #5cbf8a; --down: #e07357;
+      --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 8px 24px rgba(0,0,0,0.35);
+      --focus: 0 0 0 3px rgba(79,191,158,0.3);
+      color-scheme: dark;
+    }
+  }
+  html[data-theme="dark"] {
+    --paper: #12171a; --paper-raised: #1a2124; --paper-sunken: #0e1213;
+    --ink: #e7ece6; --ink-soft: #a9b3aa; --ink-faint: #78847c;
+    --rule: #313b37; --rule-strong: #46524c;
+    --accent: #4fbf9e; --accent-soft: #1c3630;
+    --gold: #d3a259; --gold-soft: #33291a;
+    --up: #5cbf8a; --down: #e07357;
+    --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 8px 24px rgba(0,0,0,0.35);
+    --focus: 0 0 0 3px rgba(79,191,158,0.3);
+    color-scheme: dark;
+  }
+  html[data-theme="light"] {
+    --paper: #eef0ea; --paper-raised: #f8f9f4; --paper-sunken: #e4e7dd;
+    --ink: #1b2420; --ink-soft: #4b564f; --ink-faint: #7c887f;
+    --rule: #c7cdbf; --rule-strong: #9aa693;
+    --accent: #0f6e5c; --accent-soft: #d7e6dd;
+    --gold: #a9762f; --gold-soft: #ece1cc;
+    --up: #2f7d55; --down: #b6432f;
+    --shadow: 0 1px 2px rgba(27,36,32,0.06), 0 6px 20px rgba(27,36,32,0.05);
+    --focus: 0 0 0 3px rgba(15,110,92,0.25);
+    color-scheme: light;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: -apple-system, "Segoe UI", "Noto Sans KR", "Malgun Gothic", sans-serif;
+    line-height: 1.5;
+    padding: clamp(16px, 3vw, 40px);
+  }
+  .wrap { max-width: 1180px; margin: 0 auto; }
+  a { color: var(--accent); }
+  button, input, select { font-family: inherit; }
+  :focus-visible { outline: none; box-shadow: var(--focus); border-radius: 4px; }
+
+  /* ---------------- header ---------------- */
+  header.app {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    gap: 16px;
+    flex-wrap: wrap;
+    border-bottom: 2px solid var(--ink);
+    padding-bottom: 18px;
+    margin-bottom: 22px;
+  }
+  .titleblock .eyebrow {
+    font-size: 12px; letter-spacing: 0.14em; text-transform: uppercase;
+    color: var(--accent); font-weight: 700;
+  }
+  h1 {
+    font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, "Noto Serif KR", serif;
+    font-size: clamp(24px, 3.4vw, 32px);
+    font-weight: 600; margin: 2px 0 0; letter-spacing: -0.01em;
+  }
+  .theme-toggle {
+    display: flex; gap: 2px; background: var(--paper-sunken);
+    border: 1px solid var(--rule); border-radius: 8px; padding: 3px;
+  }
+  .theme-toggle button {
+    border: none; background: transparent; color: var(--ink-faint);
+    padding: 6px 10px; border-radius: 6px; cursor: pointer; font-size: 13px;
+  }
+  .theme-toggle button.active { background: var(--paper-raised); color: var(--ink); box-shadow: var(--shadow); }
+
+  /* ---------------- settings bar ---------------- */
+  .settings-bar {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(150px,1fr));
+    gap: 1px; background: var(--rule); border: 1px solid var(--rule);
+    border-radius: 10px; overflow: hidden; margin-bottom: 20px; box-shadow: var(--shadow);
+  }
+  .setting {
+    background: var(--paper-raised); padding: 12px 16px;
+    display: flex; flex-direction: column; gap: 4px;
+  }
+  .setting label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-soft); }
+  .setting .field { display: flex; align-items: baseline; gap: 6px; }
+  .setting input {
+    border: none; background: transparent; color: var(--ink); font-weight: 600;
+    font-size: 16px; width: 100%; padding: 0; font-variant-numeric: tabular-nums;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  .setting .hint { font-size: 12px; color: var(--ink-faint); white-space: nowrap; }
+
+  /* ---------------- snapshot ---------------- */
+  .snapshot {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(160px,1fr));
+    gap: 1px; background: var(--rule); border: 1px solid var(--rule);
+    border-radius: 10px; overflow: hidden; margin-bottom: 26px; box-shadow: var(--shadow);
+  }
+  .stat { background: var(--paper-raised); padding: 14px 18px; }
+  .stat .label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--ink-soft); }
+  .stat .value {
+    font-family: ui-monospace, "SF Mono", Menlo, monospace; font-variant-numeric: tabular-nums;
+    font-size: 19px; font-weight: 700; margin-top: 3px;
+  }
+  .stat .value.warn { color: var(--down); }
+  .stat .value.ok { color: var(--up); }
+
+  section { margin-bottom: 32px; }
+  h2 {
+    font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, "Noto Serif KR", serif;
+    font-size: 18px; font-weight: 600; margin: 0 0 4px;
+    display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
+  }
+  h2 .num { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12.5px; color: var(--accent); font-weight: 700; }
+  .section-note { color: var(--ink-soft); font-size: 13px; margin: 0 0 14px; max-width: 70ch; }
+
+  /* ---------------- year picker ---------------- */
+  .year-picker {
+    display: flex; align-items: center; gap: 10px; margin-left: auto;
+  }
+  .year-picker button {
+    width: 28px; height: 28px; border-radius: 6px; border: 1px solid var(--rule);
+    background: var(--paper-raised); color: var(--ink); cursor: pointer; font-size: 14px;
+  }
+  .year-picker button:hover { background: var(--accent-soft); border-color: var(--accent); }
+  .year-picker .yr {
+    font-family: ui-monospace, "SF Mono", Menlo, monospace; font-weight: 700; font-size: 15px;
+    min-width: 52px; text-align: center;
+  }
+
+  /* ---------------- card ---------------- */
+  .card {
+    background: var(--paper-raised); border-radius: 12px; box-shadow: var(--shadow);
+    padding: 20px 22px;
+  }
+
+  /* ---------------- charts row ---------------- */
+  .chart-row { display: grid; grid-template-columns: 1.1fr 1fr; gap: 18px; }
+  @media (max-width: 760px) { .chart-row { grid-template-columns: 1fr; } }
+  .chart-card { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+  .chart-card canvas { max-width: 100%; }
+  .chart-title { font-size: 12.5px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--ink-soft); font-weight: 700; align-self: flex-start; }
+  .legend { display: flex; flex-wrap: wrap; gap: 8px 16px; justify-content: center; font-size: 12.5px; }
+  .legend .item { display: flex; align-items: center; gap: 6px; }
+  .legend .swatch { width: 10px; height: 10px; border-radius: 3px; flex-shrink: 0; }
+  .legend .pct { color: var(--ink-faint); font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+
+  /* ---------------- asset table ---------------- */
+  .table-wrap { overflow-x: auto; border-radius: 12px; box-shadow: var(--shadow); }
+  table.assets { width: 100%; border-collapse: collapse; background: var(--paper-raised); font-size: 13.5px; min-width: 860px; }
+  table.assets th, table.assets td { padding: 10px 12px; border-bottom: 1px solid var(--rule); text-align: left; vertical-align: middle; }
+  table.assets th {
+    font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--ink-soft);
+    font-weight: 700; background: var(--accent-soft); white-space: nowrap;
+  }
+  table.assets tr:last-child td { border-bottom: none; }
+  table.assets input[type="text"], table.assets input[type="number"] {
+    border: 1px solid var(--rule); background: var(--paper); color: var(--ink);
+    font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 13.5px;
+    padding: 5px 7px; border-radius: 6px; font-variant-numeric: tabular-nums;
+  }
+  table.assets input[type="number"] { width: 88px; }
+  table.assets input[type="text"] { font-family: inherit; font-weight: 600; width: 130px; }
+  .num-wrap { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+  table.assets input:hover { border-color: var(--rule); }
+  table.assets input:focus { border-color: var(--accent); background: var(--paper); }
+  .swatch-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; margin-right: 6px; flex-shrink: 0; }
+  .name-cell { display: flex; align-items: center; }
+  .num-cell { font-family: ui-monospace, "SF Mono", Menlo, monospace; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .eok-hint { color: var(--ink-faint); font-size: 11.5px; margin-left: 6px; }
+  .del-btn {
+    border: none; background: transparent; color: var(--ink-faint); cursor: pointer;
+    font-size: 15px; padding: 4px 6px; border-radius: 6px;
+  }
+  .del-btn:hover { color: var(--down); background: var(--paper-sunken); }
+  .add-row-btn {
+    margin-top: 12px; border: 1px dashed var(--rule-strong); background: transparent;
+    color: var(--ink-soft); padding: 9px 16px; border-radius: 8px; cursor: pointer;
+    font-size: 13px; width: 100%;
+  }
+  .add-row-btn:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+
+  .progress-bar { width: 100px; height: 6px; background: var(--rule); border-radius: 4px; overflow: hidden; }
+  .progress-bar .fill { height: 100%; border-radius: 4px; background: var(--accent); }
+  .progress-cell { display: flex; align-items: center; gap: 8px; }
+  .progress-pct { font-size: 11.5px; color: var(--ink-faint); width: 34px; }
+
+  .diff-cell { font-weight: 700; }
+  .diff-cell.pos { color: var(--up); }
+  .diff-cell.neg { color: var(--down); }
+  .badge { display: inline-block; padding: 2px 9px; border-radius: 100px; font-size: 11px; font-weight: 700; }
+  .badge.ok { background: var(--accent-soft); color: var(--accent); }
+  .badge.warn { background: var(--gold-soft); color: var(--gold); }
+  .badge.bad { background: rgba(182,67,47,0.14); color: var(--down); }
+
+  /* ---------------- guide table ---------------- */
+  table.guide { width: 100%; border-collapse: collapse; background: var(--paper-raised); font-size: 13.5px; }
+  table.guide th, table.guide td { padding: 10px 12px; border-bottom: 1px solid var(--rule); text-align: left; }
+  table.guide th { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--ink-soft); font-weight: 700; background: var(--accent-soft); }
+  table.guide tr:last-child td { border-bottom: none; }
+  table.guide td.num { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-variant-numeric: tabular-nums; }
+  .dilute-note { color: var(--ink-faint); font-size: 12px; font-style: normal; }
+  .guide-warning {
+    margin-top: 14px; padding: 12px 16px; border-radius: 8px; border-left: 3px solid var(--down);
+    background: rgba(182,67,47,0.08); color: var(--ink-soft); font-size: 13px;
+  }
+  .guide-warning b { color: var(--down); }
+  .guide-ok {
+    margin-top: 14px; padding: 12px 16px; border-radius: 8px; border-left: 3px solid var(--up);
+    background: rgba(47,125,85,0.08); color: var(--ink-soft); font-size: 13px;
+  }
+  .guide-ok b { color: var(--up); }
+
+  /* ---------------- footer / io ---------------- */
+  .io-bar {
+    display: flex; gap: 10px; flex-wrap: wrap; align-items: center;
+    border-top: 2px solid var(--ink); padding-top: 18px; margin-top: 8px;
+  }
+  .btn {
+    border: 1px solid var(--rule-strong); background: var(--paper-raised); color: var(--ink);
+    padding: 9px 16px; border-radius: 8px; cursor: pointer; font-size: 13px; font-weight: 600;
+  }
+  .btn:hover { border-color: var(--accent); color: var(--accent); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fdfdf8; }
+  .btn.primary:hover { opacity: 0.9; color: #fdfdf8; }
+  .btn.ghost { border-style: dashed; color: var(--ink-faint); }
+  .io-note { font-size: 12px; color: var(--ink-faint); margin-left: auto; }
+  #importFile { display: none; }
+  .disclaimer { font-size: 11.5px; color: var(--ink-faint); margin-top: 10px; }
+  .toast {
+    position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(12px);
+    background: var(--ink); color: var(--paper); padding: 10px 18px; border-radius: 8px;
+    font-size: 13px; opacity: 0; pointer-events: none; transition: opacity 0.2s, transform 0.2s;
+    z-index: 50;
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  @media (prefers-reduced-motion: reduce) {
+    .toast { transition: none; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="app">
+    <div class="titleblock">
+      <div class="eyebrow">개인용 · 로컬 저장 · 서버 없음</div>
+      <h1>포트폴리오 적립 트래커</h1>
+    </div>
+    <div class="theme-toggle" role="group" aria-label="테마 선택">
+      <button data-theme-choice="light">라이트</button>
+      <button data-theme-choice="auto">자동</button>
+      <button data-theme-choice="dark">다크</button>
+    </div>
+  </header>
+
+  <div class="settings-bar">
+    <div class="setting">
+      <label for="s-budget">연간 신규 투자 가능액</label>
+      <div class="field"><input id="s-budget" type="number" step="1" /><span class="hint">만원</span></div>
+    </div>
+    <div class="setting">
+      <label for="s-target-year">목표 달성 연도</label>
+      <div class="field"><input id="s-target-year" type="number" step="1" /><span class="hint">년</span></div>
+    </div>
+    <div class="setting">
+      <label for="s-fx">환율 (참고용)</label>
+      <div class="field"><input id="s-fx" type="number" step="1" /><span class="hint">원/달러</span></div>
+    </div>
+    <div class="setting">
+      <label for="s-baseline">기준 스냅샷 연도</label>
+      <div class="field"><input id="s-baseline" type="number" step="1" /><span class="hint">년</span></div>
+    </div>
+    <div class="setting">
+      <label for="s-return">연 수익률 가정</label>
+      <div class="field"><input id="s-return" type="number" step="0.5" /><span class="hint">%</span></div>
+    </div>
+  </div>
+
+  <div class="snapshot" id="snapshot"></div>
+
+  <section>
+    <h2><span class="num">01</span>현재 비중 vs 목표 비중
+      <span class="year-picker">
+        <button id="yr-prev" aria-label="이전 연도">‹</button>
+        <span class="yr" id="yr-label"></span>
+        <button id="yr-next" aria-label="다음 연도">›</button>
+      </span>
+    </h2>
+    <p class="section-note">선택한 연도까지 누적된 매수액을 반영한 현재 비중입니다. 목표와의 차이는 오른쪽 막대에서 확인하세요 (초록=목표 초과, 빨강=목표 미달).</p>
+    <div class="card chart-row">
+      <div class="chart-card">
+        <div class="chart-title">현재 비중</div>
+        <canvas id="donutCombo" width="380" height="300"></canvas>
+        <div class="legend" id="legendCombo"></div>
+      </div>
+      <div class="chart-card">
+        <div class="chart-title">항목별 차이 (현재 − 목표)</div>
+        <div id="diffBars" style="width:100%; display:flex; flex-direction:column; gap:10px; padding-top:6px;"></div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="num">02</span>자산 항목 관리 &amp; 연간 매수 기록</h2>
+    <p class="section-note">항목별 현재 보유액 · 목표 비중 · 계획 연간 매수액을 수정할 수 있고, 선택한 연도의 누적 매수액을 기록하면 진행률이 계산됩니다.</p>
+    <div class="table-wrap">
+      <table class="assets" id="assetsTable">
+        <thead>
+          <tr>
+            <th>항목</th>
+            <th>현재 보유액</th>
+            <th>목표 비중</th>
+            <th>현재 비중</th>
+            <th>계획 연간 매수액</th>
+            <th id="purchaseColHead">올해 누적 매수</th>
+            <th>진행률</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="assetsBody"></tbody>
+      </table>
+    </div>
+    <button class="add-row-btn" id="addAssetBtn">+ 항목 추가</button>
+  </section>
+
+  <section>
+    <h2><span class="num">03</span>투자 가이드 — 목표 달성을 위한 연간 필요 매수액</h2>
+    <p class="section-note" id="guideNote">매도 없음 가정. 상단 설정의 연 수익률 가정을 반영해, 남은 기간 동안 매년 얼마씩 사야 목표 연도에 목표 비중에 도달하는지 계산합니다. 이미 목표를 넘긴 항목은 "신규 매수 중단·희석"으로 표시됩니다.</p>
+    <div class="table-wrap">
+      <table class="guide" id="guideTable">
+        <thead>
+          <tr>
+            <th>항목</th>
+            <th>현재 비중</th>
+            <th>목표 비중</th>
+            <th>연간 필요 매수액</th>
+            <th>올해 계획액</th>
+            <th>상태</th>
+          </tr>
+        </thead>
+        <tbody id="guideBody"></tbody>
+      </table>
+    </div>
+    <div id="guideWarning"></div>
+  </section>
+
+  <div class="io-bar">
+    <button class="btn primary" id="exportBtn">JSON 내보내기</button>
+    <button class="btn" id="importBtn">JSON 가져오기</button>
+    <input type="file" id="importFile" accept="application/json" />
+    <button class="btn ghost" id="resetBtn">기본값으로 초기화</button>
+    <span class="io-note">모든 데이터는 이 브라우저의 localStorage에만 저장됩니다.</span>
+  </div>
+  <p class="disclaimer">※ 본 도구는 개인 기록·계획 관리 목적이며 투자자문이 아닙니다.</p>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+(function () {
+  "use strict";
+
+  var STORAGE_KEY = "portfolioTrackerData_v1";
+  var THEME_KEY = "portfolioTrackerTheme";
+
+  var PALETTE = ["#1f7a67", "#c08a3e", "#4f6d8c", "#b1583f", "#7c8a4a", "#7d5a8c", "#52807a", "#ab9143", "#8c4a5a", "#6a8a6f"];
+
+  var DEFAULT_DATA = {
+    settings: { annualBudget: 50000, targetYear: 2031, fxRate: 1480, baselineYear: 2026, expectedReturn: 0 },
+    assets: [
+      { id: "a1", name: "나스닥·테크", current: 52000, targetPct: 36, plannedAnnual: 21000, purchases: {} },
+      { id: "a2", name: "미국 광역·배당", current: 38100, targetPct: 28, plannedAnnual: 14000, purchases: {} },
+      { id: "a3", name: "헬스케어·제약", current: 0, targetPct: 8, plannedAnnual: 7000, purchases: {} },
+      { id: "a4", name: "방산", current: 0, targetPct: 3.5, plannedAnnual: 3500, purchases: {} },
+      { id: "a5", name: "금융", current: 0, targetPct: 2.5, plannedAnnual: 2500, purchases: {} },
+      { id: "a6", name: "귀금속", current: 56600, targetPct: 13, plannedAnnual: 0, purchases: {} },
+      { id: "a7", name: "현금·예비", current: 30000, targetPct: 9, plannedAnnual: 2000, purchases: {} }
+    ],
+    selectedYear: 2026
+  };
+
+  var state = loadState();
+  var nextId = computeNextId();
+
+  function computeNextId() {
+    var max = 0;
+    state.assets.forEach(function (a) {
+      var m = /^a(\d+)$/.exec(a.id);
+      if (m) max = Math.max(max, parseInt(m[1], 10));
+    });
+    return max + 1;
+  }
+
+  function loadState() {
+    try {
+      var raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return deepClone(DEFAULT_DATA);
+      var parsed = JSON.parse(raw);
+      if (!parsed.settings || !Array.isArray(parsed.assets)) return deepClone(DEFAULT_DATA);
+      return parsed;
+    } catch (e) {
+      return deepClone(DEFAULT_DATA);
+    }
+  }
+
+  function deepClone(o) { return JSON.parse(JSON.stringify(o)); }
+
+  function saveState() {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  }
+
+  function fmtEok(manwon) {
+    var eok = manwon / 10000;
+    var rounded = Math.round(eok * 100) / 100;
+    return rounded + "억";
+  }
+
+  function fmtPct(v) {
+    return (Math.round(v * 10) / 10) + "%";
+  }
+
+  function colorFor(index) { return PALETTE[index % PALETTE.length]; }
+
+  function holdingsAtYear(asset, year) {
+    var base = Number(asset.current) || 0;
+    var start = Math.min(state.settings.baselineYear, year);
+    var sum = base;
+    for (var y = state.settings.baselineYear; y <= year; y++) {
+      sum += Number(asset.purchases[String(y)]) || 0;
+    }
+    return sum;
+  }
+
+  function totalAtYear(year) {
+    return state.assets.reduce(function (acc, a) { return acc + holdingsAtYear(a, year); }, 0);
+  }
+
+  function targetPctSum() {
+    return state.assets.reduce(function (acc, a) { return acc + (Number(a.targetPct) || 0); }, 0);
+  }
+
+  // ---------------- rendering ----------------
+
+  function render() {
+    renderSettingsInputs();
+    renderSnapshot();
+    renderYearLabel();
+    renderAssetsTable();
+    renderGuideTable();
+    renderCharts();
+    renderDiffBars();
+  }
+
+  function renderSettingsInputs() {
+    byId("s-budget").value = state.settings.annualBudget;
+    byId("s-target-year").value = state.settings.targetYear;
+    byId("s-fx").value = state.settings.fxRate;
+    byId("s-baseline").value = state.settings.baselineYear;
+    byId("s-return").value = state.settings.expectedReturn || 0;
+  }
+
+  function renderSnapshot() {
+    var year = state.selectedYear;
+    var total = totalAtYear(year);
+    var pctSum = targetPctSum();
+    var yearsRemaining = Math.max(1, state.settings.targetYear - year);
+    var purchasedThisYear = state.assets.reduce(function (acc, a) {
+      return acc + (Number(a.purchases[String(year)]) || 0);
+    }, 0);
+
+    var pctBadgeClass = Math.abs(pctSum - 100) < 0.05 ? "ok" : "warn";
+    var el = byId("snapshot");
+    el.innerHTML =
+      stat("총자산 (" + year + "년 기준)", fmtEok(total)) +
+      stat("목표 비중 합계", pctSum.toFixed(1) + "%", pctBadgeClass) +
+      stat("목표까지 남은 기간", yearsRemaining + "년") +
+      stat(year + "년 누적 매수", fmtEok(purchasedThisYear));
+
+    function stat(label, value, cls) {
+      return '<div class="stat"><div class="label">' + label + '</div><div class="value' + (cls ? " " + cls : "") + '">' + value + "</div></div>";
+    }
+  }
+
+  function renderYearLabel() {
+    byId("yr-label").textContent = state.selectedYear + "년";
+    byId("purchaseColHead").textContent = state.selectedYear + "년 누적 매수";
+  }
+
+  function renderAssetsTable() {
+    var year = state.selectedYear;
+    var total = totalAtYear(year);
+    var body = byId("assetsBody");
+    body.innerHTML = "";
+
+    state.assets.forEach(function (asset, idx) {
+      var holdings = holdingsAtYear(asset, year);
+      var pct = total > 0 ? (holdings / total * 100) : 0;
+      var purchase = Number(asset.purchases[String(year)]) || 0;
+      var planned = Number(asset.plannedAnnual) || 0;
+      var progressPct = planned > 0 ? Math.min(100, purchase / planned * 100) : (purchase > 0 ? 100 : 0);
+
+      var tr = document.createElement("tr");
+      tr.innerHTML =
+        '<td><div class="name-cell"><span class="swatch-dot" style="background:' + colorFor(idx) + '"></span>' +
+          '<input type="text" data-role="name" value="' + escapeHtml(asset.name) + '" /></div></td>' +
+        '<td class="num-cell"><div class="num-wrap"><input type="number" data-role="current" value="' + asset.current + '" step="100" />' +
+          '<span class="eok-hint">' + fmtEok(asset.current) + '</span></div></td>' +
+        '<td class="num-cell"><div class="num-wrap"><input type="number" data-role="targetPct" value="' + asset.targetPct + '" step="0.5" style="width:64px" /><span class="eok-hint">%</span></div></td>' +
+        '<td class="num-cell">' + pct.toFixed(1) + '%</td>' +
+        '<td class="num-cell"><div class="num-wrap"><input type="number" data-role="plannedAnnual" value="' + asset.plannedAnnual + '" step="100" />' +
+          '<span class="eok-hint">' + fmtEok(asset.plannedAnnual) + '</span></div></td>' +
+        '<td class="num-cell"><div class="num-wrap"><input type="number" data-role="purchase" value="' + purchase + '" step="100" />' +
+          '<span class="eok-hint">' + fmtEok(purchase) + '</span></div></td>' +
+        '<td><div class="progress-cell"><div class="progress-bar"><div class="fill" style="width:' + progressPct.toFixed(0) + '%; background:' + colorFor(idx) + '"></div></div>' +
+          '<span class="progress-pct">' + progressPct.toFixed(0) + '%</span></div></td>' +
+        '<td><button class="del-btn" data-role="delete" aria-label="삭제" title="항목 삭제">✕</button></td>';
+
+      tr.querySelector('[data-role="name"]').addEventListener("input", function (e) {
+        asset.name = e.target.value; saveState(); renderCharts(); renderGuideTable(); renderDiffBars();
+      });
+      tr.querySelector('[data-role="current"]').addEventListener("input", function (e) {
+        asset.current = parseFloat(e.target.value) || 0; saveState(); renderAll();
+      });
+      tr.querySelector('[data-role="targetPct"]').addEventListener("input", function (e) {
+        asset.targetPct = parseFloat(e.target.value) || 0; saveState(); renderAll();
+      });
+      tr.querySelector('[data-role="plannedAnnual"]').addEventListener("input", function (e) {
+        asset.plannedAnnual = parseFloat(e.target.value) || 0; saveState(); renderAll();
+      });
+      tr.querySelector('[data-role="purchase"]').addEventListener("input", function (e) {
+        asset.purchases[String(year)] = parseFloat(e.target.value) || 0; saveState(); renderAll();
+      });
+      tr.querySelector('[data-role="delete"]').addEventListener("click", function () {
+        if (!confirm(asset.name + " 항목을 삭제할까요?")) return;
+        state.assets.splice(idx, 1); saveState(); renderAll();
+      });
+
+      body.appendChild(tr);
+    });
+  }
+
+  function renderGuideTable() {
+    var year = state.selectedYear;
+    var total = totalAtYear(year);
+    var yearsRemaining = Math.max(1, state.settings.targetYear - year);
+    var r = (Number(state.settings.expectedReturn) || 0) / 100;
+    var growth = Math.pow(1 + r, yearsRemaining);
+    // annuity factor: value at target year of 1 invested at each year-end
+    var annuity = r > 0 ? (Math.pow(1 + r, yearsRemaining) - 1) / r : yearsRemaining;
+    var projectedTotal = total * growth + state.settings.annualBudget * annuity;
+    var body = byId("guideBody");
+    body.innerHTML = "";
+    var requiredSum = 0;
+
+    state.assets.forEach(function (asset) {
+      var holdings = holdingsAtYear(asset, year);
+      var currentPct = total > 0 ? (holdings / total * 100) : 0;
+      var targetAmount = projectedTotal * (Number(asset.targetPct) || 0) / 100;
+      var requiredTotal = Math.max(0, targetAmount - holdings * growth);
+      var requiredAnnual = requiredTotal / annuity;
+      requiredSum += requiredAnnual;
+      var planned = Number(asset.plannedAnnual) || 0;
+      var dilute = requiredTotal <= 0;
+
+      var statusHtml;
+      if (dilute) {
+        statusHtml = '<span class="badge bad">신규 매수 중단·희석</span>';
+      } else if (planned + 1 >= requiredAnnual) {
+        statusHtml = '<span class="badge ok">계획으로 충족</span>';
+      } else {
+        statusHtml = '<span class="badge warn">계획 부족</span>';
+      }
+
+      var tr = document.createElement("tr");
+      tr.innerHTML =
+        "<td>" + escapeHtml(asset.name) + "</td>" +
+        "<td class=\"num\">" + currentPct.toFixed(1) + "%</td>" +
+        "<td class=\"num\">" + (Number(asset.targetPct) || 0).toFixed(1) + "%</td>" +
+        "<td class=\"num\">" + (dilute ? '<span class="dilute-note">0 (초과 보유)</span>' : fmtEok(requiredAnnual)) + "</td>" +
+        "<td class=\"num\">" + fmtEok(planned) + "</td>" +
+        "<td>" + statusHtml + "</td>";
+      body.appendChild(tr);
+    });
+
+    var warnEl = byId("guideWarning");
+    if (requiredSum > state.settings.annualBudget * 1.001) {
+      warnEl.innerHTML = '<div class="guide-warning"><b>주의:</b> 목표 달성에 필요한 연간 매수액 합계 ' + fmtEok(requiredSum) +
+        '이 연간 투자 가능액 ' + fmtEok(state.settings.annualBudget) + '을 초과합니다. 목표 비중이나 목표 연도를 조정하세요.</div>';
+    } else {
+      warnEl.innerHTML = '<div class="guide-ok"><b>정상:</b> 필요 매수액 합계 ' + fmtEok(requiredSum) +
+        '은 연간 투자 가능액 ' + fmtEok(state.settings.annualBudget) + ' 이내입니다.</div>';
+    }
+  }
+
+  function renderDiffBars() {
+    var year = state.selectedYear;
+    var total = totalAtYear(year);
+    var el = byId("diffBars");
+    el.innerHTML = "";
+    state.assets.forEach(function (asset, idx) {
+      var holdings = holdingsAtYear(asset, year);
+      var curPct = total > 0 ? (holdings / total * 100) : 0;
+      var tgtPct = Number(asset.targetPct) || 0;
+      var diff = curPct - tgtPct;
+      var maxScale = 20; // +-20pp fills the bar
+      var widthPct = Math.min(100, Math.abs(diff) / maxScale * 50);
+      var row = document.createElement("div");
+      row.style.cssText = "display:flex;align-items:center;gap:10px;font-size:12.5px;";
+      row.innerHTML =
+        '<span class="swatch-dot" style="background:' + colorFor(idx) + '"></span>' +
+        '<span style="width:92px;flex-shrink:0;color:var(--ink-soft);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + escapeHtml(asset.name) + '</span>' +
+        '<div style="flex:1;height:8px;background:var(--rule);border-radius:4px;position:relative;overflow:hidden;">' +
+          '<div style="position:absolute;top:0;bottom:0;' + (diff >= 0 ? "left:50%" : "right:50%") + ';width:' + widthPct + '%;background:' + (diff >= 0 ? "var(--up)" : "var(--down)") + ';border-radius:4px;"></div>' +
+          '<div style="position:absolute;left:50%;top:0;bottom:0;width:1px;background:var(--rule-strong);"></div>' +
+        '</div>' +
+        '<span class="diff-cell ' + (diff >= 0 ? "pos" : "neg") + '" style="width:56px;text-align:right;font-family:ui-monospace,monospace;">' + (diff >= 0 ? "+" : "") + diff.toFixed(1) + "%p</span>";
+      el.appendChild(row);
+    });
+  }
+
+  // ---------------- 3D-ish donut chart ----------------
+
+  function renderCharts() {
+    var year = state.selectedYear;
+    var total = totalAtYear(year);
+    var current = state.assets.map(function (a, i) {
+      return { label: a.name, value: total > 0 ? holdingsAtYear(a, year) / total * 100 : 0, color: colorFor(i) };
+    });
+
+    drawDonut3D(byId("donutCombo"), current, fmtEok(total));
+
+    var legendEl = byId("legendCombo");
+    legendEl.innerHTML = state.assets.map(function (a, i) {
+      var curPct = current[i].value;
+      return '<div class="item"><span class="swatch" style="background:' + colorFor(i) + '"></span>' +
+        escapeHtml(a.name) + ' <span class="pct">' + curPct.toFixed(0) + '%</span></div>';
+    }).join("");
+  }
+
+  function drawDonut3D(canvas, data, centerLabel) {
+    var ctx = canvas.getContext("2d");
+    var W = parseInt(canvas.getAttribute("width"), 10), H = parseInt(canvas.getAttribute("height"), 10);
+    var dpr = window.devicePixelRatio || 1;
+    canvas.width = W * dpr; canvas.height = H * dpr;
+    canvas.style.width = W + "px"; canvas.style.height = H + "px";
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, W, H);
+
+    var cx = W / 2, cy = H / 2 - 10;
+    var tilt = 0.58;
+    var depth = 18;
+
+    drawRing3D(ctx, cx, cy, 130, 70, data, tilt, depth, 1);
+
+    ctx.save();
+    ctx.textAlign = "center";
+    var inkColor = getComputedStyle(document.documentElement).getPropertyValue("--ink").trim() || "#222";
+    var faintColor = getComputedStyle(document.documentElement).getPropertyValue("--ink-faint").trim() || "#888";
+    ctx.font = "700 18px ui-monospace, Menlo, monospace";
+    ctx.fillStyle = inkColor;
+    ctx.fillText(centerLabel, cx, cy + 2);
+    ctx.font = "600 11px -apple-system, sans-serif";
+    ctx.fillStyle = faintColor;
+    ctx.fillText("총자산", cx, cy - 18);
+    ctx.restore();
+  }
+
+  function drawRing3D(ctx, cx, cy, outerR, innerR, data, tilt, depth, alpha) {
+    var total = data.reduce(function (a, d) { return a + d.value; }, 0);
+    if (total <= 0) return;
+    var start = -Math.PI / 2;
+
+    // side extrusion (drawn first, offset downward, darker)
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    var a = start;
+    data.forEach(function (d) {
+      var sweep = (d.value / total) * Math.PI * 2;
+      if (sweep <= 0) return;
+      for (var layer = depth; layer > 0; layer -= 2) {
+        ctx.beginPath();
+        ctx.ellipse(cx, cy + layer, outerR, outerR * tilt, 0, a, a + sweep, false);
+        ctx.ellipse(cx, cy + layer, innerR, innerR * tilt, 0, a + sweep, a, true);
+        ctx.closePath();
+        ctx.fillStyle = shade(d.color, -0.32);
+        ctx.fill();
+      }
+      a += sweep;
+    });
+    ctx.restore();
+
+    // top face
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    a = start;
+    data.forEach(function (d) {
+      var sweep = (d.value / total) * Math.PI * 2;
+      if (sweep <= 0) { return; }
+      var mid = a + sweep / 2;
+      var grad = ctx.createLinearGradient(
+        cx + Math.cos(mid) * innerR, cy + Math.sin(mid) * innerR * tilt,
+        cx + Math.cos(mid) * outerR, cy + Math.sin(mid) * outerR * tilt
+      );
+      grad.addColorStop(0, shade(d.color, -0.05));
+      grad.addColorStop(1, shade(d.color, 0.14));
+      ctx.beginPath();
+      ctx.ellipse(cx, cy, outerR, outerR * tilt, 0, a, a + sweep, false);
+      ctx.ellipse(cx, cy, innerR, innerR * tilt, 0, a + sweep, a, true);
+      ctx.closePath();
+      ctx.fillStyle = grad;
+      ctx.fill();
+      ctx.lineWidth = 1;
+      ctx.strokeStyle = "rgba(0,0,0,0.08)";
+      ctx.stroke();
+      a += sweep;
+    });
+    ctx.restore();
+  }
+
+  function shade(hex, amt) {
+    var c = hex.replace("#", "");
+    var r = parseInt(c.substring(0, 2), 16);
+    var g = parseInt(c.substring(2, 4), 16);
+    var b = parseInt(c.substring(4, 6), 16);
+    function adj(v) {
+      v = amt >= 0 ? v + (255 - v) * amt : v + v * amt;
+      return Math.max(0, Math.min(255, Math.round(v)));
+    }
+    r = adj(r); g = adj(g); b = adj(b);
+    return "rgb(" + r + "," + g + "," + b + ")";
+  }
+
+  // ---------------- helpers ----------------
+
+  function byId(id) { return document.getElementById(id); }
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
+  function renderAll() { render(); }
+  function toast(msg) {
+    var t = byId("toast");
+    t.textContent = msg;
+    t.classList.add("show");
+    clearTimeout(toast._h);
+    toast._h = setTimeout(function () { t.classList.remove("show"); }, 2200);
+  }
+
+  // ---------------- events: settings ----------------
+
+  byId("s-budget").addEventListener("input", function (e) {
+    state.settings.annualBudget = parseFloat(e.target.value) || 0; saveState(); renderAll();
+  });
+  byId("s-target-year").addEventListener("input", function (e) {
+    state.settings.targetYear = parseInt(e.target.value, 10) || state.settings.targetYear; saveState(); renderAll();
+  });
+  byId("s-fx").addEventListener("input", function (e) {
+    state.settings.fxRate = parseFloat(e.target.value) || 0; saveState();
+  });
+  byId("s-baseline").addEventListener("input", function (e) {
+    state.settings.baselineYear = parseInt(e.target.value, 10) || state.settings.baselineYear; saveState(); renderAll();
+  });
+  byId("s-return").addEventListener("input", function (e) {
+    state.settings.expectedReturn = parseFloat(e.target.value) || 0; saveState(); renderAll();
+  });
+
+  byId("yr-prev").addEventListener("click", function () {
+    state.selectedYear = Math.max(state.settings.baselineYear, state.selectedYear - 1);
+    saveState(); renderAll();
+  });
+  byId("yr-next").addEventListener("click", function () {
+    state.selectedYear = state.selectedYear + 1;
+    saveState(); renderAll();
+  });
+
+  byId("addAssetBtn").addEventListener("click", function () {
+    state.assets.push({ id: "a" + (nextId++), name: "새 항목", current: 0, targetPct: 0, plannedAnnual: 0, purchases: {} });
+    saveState(); renderAll();
+  });
+
+  byId("exportBtn").addEventListener("click", function () {
+    var blob = new Blob([JSON.stringify(state, null, 2)], { type: "application/json" });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url;
+    a.download = "portfolio-tracker-" + state.selectedYear + ".json";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    toast("JSON 파일을 내보냈습니다.");
+  });
+
+  byId("importBtn").addEventListener("click", function () { byId("importFile").click(); });
+  byId("importFile").addEventListener("change", function (e) {
+    var file = e.target.files[0];
+    if (!file) return;
+    var reader = new FileReader();
+    reader.onload = function () {
+      try {
+        var parsed = JSON.parse(reader.result);
+        if (!parsed.settings || !Array.isArray(parsed.assets)) throw new Error("형식 오류");
+        state = parsed;
+        if (typeof state.selectedYear !== "number") state.selectedYear = state.settings.baselineYear;
+        nextId = computeNextId();
+        saveState(); renderAll();
+        toast("가져오기를 완료했습니다.");
+      } catch (err) {
+        alert("JSON 파일을 읽는 중 오류가 발생했습니다: " + err.message);
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = "";
+  });
+
+  byId("resetBtn").addEventListener("click", function () {
+    if (!confirm("모든 데이터를 기본값으로 초기화할까요? 이 작업은 되돌릴 수 없습니다.")) return;
+    state = deepClone(DEFAULT_DATA);
+    nextId = computeNextId();
+    saveState(); renderAll();
+    toast("기본값으로 초기화했습니다.");
+  });
+
+  // ---------------- theme ----------------
+
+  function applyTheme(mode) {
+    if (mode === "auto") {
+      document.documentElement.removeAttribute("data-theme");
+    } else {
+      document.documentElement.setAttribute("data-theme", mode);
+    }
+    document.querySelectorAll(".theme-toggle button").forEach(function (b) {
+      b.classList.toggle("active", b.getAttribute("data-theme-choice") === mode);
+    });
+    localStorage.setItem(THEME_KEY, mode);
+    renderCharts();
+  }
+  document.querySelectorAll(".theme-toggle button").forEach(function (b) {
+    b.addEventListener("click", function () { applyTheme(b.getAttribute("data-theme-choice")); });
+  });
+  applyTheme(localStorage.getItem(THEME_KEY) || "auto");
+
+  // ---------------- init ----------------
+
+  if (typeof state.selectedYear !== "number") state.selectedYear = state.settings.baselineYear;
+  render();
+  window.addEventListener("resize", renderCharts);
+})();
+</script>
+</body>
+</html>
