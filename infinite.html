@@ -232,7 +232,7 @@ function homeView() {
     const { total, pct: pp } = pnl(c);
     h += `<div class="card cycle" onclick="openCycle('${esc(c.id)}')">
       <div class="row"><div><div class="title">${esc(c.name)}</div>
-        <div class="meta">${esc(c.ticker)} · V4.0 · ${esc(BROKER[c.broker] || c.broker)} · ${c.splits}분할</div></div>
+        <div class="meta">${esc(c.ticker)} · V4.0 · ${esc(BROKER[c.broker] || c.broker)} · ${c.splits}분할 · 수수료 −${usd(c.fees)}</div></div>
         <div class="pnl"><div class="amt num ${cls(total)}">${sgn(total)}</div><div class="pct num ${cls(total)}">${pct(pp)}</div></div></div>
       <div class="tline"><div class="t num">T${c.T.toFixed(2)} <small>/ ${c.splits}</small></div>${tbar(c)}</div>
       <div class="row"><div class="stats"><div class="stat"><span class="k">보유</span><span class="v num">${c.qty}</span><span class="k">주</span></div>
@@ -284,7 +284,7 @@ function detailView(c) {
     <div class="row" style="align-items:flex-start"><div><div class="meta">회차 <span class="badge ${phaseB}">${esc(c.phase)}</span></div>
       <div class="big num" style="margin-top:6px">T${c.T.toFixed(2)}<small> / ${c.splits}</small></div></div>
       <div class="pnl"><div class="meta">손익</div><div class="amt num ${cls(total)}" style="font-size:22px">${sgn(total)}</div><div class="pct num ${cls(total)}">${pct(pp)}</div></div></div>
-    <div class="meta" style="margin:10px 0 12px">투입 ${usd(c.net_invested)} · 원금 ${usd(c.principal)} · 잔금 ${usd(c.cash)} · 수수료 ${usd(c.fees)}</div>
+    <div class="meta" style="margin:10px 0 12px">투입 ${usd(c.net_invested)} · 원금 ${usd(c.principal)} · 잔금 ${usd(c.cash)}<br>수수료 누적 <b class="num">−${usd(c.fees)}</b> (${(c.fee_rate * 100).toFixed(3)}%) · 손익은 수수료 차감 후</div>
     ${tbar(c)}
     <div class="row meta" style="margin-top:6px"><span>전반전</span><span>후반 T${c.splits / 2}</span><span>완료 T${c.splits}</span></div>
     <div class="grid4">
@@ -336,6 +336,7 @@ function doneView() {
       <div class="meta">${esc(r.ticker)} · ${esc(BROKER[r.broker] || r.broker || '')} ${r.splits ? '· ' + esc(r.splits) + '분할' : ''}</div>
       <div class="meta">${esc(r.started.slice(2).replace(/-/g, '.'))} ~ ${esc(r.ended.slice(5).replace('-', '.'))} · ${esc(r.days)}일</div></div>
       <div class="pnl"><div class="amt num ${cls(+r.profit)}">${sgn(+r.profit)}</div><div class="meta">원금 ${usd(+r.principal, 0)} · <span class="${cls(+r.profit)}">${pct(+r.return_pct)}</span></div></div></div>
+      ${+r.fees ? `<div class="meta" style="margin-top:4px">수수료 −${usd(+r.fees)} 차감 후</div>` : ''}
       ${r.note ? `<div class="meta" style="margin-top:4px">${esc(r.note)}</div>` : ''}</div>`).join('');
   const total = rows.reduce((a, r) => a + (parseFloat(r.profit) || 0), 0);
   return header('완료', `누적 실현수익 <b class="${cls(total)}">${sgn(total)}</b> · ${rows.length}사이클`) + `
@@ -389,20 +390,24 @@ window.openNew = (mode = newMode) => {
    <label class="f"><span>종목</span><input id="nTicker" value="SOXL"></label></div>
    <div class="f2"><label class="f"><span>원금 (USD)</span><input id="nPrin" inputmode="decimal" placeholder="100000"></label>
    <label class="f"><span>분할</span><select id="nSplits"><option>40</option><option>30</option><option>20</option></select></label></div>
-   <label class="f"><span>기준% (비우면 SOXL 20 · TQQQ 15)</span><input id="nBase" inputmode="decimal"></label>
+   <div class="f2"><label class="f"><span>기준% (비우면 SOXL 20·TQQQ 15)</span><input id="nBase" inputmode="decimal"></label>
+   <label class="f"><span>수수료율 % (비우면 기본 0.07)</span><input id="nFee" inputmode="decimal" placeholder="0.07"></label></div>
    ${imp ? `<div class="f2"><label class="f"><span>현재 T</span><input id="nT" inputmode="decimal" placeholder="5.5"></label><label class="f"><span>보유 수량</span><input id="nQty" inputmode="numeric"></label></div>
    <div class="f2"><label class="f"><span>매수금 (누적 매수액)</span><input id="nBought" inputmode="decimal" placeholder="16788.49"></label><label class="f"><span>매도금 (없으면 0)</span><input id="nSold" inputmode="decimal" value="0"></label></div>
-   <div class="f2"><label class="f"><span>평단 (비우면 매수금÷수량)</span><input id="nAvg" inputmode="decimal"></label><label class="f"><span>시작일</span><input id="nStart" type="date" value="${today()}"></label></div>
+   <div class="f2"><label class="f"><span>평단 (비우면 매수금÷수량)</span><input id="nAvg" inputmode="decimal"></label><label class="f"><span>지금까지 수수료 ($)</span><input id="nFees" inputmode="decimal" placeholder="11.76"></label></div>
+   <label class="f"><span>시작일</span><input id="nStart" type="date" value="${today()}"></label>
    <div class="help" style="margin-bottom:10px">넘겨받은 날 이미 앱/MTS로 넣은 주문이 있으면, 그날 체결이 끝난 다음(다음날 아침)에 넘겨받으세요.</div>` : ''}
    <button class="btn primary" style="width:100%" onclick="submitNew()">${imp ? '넘겨받기' : '시작'}</button>`);
 };
 window.submitNew = () => {
   const p = { name: val('nName'), broker: val('nBroker'), ticker: val('nTicker').toUpperCase(), principal: +val('nPrin'), splits: +val('nSplits') };
   if (val('nBase')) p.base_pct = +val('nBase');
+  if (val('nFee')) p.fee_rate = +val('nFee');
   if (!p.ticker || !(p.principal > 0)) return toast('종목과 원금을 입력하세요');
   if (newMode === 'import') {
     Object.assign(p, { T: +val('nT'), qty: +val('nQty'), bought_amt: +val('nBought'), sold_amt: +val('nSold') || 0, started: val('nStart') });
     if (val('nAvg')) p.avg = +val('nAvg');
+    if (val('nFees')) p.fees = +val('nFees');
     if (!(p.qty > 0) || !(p.bought_amt > 0) || isNaN(p.T)) return toast('T·수량·매수금을 입력하세요');
   }
   const brokerName = BROKER[p.broker];
@@ -414,9 +419,10 @@ window.openEdit = id => {
   openSheet(`<h3>사이클 수정</h3>
    <label class="f"><span>이름</span><input id="eName" value="${esc(c.name)}"></label>
    <label class="f"><span>원금 (USD) — 바꾸면 차액만큼 잔금도 같이 바뀜</span><input id="ePrin" inputmode="decimal" value="${c.principal}"></label>
+   <label class="f"><span>수수료율 % (앞으로 체결분부터 적용)</span><input id="eFee" inputmode="decimal" value="${+(c.fee_rate * 100).toFixed(4)}"></label>
    <button class="btn primary" style="width:100%" onclick="submitEdit('${esc(id)}')">저장</button>`);
 };
-window.submitEdit = id => control('edit', { id, name: val('eName'), principal: +val('ePrin') });
+window.submitEdit = id => control('edit', { id, name: val('eName'), principal: +val('ePrin'), fee_rate: +val('eFee') });
 
 window.openFill = id => {
   const c = data.cycles.find(x => x.id === id);
@@ -442,10 +448,11 @@ window.openHistory = () => openSheet(`<h3>과거 완료 기록 추가</h3>
   <div class="f2"><label class="f"><span>증권사</span><select id="hBroker"><option value="DB">DB</option><option value="KIWOOM">키움</option></select></label><label class="f"><span>종목</span><input id="hTicker" value="SOXL"></label></div>
   <div class="f2"><label class="f"><span>시작일</span><input id="hStart" type="date"></label><label class="f"><span>종료일</span><input id="hEnd" type="date"></label></div>
   <div class="f2"><label class="f"><span>원금</span><input id="hPrin" inputmode="decimal"></label><label class="f"><span>수익금 (손실은 −)</span><input id="hProfit" inputmode="decimal"></label></div>
-  <label class="f"><span>분할 (선택)</span><input id="hSplits" inputmode="numeric"></label>
+  <div class="f2"><label class="f"><span>분할 (선택)</span><input id="hSplits" inputmode="numeric"></label><label class="f"><span>수수료 $ (선택)</span><input id="hFees" inputmode="decimal"></label></div>
+  <div class="help" style="margin-bottom:10px">수익금은 수수료를 뺀 금액으로 입력하세요.</div>
   <button class="btn primary" style="width:100%" onclick="submitHistory()">추가</button>`);
 window.submitHistory = () => {
-  const p = { name: val('hName'), broker: val('hBroker'), ticker: val('hTicker').toUpperCase(), started: val('hStart'), ended: val('hEnd'), principal: +val('hPrin'), profit: +val('hProfit'), splits: val('hSplits') };
+  const p = { name: val('hName'), broker: val('hBroker'), ticker: val('hTicker').toUpperCase(), started: val('hStart'), ended: val('hEnd'), principal: +val('hPrin'), profit: +val('hProfit'), splits: val('hSplits'), fees: +val('hFees') || 0 };
   if (!p.started || !p.ended || !(p.principal > 0) || isNaN(p.profit)) return toast('날짜·원금·수익금을 입력하세요');
   control('history', p);
 };
