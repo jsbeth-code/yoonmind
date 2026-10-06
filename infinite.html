@@ -356,6 +356,7 @@ function settingsView() {
     <label class="f"><span>GitHub 토큰</span><input id="sTok" type="password" placeholder="github_pat_…" value="${esc(cfg.token)}"></label>
     <div class="actions" style="grid-template-columns:1fr 1fr"><button class="btn" onclick="logout()">토큰 지우기</button><button class="btn primary" onclick="saveSettings()">저장</button></div>
   </div>
+  ${data && data.accounts ? accountsCard() : ''}
   <div class="card help">
     <b>토큰 만들기</b> (Fine-grained, 이 대시보드 전용)<br>
     GitHub → Settings → Developer settings → Fine-grained tokens → Generate<br>
@@ -364,6 +365,21 @@ function settingsView() {
     토큰은 이 기기 브라우저에만 저장되고 이 페이지에는 매매 데이터가 들어있지 않아요. 공용 기기에서는 쓰고 나서 지워주세요.
   </div>`;
 }
+
+function accountsCard() {
+  const rows = Object.entries(data.accounts).map(([b, r]) => `
+    <div class="f2" style="align-items:end"><label class="f"><span>${esc(BROKER[b] || b)} 계좌 수수료율 (%)</span>
+      <input id="acc_${esc(b)}" inputmode="decimal" value="${+(r * 100).toFixed(4)}"></label>
+      <button class="btn" style="margin-bottom:10px" onclick="saveAccount('${esc(b)}')">저장</button></div>`).join('');
+  return `<div class="card"><div class="title" style="font-size:15px;margin-bottom:10px">계좌별 수수료</div>${rows}
+    <label class="help" style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="accApply"> 이 계좌의 진행 중 사이클에도 적용 (앞으로 체결분부터)</label>
+    <div class="help" style="margin-top:6px">체결금액 대비 비율이에요. 예: 0.07 = 0.07%. 새 사이클은 이 값으로 시작하고, 사이클별로 따로 바꿀 수도 있어요.</div></div>`;
+}
+window.saveAccount = b => {
+  const v = parseFloat(val('acc_' + b)), apply = $('#accApply').checked;
+  if (isNaN(v) || v < 0 || v >= 5) return toast('0~5 사이 % 로 입력하세요');
+  if (confirm(`${BROKER[b] || b} 계좌 수수료율 ${v}% 로 저장${apply ? ' (진행 중 사이클에도 적용)' : ''}할까요?`)) control('account', { broker: b, fee_rate: v, apply_existing: apply });
+};
 
 /* ── 동작 ── */
 window.openCycle = id => { view.cycle = id; render(); scrollTo(0, 0) };
@@ -386,19 +402,21 @@ window.openNew = (mode = newMode) => {
   openSheet(`<h3>새 사이클</h3>
    <div class="seg"><button class="${!imp ? 'on' : ''}" onclick="openNew('start')">새로 시작</button><button class="${imp ? 'on' : ''}" onclick="openNew('import')">진행 중 넘겨받기</button></div>
    <label class="f"><span>이름</span><input id="nName" placeholder="예: SOXL 3차 DB $10만"></label>
-   <div class="f2"><label class="f"><span>증권사</span><select id="nBroker"><option value="DB">DB (자동 주문)</option><option value="KIWOOM">키움 (직접 주문)</option></select></label>
+   <div class="f2"><label class="f"><span>증권사</span><select id="nBroker" onchange="syncFee()"><option value="DB">DB (자동 주문)</option><option value="KIWOOM">키움 (직접 주문)</option></select></label>
    <label class="f"><span>종목</span><input id="nTicker" value="SOXL"></label></div>
    <div class="f2"><label class="f"><span>원금 (USD)</span><input id="nPrin" inputmode="decimal" placeholder="100000"></label>
    <label class="f"><span>분할</span><select id="nSplits"><option>40</option><option>30</option><option>20</option></select></label></div>
    <div class="f2"><label class="f"><span>기준% (비우면 SOXL 20·TQQQ 15)</span><input id="nBase" inputmode="decimal"></label>
-   <label class="f"><span>수수료율 % (비우면 기본 0.07)</span><input id="nFee" inputmode="decimal" placeholder="0.07"></label></div>
+   <label class="f"><span>수수료율 % (계좌 기본값)</span><input id="nFee" inputmode="decimal"></label></div>
    ${imp ? `<div class="f2"><label class="f"><span>현재 T</span><input id="nT" inputmode="decimal" placeholder="5.5"></label><label class="f"><span>보유 수량</span><input id="nQty" inputmode="numeric"></label></div>
    <div class="f2"><label class="f"><span>매수금 (누적 매수액)</span><input id="nBought" inputmode="decimal" placeholder="16788.49"></label><label class="f"><span>매도금 (없으면 0)</span><input id="nSold" inputmode="decimal" value="0"></label></div>
    <div class="f2"><label class="f"><span>평단 (비우면 매수금÷수량)</span><input id="nAvg" inputmode="decimal"></label><label class="f"><span>지금까지 수수료 ($)</span><input id="nFees" inputmode="decimal" placeholder="11.76"></label></div>
    <label class="f"><span>시작일</span><input id="nStart" type="date" value="${today()}"></label>
    <div class="help" style="margin-bottom:10px">넘겨받은 날 이미 앱/MTS로 넣은 주문이 있으면, 그날 체결이 끝난 다음(다음날 아침)에 넘겨받으세요.</div>` : ''}
    <button class="btn primary" style="width:100%" onclick="submitNew()">${imp ? '넘겨받기' : '시작'}</button>`);
+  syncFee();
 };
+window.syncFee = () => { const r = data?.accounts?.[val('nBroker')]; if (r != null) $('#nFee').value = +(r * 100).toFixed(4) };
 window.submitNew = () => {
   const p = { name: val('nName'), broker: val('nBroker'), ticker: val('nTicker').toUpperCase(), principal: +val('nPrin'), splits: +val('nSplits') };
   if (val('nBase')) p.base_pct = +val('nBase');
