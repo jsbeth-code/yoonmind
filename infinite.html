@@ -182,7 +182,8 @@ async function control(action, payload, done = '요청을 보냈어요. 1~2분 �
 
 /* ── 공통 계산 ── */
 function pnl(c) {
-  const total = (c.realized || 0) + (c.unrealized || 0);
+  // realized_gross: 실현손익이 수수료 전 매도분 손익 (봇 새 버전). 예전 데이터는 이미 수수료가 빠져 있음
+  const total = (c.realized || 0) + (c.unrealized || 0) - (c.realized_gross ? (c.fees || 0) : 0);
   return { total, pct: c.principal ? total / c.principal * 100 : 0 };
 }
 function statusBadge(c) {
@@ -293,7 +294,7 @@ function detailView(c) {
       <div><div class="k">${c.mode === 'reverse' ? '별지점(5일평균)' : '☆%'}</div><div class="v num">${c.star_pct != null ? c.star_pct.toFixed(2) + '%' : '-'}</div></div>
       <div><div class="k">${c.mode === 'reverse' ? '쿼터매수금' : '1회 매수금'}</div><div class="v num">${usd(c.unit)}</div></div>
       <div><div class="k">평가금액</div><div class="v num">${usd(c.eval)}</div></div>
-      <div><div class="k">실현 / 평가손익</div><div class="v num" style="font-size:15px"><span class="${cls(c.realized)}">${sgn(c.realized)}</span> / <span class="${cls(c.unrealized)}">${sgn(c.unrealized)}</span></div></div>
+      <div><div class="k">실현(매도) / 평가 / 수수료</div><div class="v num" style="font-size:15px"><span class="${cls(c.realized)}">${sgn(c.realized)}</span> / <span class="${cls(c.unrealized)}">${sgn(c.unrealized)}</span>${c.realized_gross ? ` / <span class="down">−${usd(c.fees)}</span>` : ''}</div></div>
     </div>
     <div style="margin-top:12px">${priceLine(c)}</div>
     <div class="actions">
