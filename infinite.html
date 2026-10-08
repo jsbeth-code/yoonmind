@@ -85,6 +85,11 @@
   .bc .stat .k{font-size:11.5px} .bc .stat .v{font-size:14.5px}
   .bc .badge{font-size:10.5px;padding:2px 7px}
   .blogo-s{height:14px;vertical-align:-2px;margin-right:6px}
+  .mkt{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;background:var(--surface);border:1px solid var(--border-2);border-radius:12px;padding:8px 12px;margin-bottom:10px;font-size:12.5px;color:var(--muted)}
+  .mkt b{color:var(--text);font-weight:700} .mkt i{font-style:normal;color:var(--faint)}
+  .mkt-t{font-weight:700;color:var(--text);margin-right:2px}
+  .hk{font-size:10.5px;font-weight:700;padding:1px 6px;border-radius:99px}
+  .hk.closed{background:var(--up-soft);color:var(--up)} .hk.early{background:var(--warn-soft);color:var(--warn)}
   /* 사이클 상세: 홈 카드와 같은 증권사 카드 + 숫자 표 */
   .bc.dcard{padding:12px 14px 13px;gap:6px}
   .bc.dcard .nm{font-size:20px}
@@ -321,10 +326,22 @@ function header(title, sub) {
     <button class="icon-btn" title="시세·주문표 갱신" onclick="control('refresh',{},'갱신 요청을 보냈어요. 1~2분 뒤 반영됩니다.')"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg></button></div>`;
 }
 
+/* 미국 증시 휴장·조기 마감 미리 알림 (봇이 30일치 계산해 dashboard.json 에 넣음) — 2주 안의 것만 */
+function marketNotice() {
+  const wd = '일월화수목금토', now = today();
+  const soon = (data.market?.upcoming || []).filter(x => { const g = (new Date(x.date) - new Date(now)) / 864e5; return g >= 0 && g <= 14 });
+  if (!soon.length) return '';
+  const item = x => { const d = new Date(x.date + 'T12:00:00'); const day = `${d.getMonth() + 1}/${d.getDate()}(${wd[d.getDay()]})`;
+    return x.kind === 'closed' ? `<b>${day}</b> ${esc(x.name)} <span class="hk closed">휴장</span>`
+                               : `<b>${day}</b> <span class="hk early">조기 마감</span> 한국 ${esc(x.close_kst)}`; };
+  return `<div class="mkt"><span class="mkt-t">🇺🇸 미국장</span>${soon.map(item).join('<i>·</i>')}</div>`;
+}
+
 function homeView() {
   const cs = data.cycles || [];
   let h = header('무한매수', `${esc(data.updated)} 업데이트`);
   if (data.dry_run) h += `<div class="banner">모의실행(dry_run) 중 — 주문표만 계산하고 실제 주문은 넣지 않아요.</div>`;
+  h += marketNotice();
   if (!cs.length) h += '<div class="empty">진행 중인 사이클이 없어요.<br>오른쪽 아래 <b>새 사이클</b>로 시작하세요.</div>';
   for (const c of cs) {
     const { total, pct: pp } = pnl(c);
