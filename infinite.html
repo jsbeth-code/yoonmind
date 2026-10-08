@@ -66,6 +66,25 @@
   .mini{border:1px solid var(--border);background:var(--surface);border-radius:9px;padding:4px 10px;font-size:12px;font-weight:700;color:var(--accent)}
   .preview{background:var(--accent-soft);border-radius:12px;padding:10px 12px;font-size:13px;line-height:1.6;margin:4px 0 12px}
   #root{transition:transform .18s ease}
+  /* 증권사 카드: DB 초록(꽃잎 주황·파랑·연두) / 키움 남색(자홍 화살표) */
+  .bc{position:relative;overflow:hidden;border:0;padding:10px 13px 11px;display:flex;flex-direction:column;gap:5px}
+  .bc.db{background:linear-gradient(160deg,#f3faf0,#e2f1dc)} .bc.kw{background:linear-gradient(160deg,#f2f5fa,#e1e7f2)}
+  .bc .wm{position:absolute;right:-10px;bottom:-14px;height:84px;opacity:.12;pointer-events:none}
+  .bc>*{position:relative}
+  .bc .blogo{height:17px;width:auto;display:block;align-self:flex-start}
+  .bc .nm{font-size:18px;font-weight:800;letter-spacing:-.5px;line-height:1.15}
+  .bc.db .nm{color:#1f6e2b} .bc.kw .nm{color:#1d3256}
+  .bc .cap{font-family:'IBM Plex Mono',ui-monospace,monospace;font-weight:600;font-size:12px;padding:1px 7px;border-radius:7px;margin-left:6px;vertical-align:2px}
+  .bc.db .cap{background:rgba(47,143,58,.12);color:#1f6e2b} .bc.kw .cap{background:rgba(43,69,112,.1);color:#2b4570}
+  .bc .sub{font-size:11.5px;color:#5d6472}
+  .bc .pnl .amt{font-size:15px} .bc .pnl .pct{font-size:11px}
+  .bc .tline{margin:2px 0 1px;gap:10px} .bc .tline .t{font-size:13px}
+  .bc .bar{height:7px;background:rgba(255,255,255,.8)} .bc .bar .knob{top:-3px;height:13px;width:5px}
+  .bc.db .bar .fill{background:linear-gradient(90deg,#ef6a2a,#8cc63f)} .bc.db .bar .knob{background:#2f8f3a}
+  .bc.kw .bar .fill{background:linear-gradient(90deg,#2b4570,#d6338a)} .bc.kw .bar .knob{background:#d6338a}
+  .bc .stat .k{font-size:11.5px} .bc .stat .v{font-size:14.5px}
+  .bc .badge{font-size:10.5px;padding:2px 7px}
+  .blogo-s{height:14px;vertical-align:-2px;margin-right:6px}
   .done-it{cursor:pointer}
   .done-it:active{background:var(--surface-2)}
   .bigp{font-size:32px;font-weight:800;letter-spacing:-.8px;line-height:1.1}
@@ -179,6 +198,21 @@ const sgn = n => (n > 0 ? '+' : n < 0 ? '−' : '') + usd(Math.abs(n));
 const pct = n => (n > 0 ? '+' : n < 0 ? '−' : '') + Math.abs(n).toFixed(2) + '%';
 const cls = n => n > 0 ? 'up' : n < 0 ? 'down' : 'flat';
 const BROKER = { DB: 'DB', KIWOOM: '키움' };
+const BRAND = {
+  DB: { cls: 'db', name: 'DB증권', logo: 'infinite-assets/db_logo.png', mark: 'infinite-assets/db_mark.png' },
+  KIWOOM: { cls: 'kw', name: '키움증권', logo: 'infinite-assets/kw_logo.png', mark: 'infinite-assets/kw_mark.png' },
+};
+const brandLogo = (b, klass = 'blogo-s') => BRAND[b] ? `<img class="${klass}" src="${BRAND[b].logo}" alt="${BRAND[b].name}">` : '';
+const man = v => '$' + (+(v / 10000).toFixed(2)).toLocaleString('en-US') + '만';
+/* 카드 제목: 이름에서 증권사·자본금 표기를 빼고 "SOXL 3차" 만 (로고·자본금은 따로 보여줌) */
+const shortName = c => (String(c.name || '').replace(/DB증권|키움증권|KIWOOM|키움|\bDB\b/g, ' ').replace(/\$[\d,.]+\s*만?/g, ' ').replace(/\s+/g, ' ').trim()) || c.ticker;
+/* 새 사이클 자동 제목 (봇 auto_name 과 같은 규칙): 증권사 종목 N차 $자본금, N = 같은 종목 사이클 수 + 1 */
+function autoName(broker, ticker, principal) {
+  const t = String(ticker || '').toUpperCase().trim();
+  if (!t) return '';
+  const n = (data?.cycles || []).filter(c => c.ticker === t).length + (data?.completed || []).filter(r => r.ticker === t).length + 1;
+  return `${BROKER[broker] || broker} ${t} ${n}차${principal > 0 ? ' ' + man(principal) : ''}`;
+}
 
 function toast(msg, ms = 3500) { const t = $('#toast'); t.textContent = msg; t.style.display = 'block'; clearTimeout(t._h); t._h = setTimeout(() => t.style.display = 'none', ms); }
 
@@ -264,9 +298,13 @@ function homeView() {
   if (!cs.length) h += '<div class="empty">진행 중인 사이클이 없어요.<br>오른쪽 아래 <b>새 사이클</b>로 시작하세요.</div>';
   for (const c of cs) {
     const { total, pct: pp } = pnl(c);
-    h += `<div class="card cycle" onclick="openCycle('${esc(c.id)}')">
-      <div class="row"><div style="flex:1;min-width:0"><div class="title one">${esc(c.name)}</div>
-        <div class="meta one">${esc(c.ticker)} · ${esc(BROKER[c.broker] || c.broker)} · ${c.splits}분할 · 수수료 −${usd(c.fees)}</div></div>
+    const br = BRAND[c.broker] || {};
+    h += `<div class="card cycle bc ${br.cls || ''}" onclick="openCycle('${esc(c.id)}')">
+      ${br.mark ? `<img class="wm" src="${br.mark}" alt="">` : ''}
+      <div class="row" style="align-items:flex-start"><div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:4px">
+        ${br.logo ? `<img class="blogo" src="${br.logo}" alt="${br.name}">` : `<div class="meta">${esc(c.broker)}</div>`}
+        <div class="one"><span class="nm">${esc(shortName(c))}</span><span class="cap">${man(c.principal)}</span></div>
+        <div class="sub one">${c.splits}분할 · 수수료 −${usd(c.fees)}</div></div>
         <div class="pnl"><div class="amt num ${cls(total)}">${sgn(total)}</div><div class="pct num ${cls(total)}">${pct(pp)}</div></div></div>
       <div class="tline"><div class="t num">T${c.T.toFixed(2)} <small>/ ${c.splits}</small></div>${tbar(c)}</div>
       <div class="row"><div class="stats"><div class="stat"><span class="k">보유</span><span class="v num">${c.qty}</span><span class="k">주</span></div>
@@ -317,7 +355,7 @@ function detailView(c) {
   if (!c) { view.cycle = null; return homeView() }
   const { total, pct: pp } = pnl(c);
   const phaseB = c.mode === 'reverse' ? 'b-up' : 'b-ok';
-  return `<div class="dhead"><button class="backbtn" aria-label="뒤로" onclick="goBack()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></button><div class="dtitle">${esc(c.name)}</div>${statusBadge(c)}</div>
+  return `<div class="dhead"><button class="backbtn" aria-label="뒤로" onclick="goBack()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></button><div class="dtitle">${brandLogo(c.broker)}${esc(shortName(c))} <span class="meta num">${man(c.principal)}</span></div>${statusBadge(c)}</div>
   <div class="card">
     <div class="row" style="align-items:flex-start"><div><div class="meta">회차 <span class="badge ${phaseB}">${esc(c.phase)}</span></div>
       <div class="big num" style="margin-top:6px">T${c.T.toFixed(2)}<small> / ${c.splits}</small></div></div>
@@ -373,7 +411,7 @@ function doneView() {
   }
   const maxAbs = Math.max(1, ...byMonth.map(Math.abs)), yearSum = byMonth.reduce((a, b) => a + b, 0);
   const bars = byMonth.map((v, i) => `<div class="b ${v > 0 ? 'pos' : v < 0 ? 'neg' : ''}" style="height:${Math.max(4, Math.abs(v) / maxAbs * 86)}px" title="${i + 1}월 ${sgn(v)}"></div>`).join('');
-  const list = rows.map(r => `<div class="done-it" onclick="openDone('${esc(r.id)}')"><div class="row"><div><div class="title" style="font-size:15px">${esc(r.name || r.ticker)}</div>
+  const list = rows.map(r => `<div class="done-it" onclick="openDone('${esc(r.id)}')"><div class="row"><div><div class="title" style="font-size:15px">${brandLogo(r.broker)}${esc(shortName(r))} <span class="meta num">${man(+r.principal)}</span></div>
       <div class="meta">${esc(r.ticker)} · ${esc(BROKER[r.broker] || r.broker || '')} ${r.splits ? '· ' + esc(r.splits) + '분할' : ''}</div>
       <div class="meta">${esc(r.started.slice(2).replace(/-/g, '.'))} ~ ${esc(r.ended.slice(5).replace('-', '.'))} · ${esc(r.days)}일</div></div>
       <div class="pnl"><div class="amt num ${cls(+r.profit)}">${sgn(+r.profit)}</div><div class="meta">원금 ${usd(+r.principal, 0)} · <span class="${cls(+r.profit)}">${pct(+r.return_pct)}</span></div></div></div>
@@ -399,7 +437,7 @@ function doneDetailView(r) {
   const st = d ? d.stats : null;
   const traded = (+r.bought_amt || 0) + (+r.sold_amt || 0);
   const feeRate = fees && traded ? (fees / traded * 100).toFixed(2) + '%' : '-';
-  let h = `<div class="dhead"><button class="backbtn" aria-label="뒤로" onclick="goBack()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></button><div class="dtitle">${esc(r.name || r.ticker)} <span class="meta">${esc(r.ticker)} · V4.0 · ${esc(BROKER[r.broker] || r.broker || '')}</span></div></div>
+  let h = `<div class="dhead"><button class="backbtn" aria-label="뒤로" onclick="goBack()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></button><div class="dtitle">${brandLogo(r.broker)}${esc(shortName(r))} <span class="meta num">${man(+r.principal)}</span></div></div>
   <div class="card">
     <div><span class="bigp num ${cls(gross)}">${sgn(gross)}</span> <span class="num ${cls(gross)}" style="font-weight:700">${pct(gross / prin * 100)}</span></div>
     <div class="meta" style="margin-top:4px">수수료 <b class="num">−${usd(fees)}</b> · 실순익 <b class="num ${cls(net)}">${sgn(net)}</b></div>
@@ -596,10 +634,10 @@ window.openNew = (mode = newMode) => {
   const imp = mode === 'import';
   openSheet(`<h3>새 사이클</h3>
    <div class="seg"><button class="${!imp ? 'on' : ''}" onclick="openNew('start')">새로 시작</button><button class="${imp ? 'on' : ''}" onclick="openNew('import')">진행 중 넘겨받기</button></div>
-   <label class="f"><span>이름</span><input id="nName" placeholder="예: SOXL 3차 DB $10만"></label>
-   <div class="f2"><label class="f"><span>증권사</span><select id="nBroker" onchange="syncFee()"><option value="DB">DB (자동 주문)</option><option value="KIWOOM">키움 (자동 주문)</option></select></label>
-   <label class="f"><span>종목</span><input id="nTicker" value="SOXL"></label></div>
-   <div class="f2"><label class="f"><span>원금 (USD)</span><input id="nPrin" inputmode="decimal" placeholder="100000"></label>
+   <label class="f"><span>이름 (자동 · 고쳐도 돼요)</span><input id="nName" oninput="nameTouched=true"></label>
+   <div class="f2"><label class="f"><span>증권사</span><select id="nBroker" onchange="syncFee();syncName()"><option value="DB">DB (자동 주문)</option><option value="KIWOOM">키움 (자동 주문)</option></select></label>
+   <label class="f"><span>종목</span><input id="nTicker" value="SOXL" oninput="syncName()"></label></div>
+   <div class="f2"><label class="f"><span>원금 (USD)</span><input id="nPrin" inputmode="decimal" placeholder="100000" oninput="syncName()"></label>
    <label class="f"><span>분할</span><select id="nSplits"><option>40</option><option>30</option><option>20</option></select></label></div>
    <div class="f2"><label class="f"><span>기준% (비우면 SOXL 20·TQQQ 15)</span><input id="nBase" inputmode="decimal"></label>
    <label class="f"><span>수수료율 % (계좌 기본값)</span><input id="nFee" inputmode="decimal"></label></div>
@@ -609,8 +647,10 @@ window.openNew = (mode = newMode) => {
    <label class="f"><span>시작일</span><input id="nStart" type="date" value="${today()}"></label>
    <div class="help" style="margin-bottom:10px">넘겨받은 날 이미 앱/MTS로 넣은 주문이 있으면, 그날 체결이 끝난 다음(다음날 아침)에 넘겨받으세요.</div>` : ''}
    <button class="btn primary" style="width:100%" onclick="submitNew()">${imp ? '넘겨받기' : '시작'}</button>`);
-  syncFee();
+  syncFee(); nameTouched = false; syncName();
 };
+let nameTouched = false;
+window.syncName = () => { if (!nameTouched && $('#nName')) $('#nName').value = autoName(val('nBroker'), val('nTicker'), +val('nPrin')) };
 window.syncFee = () => { const r = data?.accounts?.[val('nBroker')]; if (r != null) $('#nFee').value = +(r * 100).toFixed(4) };
 window.submitNew = () => {
   const p = { name: val('nName'), broker: val('nBroker'), ticker: val('nTicker').toUpperCase(), principal: +val('nPrin'), splits: +val('nSplits') };
