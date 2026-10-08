@@ -443,12 +443,20 @@ function doneView() {
   }
   const maxAbs = Math.max(1, ...byMonth.map(Math.abs)), yearSum = byMonth.reduce((a, b) => a + b, 0);
   const bars = byMonth.map((v, i) => `<div class="b ${v > 0 ? 'pos' : v < 0 ? 'neg' : ''}" style="height:${Math.max(4, Math.abs(v) / maxAbs * 86)}px" title="${i + 1}월 ${sgn(v)}"></div>`).join('');
-  const list = rows.map(r => `<div class="done-it" onclick="openDone('${esc(r.id)}')"><div class="row"><div><div class="title" style="font-size:15px">${brandLogo(r.broker)}${esc(shortName(r))} <span class="meta num">${man(+r.principal)}</span></div>
-      <div class="meta">${esc(r.ticker)} · ${esc(BROKER[r.broker] || r.broker || '')} ${r.splits ? '· ' + esc(r.splits) + '분할' : ''}</div>
-      <div class="meta">${esc(r.started.slice(2).replace(/-/g, '.'))} ~ ${esc(r.ended.slice(5).replace('-', '.'))} · ${esc(r.days)}일</div></div>
-      <div class="pnl"><div class="amt num ${cls(+r.profit)}">${sgn(+r.profit)}</div><div class="meta">원금 ${usd(+r.principal, 0)} · <span class="${cls(+r.profit)}">${pct(+r.return_pct)}</span></div></div></div>
-      ${+r.fees ? `<div class="meta" style="margin-top:4px">수수료 −${usd(+r.fees)} 차감 후</div>` : ''}
-      ${r.note ? `<div class="meta" style="margin-top:4px">${esc(r.note)}</div>` : ''}</div>`).join('');
+  const list = rows.map(r => {
+    const br = BRAND[r.broker] || {}, net = +r.profit, fees = +r.fees || 0;
+    const mt = +r.max_T || 0, sp = +r.splits || 0, ratio = sp ? Math.max(0, Math.min(1, mt / sp)) : 0;
+    return `<div class="card cycle bc ${br.cls || ''}" onclick="openDone('${esc(r.id)}')">
+      ${br.mark ? `<img class="wm" src="${br.mark}" alt="">` : ''}
+      <div class="row" style="align-items:flex-start"><div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:4px">
+        ${br.logo ? `<img class="blogo" src="${br.logo}" alt="${br.name}">` : `<div class="meta">${esc(r.broker)}</div>`}
+        <div class="one"><span class="nm">${esc(shortName(r))}</span><span class="cap">${man(+r.principal)}</span></div>
+        <div class="sub one">${sp ? sp + '분할 · ' : ''}${esc(r.started.slice(2).replace(/-/g, '.'))} ~ ${esc(r.ended.slice(5).replace('-', '.'))} · ${esc(r.days)}일</div></div>
+        <div class="pnl"><div class="amt num ${cls(net)}">${sgn(net)}</div><div class="pct num ${cls(net)}">${pct(+r.return_pct)}</div></div></div>
+      ${sp && mt ? `<div class="tline"><div class="t num">최고 T${mt.toFixed(1)} <small>/ ${sp}</small></div><div class="bar"><div class="fill" style="width:${ratio * 100}%"></div><div class="mid"></div><div class="knob" style="left:calc(${ratio * 100}% - 3px)"></div></div></div>` : ''}
+      <div class="row"><div class="sub one">${fees ? `수수료 <b class="num">−${usd(fees)}</b> · 수수료 전 <b class="num ${cls(net + fees)}">${sgn(net + fees)}</b>` : esc(r.note || '')}</div>
+        <span class="badge b-gray">✓ 완료 · ${esc(r.ended.slice(5))}</span></div></div>`;
+  }).join('');
   const total = rows.reduce((a, r) => a + (parseFloat(r.profit) || 0), 0);
   return header('완료', `누적 실현수익 <b class="${cls(total)}">${sgn(total)}</b> · ${rows.length}사이클`) + `
   <div class="card"><div class="row"><button class="icon-btn" onclick="shiftMonth(-1)">‹</button><div class="title">${calYear}년 ${calMonth + 1}월</div><button class="icon-btn" onclick="shiftMonth(1)">›</button></div>
@@ -457,7 +465,7 @@ function doneView() {
   <div class="card"><div class="row"><div class="title" style="font-size:15px">${calYear}년</div><div class="num ${cls(yearSum)}" style="font-weight:800">연 ${sgn(yearSum)}</div></div>
     <div class="bars">${bars}</div><div class="bars-l">${byMonth.map((_, i) => `<span>${i + 1}</span>`).join('')}</div></div>
   <div class="sec"><span>완료 사이클</span><button class="btn" style="padding:6px 12px;font-size:12px" onclick="openHistory()">＋ 과거 기록</button></div>
-  <div class="card">${list || '<div class="empty">완료된 사이클이 없어요.</div>'}</div>`;
+  ${list || '<div class="card"><div class="empty">완료된 사이클이 없어요.</div></div>'}`;
 }
 
 /* ── 완료 사이클 상세 (요약 · 종가/평단 그래프 · 매매 내역) ── */
