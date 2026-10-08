@@ -66,6 +66,28 @@
   .mini{border:1px solid var(--border);background:var(--surface);border-radius:9px;padding:4px 10px;font-size:12px;font-weight:700;color:var(--accent)}
   .preview{background:var(--accent-soft);border-radius:12px;padding:10px 12px;font-size:13px;line-height:1.6;margin:4px 0 12px}
   #root{transition:transform .18s ease}
+  .done-it{cursor:pointer}
+  .done-it:active{background:var(--surface-2)}
+  .bigp{font-size:32px;font-weight:800;letter-spacing:-.8px;line-height:1.1}
+  .kv{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:14px;margin-top:10px}
+  .kv span{color:var(--muted);margin-right:4px}
+  .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:12px 10px}
+  .grid3 .k{font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis} .grid3 .v{font-size:18px;font-weight:700;margin-top:2px;white-space:nowrap}
+  .grid3 .v small{font-size:12px;color:var(--faint);font-weight:600}
+  .chart{position:relative;margin-top:6px;touch-action:pan-y}
+  .chart svg{width:100%;height:auto;display:block}
+  .chart text{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9px;fill:var(--faint)}
+  .tip{position:absolute;top:6px;background:#1d2130;color:#fff;border-radius:10px;padding:8px 10px;font-size:12px;line-height:1.55;pointer-events:none;display:none;min-width:130px;white-space:nowrap;z-index:2}
+  .tip b{font-family:'IBM Plex Mono',ui-monospace,monospace;float:right;margin-left:12px}
+  .tip i{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px}
+  .legend{display:flex;gap:14px;justify-content:center;font-size:12px;color:var(--muted);margin-top:6px}
+  .legend i{display:inline-block;vertical-align:middle;margin-right:4px}
+  .tbl .tr{display:grid;grid-template-columns:minmax(84px,1.25fr) 42px 1fr 40px 1.05fr;gap:4px;align-items:center;padding:7px 0;border-bottom:1px solid var(--border-2);font-size:12.5px}
+  .tbl .tr>div{min-width:0;white-space:nowrap}
+  .tbl .tr>div:last-child{font-size:12px;letter-spacing:-.3px}
+  .tbl .tr>div:nth-child(n+3){text-align:right}
+  .tbl .th{font-size:11px;color:var(--faint);padding-top:0}
+  .tbl .tr .chip{margin:0;text-align:center}
   .big{font-size:34px;font-weight:800;letter-spacing:-1px;line-height:1}
   .big small{font-size:20px;color:var(--faint);font-weight:600}
   .grid4{display:grid;grid-template-columns:1fr 1fr;gap:9px 12px;margin-top:10px}
@@ -148,7 +170,7 @@
 const LS = k => { try { return localStorage.getItem(k) } catch { return null } };
 const SS = (k, v) => { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, v) } catch {} };
 const cfg = { repo: LS('ib.repo') || 'jsbeth-code/infinite-buy', token: LS('ib.token') || '' };
-let data = null, view = { tab: 'home', cycle: null }, calMonth = null, calYear = null;
+let data = null, view = { tab: 'home', cycle: null, done: null }, tradesOpen = false, calMonth = null, calYear = null;
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -221,11 +243,12 @@ const fmtD = s => s && s.length === 8 ? `${s.slice(4, 6)}-${s.slice(6)}` : (s ||
 function render() {
   const root = $('#root');
   $('#tabs').style.display = cfg.token ? 'flex' : 'none';
-  document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === view.tab && !view.cycle));
+  document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === view.tab && !view.cycle && !view.done));
   if (!cfg.token || view.tab === 'settings') return root.innerHTML = settingsView();
   if (!data) return root.innerHTML = '<div class="empty">불러오는 중…</div>';
   if (data.error) return root.innerHTML = `<div class="card"><b>불러오기 실패</b><div class="note">${esc(data.error)}</div><div class="help" style="margin-top:8px">토큰 권한(Contents 읽기)과 저장소 이름을 확인하세요. 아직 봇이 한 번도 실행되지 않았다면 dashboard.json 이 없을 수 있어요.</div><div class="actions"><button class="btn" onclick="view.tab='settings';render()">설정</button><button class="btn primary" onclick="control('refresh',{})">데이터 생성</button></div></div>`;
   if (view.cycle) return root.innerHTML = detailView(data.cycles.find(c => c.id === view.cycle));
+  if (view.done) { root.innerHTML = doneDetailView((data.completed || []).find(r => r.id === view.done)); return bindChart() }
   root.innerHTML = view.tab === 'done' ? doneView() : homeView();
 }
 
@@ -350,7 +373,7 @@ function doneView() {
   }
   const maxAbs = Math.max(1, ...byMonth.map(Math.abs)), yearSum = byMonth.reduce((a, b) => a + b, 0);
   const bars = byMonth.map((v, i) => `<div class="b ${v > 0 ? 'pos' : v < 0 ? 'neg' : ''}" style="height:${Math.max(4, Math.abs(v) / maxAbs * 86)}px" title="${i + 1}월 ${sgn(v)}"></div>`).join('');
-  const list = rows.map(r => `<div class="done-it"><div class="row"><div><div class="title" style="font-size:15px">${esc(r.name || r.ticker)}</div>
+  const list = rows.map(r => `<div class="done-it" onclick="openDone('${esc(r.id)}')"><div class="row"><div><div class="title" style="font-size:15px">${esc(r.name || r.ticker)}</div>
       <div class="meta">${esc(r.ticker)} · ${esc(BROKER[r.broker] || r.broker || '')} ${r.splits ? '· ' + esc(r.splits) + '분할' : ''}</div>
       <div class="meta">${esc(r.started.slice(2).replace(/-/g, '.'))} ~ ${esc(r.ended.slice(5).replace('-', '.'))} · ${esc(r.days)}일</div></div>
       <div class="pnl"><div class="amt num ${cls(+r.profit)}">${sgn(+r.profit)}</div><div class="meta">원금 ${usd(+r.principal, 0)} · <span class="${cls(+r.profit)}">${pct(+r.return_pct)}</span></div></div></div>
@@ -365,6 +388,92 @@ function doneView() {
     <div class="bars">${bars}</div><div class="bars-l">${byMonth.map((_, i) => `<span>${i + 1}</span>`).join('')}</div></div>
   <div class="sec"><span>완료 사이클</span><button class="btn" style="padding:6px 12px;font-size:12px" onclick="openHistory()">＋ 과거 기록</button></div>
   <div class="card">${list || '<div class="empty">완료된 사이클이 없어요.</div>'}</div>`;
+}
+
+/* ── 완료 사이클 상세 (요약 · 종가/평단 그래프 · 매매 내역) ── */
+const md = d => `${+d.slice(5, 7)}/${+d.slice(8)}`;
+function doneDetailView(r) {
+  if (!r) { view.done = null; return doneView() }
+  const d = (data.completed_detail || {})[r.id];
+  const fees = +r.fees || 0, net = +r.profit, gross = d ? d.gross : net + fees, prin = +r.principal;
+  const st = d ? d.stats : null;
+  const traded = (+r.bought_amt || 0) + (+r.sold_amt || 0);
+  const feeRate = fees && traded ? (fees / traded * 100).toFixed(2) + '%' : '-';
+  let h = `<div class="dhead"><button class="backbtn" aria-label="뒤로" onclick="goBack()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></button><div class="dtitle">${esc(r.name || r.ticker)} <span class="meta">${esc(r.ticker)} · V4.0 · ${esc(BROKER[r.broker] || r.broker || '')}</span></div></div>
+  <div class="card">
+    <div><span class="bigp num ${cls(gross)}">${sgn(gross)}</span> <span class="num ${cls(gross)}" style="font-weight:700">${pct(gross / prin * 100)}</span></div>
+    <div class="meta" style="margin-top:4px">수수료 <b class="num">−${usd(fees)}</b> · 실순익 <b class="num ${cls(net)}">${sgn(net)}</b></div>
+    <div class="kv"><div><span>원금</span><b class="num">${usd(prin)}</b></div>${r.splits ? `<div><span>분할</span><b>${esc(r.splits)}</b></div>` : ''}${r.base_pct ? `<div><span>최대</span><b>${+r.base_pct}%</b></div>` : ''}<div><span>수수료율</span><b>${feeRate}</b></div></div>
+    <div class="kv" style="margin-top:6px"><div><span>기간</span><b>${esc(r.started)} ~ ${esc(r.ended)} · ${esc(r.days)}일</b></div></div>
+  </div>`;
+  if (!d) return h + '<div class="card"><div class="empty">매매 내역이 없어요. 봇 도입 전 기록은 매매 내역을 넣으면 그래프가 생겨요.</div></div>';
+  h += `<div class="sec"><span>매매 요약</span></div><div class="card"><div class="grid3">
+    <div><div class="k">매수 / 매도</div><div class="v num">${st.buys}<small>회</small> / ${st.sells}<small>회</small></div></div>
+    <div><div class="k">최고 회차</div><div class="v num">${r.max_T ? 'T' + (+r.max_T).toFixed(1) : '-'}${r.splits ? `<small> / ${esc(r.splits)}</small>` : ''}</div></div>
+    <div><div class="k">최대 투입</div><div class="v num">${usd(st.max_invested)}</div></div>
+    <div><div class="k">매수금 대비</div><div class="v num ${cls(st.return_on_bought)}">${st.return_on_bought == null ? '-' : pct(st.return_on_bought)}</div></div>
+    <div><div class="k">최대낙폭</div><div class="v num ${cls(st.max_drawdown)}">${sgn(st.max_drawdown)}</div></div>
+    <div><div class="k">총 수수료</div><div class="v num">${usd(fees)}</div></div></div></div>`;
+  h += `<div class="sec"><span>매매 · 평단가</span></div><div class="card"><div class="chart" id="chart">${chartSvg(d.series)}<div class="tip" id="tip"></div></div>
+    <div class="legend"><span><i style="width:14px;height:2px;background:#c3c7d3"></i>종가</span><span><i style="width:14px;border-top:2px dashed #f0a020"></i>평단가</span><span><i style="width:8px;height:8px;border-radius:50%;background:var(--buy)"></i>매수</span><span><i style="width:8px;height:8px;border-radius:50%;background:var(--down)"></i>매도</span></div></div>`;
+  const rows = d.trades.map(t => `<div class="tr"><div class="num">${esc(t.session)}</div><div><span class="chip ${t.side}">${t.side === 'buy' ? '매수' : '매도'}</span></div><div class="num">${usd(t.price)}</div><div>${t.qty}주</div><div class="num ${t.pnl == null ? 'flat' : cls(t.pnl)}">${t.pnl == null ? '—' : sgn(t.pnl)}</div></div>`).join('');
+  h += `<div class="sec"><span>매매 내역</span><button class="mini" onclick="tradesOpen=!tradesOpen;render()">${d.trades.length}건 ${tradesOpen ? '▴' : '▾'}</button></div>
+    ${tradesOpen ? `<div class="card tbl"><div class="tr th"><div>날짜</div><div>유형</div><div>가격</div><div>수량</div><div>손익</div></div>${rows}</div>` : ''}`;
+  return h;
+}
+const CH = { W: 340, H: 210, L: 46, R: 8, T: 10, B: 22 };
+function chartSvg(series) {
+  const pts = series.filter(x => x.c != null || x.b.length || x.s.length);
+  chartData = pts;
+  if (pts.length < 2) return '<div class="empty">그래프 데이터가 부족해요</div>';
+  const vals = pts.flatMap(x => [x.c, x.avg, ...x.b, ...x.s]).filter(v => v != null);
+  let lo = Math.min(...vals), hi = Math.max(...vals);
+  const pad = (hi - lo) * .06 || 1; lo -= pad; hi += pad;
+  const { W, H, L, R, T, B } = CH, pw = W - L - R, ph = H - T - B, n = pts.length;
+  const X = i => L + i / (n - 1) * pw, Y = v => T + (hi - v) / (hi - lo) * ph;
+  chartScale = { X, Y, n, pw };
+  let g = '';
+  for (let k = 0; k <= 4; k++) {
+    const v = lo + (hi - lo) * k / 4, y = Y(v);
+    g += `<line x1="${L}" x2="${W - R}" y1="${y}" y2="${y}" stroke="#eef0f5"/><text x="${L - 4}" y="${y + 3}" text-anchor="end">$${v.toFixed(v >= 100 ? 0 : 2)}</text>`;
+  }
+  const step = Math.max(1, Math.round((n - 1) / 6));
+  for (let i = 0; i < n; i += step) g += `<text x="${X(i)}" y="${H - 6}" text-anchor="middle">${md(pts[i].d)}</text>`;
+  const close = pts.map((x, i) => x.c == null ? null : `${X(i).toFixed(1)},${Y(x.c).toFixed(1)}`).filter(Boolean).join(' ');
+  let avg = '', pen = false;
+  pts.forEach((x, i) => {
+    if (x.avg == null) { pen = false; return }
+    avg += `${pen ? 'H' + X(i).toFixed(1) + ' V' : 'M' + X(i).toFixed(1) + ' '}${Y(x.avg).toFixed(1)} `;
+    pen = true;
+  });
+  const dots = pts.map((x, i) => x.b.map(p => `<circle cx="${X(i)}" cy="${Y(p)}" r="2.6" fill="var(--buy)"/>`).join('') +
+    x.s.map(p => `<circle cx="${X(i)}" cy="${Y(p)}" r="3" fill="var(--down)"/>`).join('')).join('');
+  return `<svg viewBox="0 0 ${W} ${H}" id="chartSvg">${g}<polyline points="${close}" fill="none" stroke="#c3c7d3" stroke-width="1.4"/>
+    <path d="${avg}" fill="none" stroke="#f0a020" stroke-width="1.6" stroke-dasharray="4 3"/>${dots}
+    <line id="cursor" x1="0" x2="0" y1="${T}" y2="${H - B}" stroke="#8b90a0" stroke-width=".8" style="display:none"/></svg>`;
+}
+let chartData = [], chartScale = null;
+function bindChart() {
+  const box = $('#chart'), svg = $('#chartSvg');
+  if (!box || !svg || !chartScale) return;
+  const show = ev => {
+    const r = svg.getBoundingClientRect(), k = CH.W / r.width;
+    const x = (ev.clientX - r.left) * k, { X, n, pw } = chartScale;
+    const i = Math.max(0, Math.min(n - 1, Math.round((x - CH.L) / pw * (n - 1))));
+    const p = chartData[i], cur = $('#cursor');
+    cur.setAttribute('x1', X(i)); cur.setAttribute('x2', X(i)); cur.style.display = '';
+    const tip = $('#tip');
+    tip.innerHTML = `<div style="color:#aab">${p.d.replace(/-/g, '.')}</div>` +
+      (p.c != null ? `<div><i style="background:#c3c7d3;border-radius:1px;height:2px"></i>종가 <b>${usd(p.c)}</b></div>` : '') +
+      (p.avg != null ? `<div><i style="background:#f0a020;border-radius:1px;height:2px"></i>평단가 <b>${usd(p.avg)}</b></div>` : '') +
+      p.b.map(v => `<div><i style="background:var(--buy)"></i>매수 <b>${usd(v)}</b></div>`).join('') +
+      p.s.map(v => `<div><i style="background:var(--down)"></i>매도 <b>${usd(v)}</b></div>`).join('');
+    tip.style.display = 'block';
+    const px = X(i) / k, left = px > r.width / 2 ? px - tip.offsetWidth - 10 : px + 10;
+    tip.style.left = Math.max(0, left) + 'px';
+  };
+  box.onpointerdown = show; box.onpointermove = e => { if (e.pointerType === 'mouse' || e.buttons) show(e) };
+  box.onpointerleave = () => { $('#tip').style.display = 'none'; $('#cursor').style.display = 'none' };
 }
 
 function settingsView() {
@@ -402,26 +511,33 @@ window.saveAccount = b => {
 /* ── 동작 ── */
 /* 화면 이동은 브라우저 기록(history)에 남겨서 아이폰 스와이프·뒤로 버튼이 앱 안에서 동작하게 한다 */
 const sheetOpen = () => $('#sheetBg').classList.contains('on');
+window.openDone = id => {
+  view.done = id; tradesOpen = false;
+  history.pushState({ tab: 'done', done: id }, '', '#d=' + encodeURIComponent(id));
+  render(); scrollTo(0, 0);
+};
 window.openCycle = id => {
   view.cycle = id;
   history.pushState({ tab: view.tab, cycle: id }, '', '#c=' + encodeURIComponent(id));
   render(); scrollTo(0, 0);
 };
 window.goBack = () => {
-  if (history.state && (history.state.cycle || history.state.sheet)) return history.back();
+  if (history.state && (history.state.cycle || history.state.done || history.state.sheet)) return history.back();
   if (sheetOpen()) return hideSheet();
-  view.cycle = null; render();
+  view.cycle = null; view.done = null; render();
 };
 addEventListener('popstate', e => {
   const st = e.state || {};
   if (sheetOpen() && !st.sheet) hideSheet();
-  const cycle = st.cycle || null, tab = st.tab || 'home';
-  if (cycle !== view.cycle || tab !== view.tab) { view.cycle = cycle; view.tab = tab; render(); scrollTo(0, 0) }
+  const cycle = st.cycle || null, done = st.done || null, tab = st.tab || 'home';
+  if (cycle !== view.cycle || done !== view.done || tab !== view.tab) { view.cycle = cycle; view.done = done; view.tab = tab; render(); scrollTo(0, 0) }
 });
 (function initHistory() {
-  const m = location.hash.match(/^#c=(.+)$/);
-  history.replaceState({ tab: 'home' }, '', location.pathname + location.search);
-  if (m) { view.cycle = decodeURIComponent(m[1]); history.pushState({ tab: 'home', cycle: view.cycle }, '', location.hash || '#c=' + m[1]) }
+  const m = location.hash.match(/^#c=(.+)$/), md2 = location.hash.match(/^#d=(.+)$/), h = location.hash;
+  history.replaceState({ tab: md2 ? 'done' : 'home' }, '', location.pathname + location.search);
+  if (md2) view.tab = 'done';
+  if (m) { view.cycle = decodeURIComponent(m[1]); history.pushState({ tab: 'home', cycle: view.cycle }, '', h) }
+  if (md2) { view.done = decodeURIComponent(md2[1]); history.pushState({ tab: 'done', done: view.done }, '', h) }
 })();
 /* 홈 화면에 추가한 앱(standalone)에는 브라우저 스와이프가 없어서 왼쪽 가장자리 스와이프를 직접 처리 */
 (function edgeSwipe() {
@@ -431,7 +547,7 @@ addEventListener('popstate', e => {
   const root = () => $('#root');
   addEventListener('touchstart', e => {
     const t = e.touches[0];
-    x0 = (e.touches.length === 1 && t.clientX < 30 && (view.cycle || sheetOpen())) ? t.clientX : null;
+    x0 = (e.touches.length === 1 && t.clientX < 30 && (view.cycle || view.done || sheetOpen())) ? t.clientX : null;
     y0 = t.clientY; dx = 0;
   }, { passive: true });
   addEventListener('touchmove', e => {
@@ -456,7 +572,7 @@ window.logout = () => { SS('ib.token', null); cfg.token = ''; data = null; rende
 window.confirmDo = (action, id, msg) => { if (confirm(msg)) control(action, { id }) };
 window.toggleAuto = (id, on) => { if (confirm(on ? '자동 주문을 켤까요? 다음 주문 시간(프리장 시작)부터 봇이 직접 주문합니다. 같은 세션에 앱/MTS로 주문했다면 중복되니 주의하세요.' : '직접 주문으로 바꿀까요? 봇은 주문표만 계산하고, 체결은 직접 입력해야 해요.')) control('edit', { id, auto: on }) };
 document.querySelectorAll('#tabs button').forEach(b => b.onclick = () => {
-  view.tab = b.dataset.tab; view.cycle = null;
+  view.tab = b.dataset.tab; view.cycle = null; view.done = null;
   history.replaceState({ tab: view.tab }, '', location.pathname + location.search);
   render(); scrollTo(0, 0);
 });
