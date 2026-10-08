@@ -85,6 +85,36 @@
   .bc .stat .k{font-size:11.5px} .bc .stat .v{font-size:14.5px}
   .bc .badge{font-size:10.5px;padding:2px 7px}
   .blogo-s{height:14px;vertical-align:-2px;margin-right:6px}
+  /* 사이클 상세: 홈 카드와 같은 증권사 카드 + 숫자 표 */
+  .bc.dcard{padding:12px 14px 13px;gap:6px}
+  .bc.dcard .nm{font-size:20px}
+  .bc.dcard .pnl .amt{font-size:17px} .bc.dcard .pnl .pct{font-size:12px}
+  .bc .ptag{font-size:10.5px;font-weight:700;padding:1px 7px;border-radius:99px;margin-left:2px}
+  .bc.db .ptag{background:rgba(47,143,58,.12);color:#1f6e2b} .bc.kw .ptag{background:rgba(43,69,112,.1);color:#2b4570}
+  .bc .ptag.rev{background:var(--up-soft);color:var(--up)}
+  .bc .kv2{display:grid;grid-template-columns:1fr 1fr;gap:3px 12px;font-size:11.5px;color:#5d6472}
+  .bc .kv2>div{white-space:nowrap;min-width:0;overflow:hidden;text-overflow:ellipsis}
+  .bc .kv2 b{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:14px;color:var(--text);margin-left:4px;font-weight:600}
+  .bc .kv2 small{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:11px;margin-left:3px;font-weight:600}
+  .tiles{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--border-2);border:1px solid var(--border-2);border-radius:14px;overflow:hidden;margin-bottom:6px}
+  .tiles>div{background:var(--surface);padding:8px 10px;min-width:0;display:flex;flex-direction:column;gap:2px}
+  .tiles .k{font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .tiles .v{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  @media (max-width:370px){.tiles .v{font-size:12.5px}}
+  .actions.a4{grid-template-columns:repeat(4,1fr);gap:6px}
+  .actions.a4 .btn{font-size:12.5px;padding:9px 2px;white-space:nowrap}
+  .hist2{padding:2px 12px}
+  .hist2 .d{display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--border-2)}
+  .hist2 .d:last-child{border-bottom:0}
+  .hist2 .dt{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:12px;color:var(--muted);width:42px;flex:none}
+  .hist2 .ln{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px}
+  .hist2 .ln>div{display:flex;align-items:center;gap:6px;font-size:13px;white-space:nowrap}
+  .hist2 .ln b{font-family:'IBM Plex Mono',ui-monospace,monospace;font-weight:600}
+  .hist2 .ln .chip{margin-right:0;font-size:10.5px;padding:2px 6px}
+  .hist2 .ln i{font-style:normal;margin-left:auto;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:11.5px;color:var(--muted)}
+  .hist2 .src{font-size:10.5px;color:var(--faint)}
+  .pen{flex:none;width:30px;height:30px;border-radius:9px;border:1px solid var(--border);background:var(--surface);display:grid;place-items:center;color:var(--accent)}
+  .pen svg{width:14px;height:14px}
   .done-it{cursor:pointer}
   .done-it:active{background:var(--surface-2)}
   .bigp{font-size:32px;font-weight:800;letter-spacing:-.8px;line-height:1.1}
@@ -339,52 +369,54 @@ function fillsBy(c) {
   for (const x of c.fills || []) (by[x.session] = by[x.session] || []).push(x);
   return by;
 }
+const PEN = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M11 2.5l2.5 2.5L6 12.5 3 13l.5-3z"/></svg>';
 function historyView(c) {
   const by = fillsBy(c);
   if (!Object.keys(by).length) return '<div class="card"><div class="empty">아직 체결 기록이 없어요.</div></div>';
   const src = { manual: '직접입력', edited: '수정함', imported: '넘겨받음' };
   let h = '';
   for (const d of Object.keys(by).sort().reverse()) {
-    h += `<div class="day"><span>${esc(d)}</span><button class="mini" onclick="openHist('${esc(c.id)}','${esc(d)}')">✏️ 수정</button></div>`;
-    for (const x of by[d]) h += `<div class="it"><div><span class="chip ${x.side}">${x.side === 'buy' ? '매수' : '매도'}</span><b class="num">${usd(x.price)} × ${x.qty}주</b> <span class="meta">${src[x.source] || ''}</span></div><span class="num meta">${usd(x.amount)}</span></div>`;
+    h += `<div class="d"><span class="dt">${esc(d.slice(5))}</span><div class="ln">${by[d].map(x =>
+      `<div><span class="chip ${x.side}">${x.side === 'buy' ? '매수' : '매도'}</span><b>${usd(x.price)}</b>×${x.qty}${src[x.source] ? ` <span class="src">${src[x.source]}</span>` : ''}<i>${usd(x.amount)}</i></div>`).join('')}</div>
+      <button class="pen" aria-label="${esc(d)} 기록 수정" onclick="openHist('${esc(c.id)}','${esc(d)}')">${PEN}</button></div>`;
   }
-  return `<div class="card hist">${h}</div>`;
+  return `<div class="card hist2">${h}</div>`;
 }
 
 function detailView(c) {
   if (!c) { view.cycle = null; return homeView() }
   const { total, pct: pp } = pnl(c);
-  const phaseB = c.mode === 'reverse' ? 'b-up' : 'b-ok';
-  return `<div class="dhead"><button class="backbtn" aria-label="뒤로" onclick="goBack()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></button><div class="dtitle">${brandLogo(c.broker)}${esc(shortName(c))} <span class="meta num">${man(c.principal)}</span></div>${statusBadge(c)}</div>
-  <div class="card">
-    <div class="row" style="align-items:flex-start"><div><div class="meta">회차 <span class="badge ${phaseB}">${esc(c.phase)}</span></div>
-      <div class="big num" style="margin-top:6px">T${c.T.toFixed(2)}<small> / ${c.splits}</small></div></div>
-      <div class="pnl"><div class="meta">손익</div><div class="amt num ${cls(total)}" style="font-size:22px">${sgn(total)}</div><div class="pct num ${cls(total)}">${pct(pp)}</div></div></div>
-    <div class="meta" style="margin:8px 0 10px">투입 ${usd(c.net_invested)} · 원금 ${usd(c.principal)} · 잔금 ${usd(c.cash)}<br>수수료 누적 <b class="num">−${usd(c.fees)}</b> (${(c.fee_rate * 100).toFixed(3)}%) · 손익은 수수료 차감 후</div>
-    ${tbar(c)}
-    <div class="row meta" style="margin-top:6px"><span>전반전</span><span>후반 T${c.splits / 2}</span><span>완료 T${c.splits}</span></div>
-    <div class="grid4">
-      <div><div class="k">평단</div><div class="v num">${usd(c.avg)}</div></div>
-      <div><div class="k">보유</div><div class="v num">${c.qty}주</div></div>
-      <div><div class="k">${c.mode === 'reverse' ? '별지점(5일평균)' : '☆%'}</div><div class="v num">${c.star_pct != null ? c.star_pct.toFixed(2) + '%' : '-'}</div></div>
-      <div><div class="k">${c.mode === 'reverse' ? '쿼터매수금' : '1회 매수금'}</div><div class="v num">${usd(c.unit)}</div></div>
-      <div><div class="k">평가금액</div><div class="v num">${usd(c.eval)}</div></div>
-      <div><div class="k">실현(매도) / 평가 / 수수료</div><div class="v num" style="font-size:15px"><span class="${cls(c.realized)}">${sgn(c.realized)}</span> / <span class="${cls(c.unrealized)}">${sgn(c.unrealized)}</span>${c.realized_gross ? ` / <span class="down">−${usd(c.fees)}</span>` : ''}</div></div>
-    </div>
-    <div style="margin-top:8px">${priceLine(c)}</div>
-    <div class="actions">
-      ${c.paused ? `<button class="btn primary" onclick="confirmDo('resume','${esc(c.id)}','재개할까요? 다음 주문 시간부터 자동 주문합니다.')">▶ 재개</button>`
-                 : `<button class="btn" onclick="confirmDo('pause','${esc(c.id)}','일시정지할까요? 이미 접수된 오늘 주문은 MTS에서 직접 취소해야 해요.')">⏸ 일시정지</button>`}
-      <button class="btn" onclick="openEdit('${esc(c.id)}')">✏️ 수정</button>
-      <button class="btn danger" onclick="confirmDo('stop','${esc(c.id)}','이 사이클을 종료할까요? 남은 보유분은 그대로 두고 기록만 마감합니다. 미체결 주문은 MTS에서 취소하세요.')">⏹ 종료</button>
-    </div>
-    <div class="actions" style="grid-template-columns:${!c.auto ? '1fr 1fr' : '1fr'}">
-      ${!c.auto ? `<button class="btn primary" onclick="openFill('${esc(c.id)}')">✍️ 체결 입력</button>` : ''}
-      <button class="btn" onclick="toggleAuto('${esc(c.id)}', ${!c.auto})">${c.auto ? '✋ 직접 주문으로 전환' : '🤖 자동 주문 켜기'}</button>
-    </div>
+  const br = BRAND[c.broker] || {}, p = c.price || {}, rev = c.mode === 'reverse';
+  const live = p.live ? `<div>현재가<b>${usd(p.live)}</b><small class="${cls(p.live - p.close)}">${pct((p.live / p.close - 1) * 100)}</small></div>` : '';
+  const tile = (k, v, klass = '') => `<div><span class="k">${k}</span><span class="v ${klass}">${v}</span></div>`;
+  return `<div class="dhead"><button class="backbtn" aria-label="뒤로" onclick="goBack()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></button><div class="dtitle">사이클</div>${statusBadge(c)}</div>
+  <div class="card bc dcard ${br.cls || ''}">
+    ${br.mark ? `<img class="wm" src="${br.mark}" alt="">` : ''}
+    ${br.logo ? `<img class="blogo" src="${br.logo}" alt="${br.name}">` : `<div class="meta">${esc(c.broker)}</div>`}
+    <div class="row" style="align-items:flex-start"><div style="min-width:0">
+        <div class="one"><span class="nm">${esc(shortName(c))}</span><span class="cap">${man(c.principal)}</span></div>
+        <div class="sub" style="margin-top:3px">${c.splits}분할 · <span class="ptag ${rev ? 'rev' : ''}">${esc(c.phase)}</span></div></div>
+      <div class="pnl"><div class="amt num ${cls(total)}">${sgn(total)}</div><div class="pct num ${cls(total)}">${pct(pp)}</div></div></div>
+    <div class="tline"><div class="t num">T${c.T.toFixed(2)} <small>/ ${c.splits}</small></div>${tbar(c)}</div>
+    <div class="kv2"><div>보유<b>${c.qty}</b>주</div><div>평단<b>${usd(c.avg)}</b></div>
+      ${p.close ? `<div>종가 ${esc(fmtD(p.close_date))}<b>${usd(p.close)}</b></div>` : ''}${live}</div>
   </div>
+  <div class="tiles">
+    ${tile('투입금액', usd(c.net_invested))}${tile('평가금액', usd(c.eval))}${tile('잔금', usd(c.cash))}
+    ${tile(rev ? '쿼터매수금' : '1회 매수금', usd(c.unit))}${tile(rev ? '별지점(5일평균)' : '☆%', c.star_pct != null ? c.star_pct.toFixed(2) + '%' : '-')}${tile('수수료', '−' + usd(c.fees), 'down')}
+    ${c.realized ? tile('실현(매도)', sgn(c.realized), cls(c.realized)) + tile('평가손익', sgn(c.unrealized), cls(c.unrealized)) + tile('원금', usd(c.principal)) : ''}
+  </div>
+  <div class="meta" style="margin:0 2px">평가손익 <span class="num ${cls(c.unrealized)}">${sgn(c.unrealized)}</span> · 수수료율 ${(c.fee_rate * 100).toFixed(3)}% · 손익은 수수료 차감 후${p.updated ? ' · ' + esc(p.updated) + ' 기준' : ''}</div>
+  <div class="actions a4">
+    ${c.paused ? `<button class="btn primary" onclick="confirmDo('resume','${esc(c.id)}','재개할까요? 다음 주문 시간부터 자동 주문합니다.')">▶ 재개</button>`
+               : `<button class="btn" onclick="confirmDo('pause','${esc(c.id)}','일시정지할까요? 이미 접수된 오늘 주문은 MTS에서 직접 취소해야 해요.')">⏸ 일시정지</button>`}
+    <button class="btn" onclick="openEdit('${esc(c.id)}')">✏️ 수정</button>
+    <button class="btn" onclick="toggleAuto('${esc(c.id)}', ${!c.auto})">${c.auto ? '✋ 직접 주문' : '🤖 자동 켜기'}</button>
+    <button class="btn danger" onclick="confirmDo('stop','${esc(c.id)}','이 사이클을 종료할까요? 남은 보유분은 그대로 두고 기록만 마감합니다. 미체결 주문은 MTS에서 취소하세요.')">⏹ 종료</button>
+  </div>
+  ${!c.auto ? `<div class="actions" style="grid-template-columns:1fr"><button class="btn primary" onclick="openFill('${esc(c.id)}')">✍️ 체결 입력</button></div>` : ''}
   ${orderCols(c)}
-  <div class="sec"><span>매매 히스토리 <span class="meta">${(c.fills || []).length}건</span></span><button class="mini" onclick="openHist('${esc(c.id)}','')">＋ 기록 추가</button></div>
+  <div class="sec"><span>매매 기록 <span class="meta">${(c.fills || []).length}건</span></span><button class="mini" onclick="openHist('${esc(c.id)}','')">＋ 기록 추가</button></div>
   ${historyView(c)}`;
 }
 
@@ -437,8 +469,10 @@ function doneDetailView(r) {
   const st = d ? d.stats : null;
   const traded = (+r.bought_amt || 0) + (+r.sold_amt || 0);
   const feeRate = fees && traded ? (fees / traded * 100).toFixed(2) + '%' : '-';
-  let h = `<div class="dhead"><button class="backbtn" aria-label="뒤로" onclick="goBack()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></button><div class="dtitle">${brandLogo(r.broker)}${esc(shortName(r))} <span class="meta num">${man(+r.principal)}</span></div></div>
-  <div class="card">
+  let h = `<div class="dhead"><button class="backbtn" aria-label="뒤로" onclick="goBack()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></button><div class="dtitle">완료 사이클</div></div>
+  <div class="card bc dcard ${(BRAND[r.broker] || {}).cls || ''}">
+    ${BRAND[r.broker] ? `<img class="wm" src="${BRAND[r.broker].mark}" alt=""><img class="blogo" src="${BRAND[r.broker].logo}" alt="${BRAND[r.broker].name}">` : ''}
+    <div class="one"><span class="nm">${esc(shortName(r))}</span><span class="cap">${man(prin)}</span></div>
     <div><span class="bigp num ${cls(gross)}">${sgn(gross)}</span> <span class="num ${cls(gross)}" style="font-weight:700">${pct(gross / prin * 100)}</span></div>
     <div class="meta" style="margin-top:4px">수수료 <b class="num">−${usd(fees)}</b> · 실순익 <b class="num ${cls(net)}">${sgn(net)}</b></div>
     <div class="kv"><div><span>원금</span><b class="num">${usd(prin)}</b></div>${r.splits ? `<div><span>분할</span><b>${esc(r.splits)}</b></div>` : ''}${r.base_pct ? `<div><span>최대</span><b>${+r.base_pct}%</b></div>` : ''}<div><span>수수료율</span><b>${feeRate}</b></div></div>
