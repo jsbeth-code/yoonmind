@@ -107,6 +107,19 @@
   .mkt-t{font-weight:700;color:var(--text);margin-right:2px}
   .hk{font-size:10.5px;font-weight:700;padding:1px 6px;border-radius:99px}
   .hk.closed{background:var(--up-soft);color:var(--up)} .hk.early{background:var(--warn-soft);color:var(--warn)}
+  /* VR 상세: 회차 그래프 · 회차 기록 */
+  .vrr{padding:10px 0;border-bottom:1px solid var(--border-2);display:flex;flex-direction:column;gap:3px}
+  .vrr:last-child{border-bottom:0}
+  .vrr .h{display:flex;align-items:center;gap:6px;font-size:13px;white-space:nowrap}
+  .vrr .h b{font-weight:800}
+  .vrr .h .dt{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:11.5px;color:var(--muted)}
+  .vrr .h .pl{margin-left:auto;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:12.5px;font-weight:600;text-align:right}
+  .vrr .h .pl small{font-size:10.5px}
+  .vrr .l.f{font-size:11px;color:var(--faint)}
+  .vrr .l{font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .vrr .l b{font-family:'IBM Plex Mono',ui-monospace,monospace;font-weight:600;color:var(--text)}
+  .vrr .vzone{align-self:auto;font-size:10px;padding:0 6px}
+  .vrr .live{font-size:10px;font-weight:700;padding:1px 6px;border-radius:99px;background:var(--accent-soft);color:var(--accent)}
   /* 사이클 상세: 홈 카드와 같은 증권사 카드 + 숫자 표 */
   .bc.dcard{padding:12px 14px 13px;gap:6px}
   .bc.dcard .nm{font-size:20px}
@@ -242,7 +255,7 @@ const LS = k => { try { return localStorage.getItem(k) } catch { return null } }
 const SS = (k, v) => { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, v) } catch {} };
 const cfg = { repo: LS('ib.repo') || 'jsbeth-code/infinite-buy', token: LS('ib.token') || '' };
 let homeTab = (() => { try { return localStorage.getItem('ib.homeTab') === 'vr' ? 'vr' : 'ib' } catch { return 'ib' } })();
-let data = null, view = { tab: 'home', cycle: null, done: null }, tradesOpen = false, calMonth = null, calYear = null;
+let data = null, view = { tab: 'home', cycle: null, done: null, vr: null }, tradesOpen = false, calMonth = null, calYear = null;
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -330,11 +343,12 @@ const fmtD = s => s && s.length === 8 ? `${s.slice(4, 6)}-${s.slice(6)}` : (s ||
 function render() {
   const root = $('#root');
   $('#tabs').style.display = cfg.token ? 'flex' : 'none';
-  document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === view.tab && !view.cycle && !view.done));
+  document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === view.tab && !view.cycle && !view.done && !view.vr));
   if (!cfg.token || view.tab === 'settings') return root.innerHTML = settingsView();
   if (!data) return root.innerHTML = '<div class="empty">불러오는 중…</div>';
   if (data.error) return root.innerHTML = `<div class="card"><b>불러오기 실패</b><div class="note">${esc(data.error)}</div><div class="help" style="margin-top:8px">토큰 권한(Contents 읽기)과 저장소 이름을 확인하세요. 아직 봇이 한 번도 실행되지 않았다면 dashboard.json 이 없을 수 있어요.</div><div class="actions"><button class="btn" onclick="view.tab='settings';render()">설정</button><button class="btn primary" onclick="control('refresh',{})">데이터 생성</button></div></div>`;
   if (view.cycle) return root.innerHTML = detailView(data.cycles.find(c => c.id === view.cycle));
+  if (view.vr) { root.innerHTML = vrDetailView((data.vr || []).find(r => r.id === view.vr)); return bindVrChart() }
   if (view.done) { root.innerHTML = doneDetailView((data.completed || []).find(r => r.id === view.done)); return bindChart() }
   root.innerHTML = view.tab === 'done' ? doneView() : homeView();
 }
@@ -363,7 +377,9 @@ function homeSwitch() {
 function setHomeTab(k) { homeTab = k; try { localStorage.setItem('ib.homeTab', k) } catch {} render(); window.scrollTo(0, 0) }
 
 /* VR 카드: 봇이 dashboard.json 에 vr 목록을 넣으면 표시 (VR 봇 연결 전에는 빈 화면 안내).
-   항목: {id,name,broker,ticker,round,v,min_band,max_band,eval,pool,qty,avg,pnl,pnl_pct,next} */
+   항목: {id,name,broker,ticker,round,v,min_band,max_band,eval,pool,qty,avg,pnl,pnl_pct,next,G,invested,price,
+   rounds:[{n,started,G,v,min_band,max_band,start_qty,contrib,lump,bought,sold,buy_qty,sell_qty,eval,pool,end_qty,close,pnl,pnl_pct,open,note}] 최근 회차부터}
+   카드를 누르면 VR 상세(회차 그래프·회차 기록) */
 function vrBand(r) {
   const lo = r.min_band, hi = r.max_band, span = hi - lo || 1;
   const pos = Math.max(0, Math.min(1, (r.eval - lo) / span));
@@ -373,6 +389,8 @@ function vrBand(r) {
     <div class="vlab num"><span>${usd(lo, 0)}</span><span>V ${usd(r.v, 0)}</span><span>${usd(hi, 0)}</span></div></div>
     <span class="vzone ${zone[0]}">${zone[1]}</span>`;
 }
+const vrName = r => String(r.name || r.ticker + ' VR').replace(/DB증권|키움증권|KIWOOM|키움|\bDB\b/g, ' ').replace(/\s+/g, ' ').trim();
+const vrZone = (ev, lo, hi) => ev < lo ? ['buy', '매수 구간'] : ev > hi ? ['sell', '매도 구간'] : ['in', '밴드 안'];
 function vrHome() {
   const rs = data.vr || [];
   if (!rs.length) return `<div class="card vr-empty"><div class="vr-ic">VR</div>
@@ -380,11 +398,11 @@ function vrHome() {
     <div class="meta" style="line-height:1.6;margin-top:4px">VR 자동매매를 봇에 연결하면 여기에 회차·V·밴드·Pool 이 보여요.<br>지금은 엑셀로 기록 중인 VR 을 그대로 쓰시면 돼요.</div></div>`;
   return rs.map(r => {
     const br = BRAND[r.broker] || {};
-    return `<div class="card bc ${br.cls || ''}">
+    return `<div class="card cycle bc ${br.cls || ''}" onclick="openVR('${esc(r.id)}')">
       ${br.mark ? `<img class="wm" src="${br.mark}" alt="">` : ''}
       <div class="row" style="align-items:flex-start"><div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:4px">
         ${br.logo ? `<img class="blogo" src="${br.logo}" alt="${br.name}">` : ''}
-        <div class="one"><span class="nm">${esc(r.name || r.ticker + ' VR')}</span><span class="cap">${esc(r.round)}회차</span></div>
+        <div class="one"><span class="nm">${esc(vrName(r))}</span><span class="cap">${esc(r.round)}회차</span></div>
         <div class="sub one">${esc(r.ticker)} · 2주 1회${r.next ? ' · 다음 ' + esc(r.next) : ''}</div></div>
         <div class="pnl"><div class="amt num ${cls(r.pnl)}">${sgn(r.pnl)}</div><div class="pct num ${cls(r.pnl)}">${pct(r.pnl_pct)}</div></div></div>
       ${vrBand(r)}
@@ -493,6 +511,93 @@ function detailView(c) {
   ${orderCols(c)}
   <div class="sec"><span>매매 기록 <span class="meta">${(c.fills || []).length}건</span></span><button class="mini" onclick="openHist('${esc(c.id)}','')">＋ 기록 추가</button></div>
   ${historyView(c)}`;
+}
+
+/* ── VR 상세: 카드 · 숫자 표 · 회차 그래프(밴드·V·평가) · 회차 기록 ── */
+function vrDetailView(r) {
+  if (!r) { view.vr = null; return homeView() }
+  const br = BRAND[r.broker] || {}, p = r.price || {}, hs = r.rounds || [];
+  const tile = (k, v, klass = '') => `<div><span class="k">${k}</span><span class="v ${klass}">${v}</span></div>`;
+  const live = p.live ? `<div>현재가<b>${usd(p.live)}</b>${p.close ? `<small class="${cls(p.live - p.close)}">${pct((p.live / p.close - 1) * 100)}</small>` : ''}</div>` : '';
+  const cur = hs[0] || {};
+  let h = `<div class="dhead"><button class="backbtn" aria-label="뒤로" onclick="goBack()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></button><div class="dtitle">VR</div></div>
+  <div class="card bc dcard ${br.cls || ''}">
+    ${br.mark ? `<img class="wm" src="${br.mark}" alt="">` : ''}
+    ${br.logo ? `<img class="blogo" src="${br.logo}" alt="${br.name}">` : `<div class="meta">${esc(r.broker)}</div>`}
+    <div class="row" style="align-items:flex-start"><div style="min-width:0">
+        <div class="one"><span class="nm">${esc(vrName(r))}</span><span class="cap">${esc(r.round)}회차</span></div>
+        <div class="sub" style="margin-top:3px">${esc(r.ticker)} · 2주 1회 · G ${esc(r.G)}${r.next ? ' · 다음 ' + esc(r.next) : ''}</div></div>
+      <div class="pnl"><div class="amt num ${cls(r.pnl)}">${sgn(r.pnl)}</div><div class="pct num ${cls(r.pnl)}">${pct(r.pnl_pct)}</div></div></div>
+    ${vrBand(r)}
+    <div class="kv2"><div>보유<b>${r.qty}</b>주</div><div>평단<b>${r.avg ? usd(r.avg) : '-'}</b></div>
+      ${p.close ? `<div>종가 ${esc(fmtD(p.close_date))}<b>${usd(p.close)}</b></div>` : ''}${live}</div>
+  </div>
+  <div class="tiles">
+    ${tile('V (목표)', usd(r.v, 0))}${tile('평가금', usd(r.eval, 0))}${tile('Pool', usd(r.pool, 0))}
+    ${tile('누적 투입', usd(r.invested, 0))}${tile('계좌 총액', usd(r.eval + r.pool, 0))}${tile('이번 적립', usd(cur.contrib, 0))}
+  </div>
+  <div class="meta" style="margin:0 2px">밴드 ${usd(r.min_band, 0)} ~ ${usd(r.max_band, 0)} · 손익 = 평가금 + Pool − 누적 투입${p.updated ? ' · ' + esc(p.updated) + ' 기준' : ''}</div>`;
+  if (!hs.length) return h;
+  h += `<div class="sec"><span>회차별 V · 평가</span></div><div class="card"><div class="chart" id="vchart">${vrChartSvg(hs.slice().reverse())}<div class="tip" id="vtip"></div></div>
+    <div class="legend"><span><i style="width:14px;height:8px;background:rgba(91,91,240,.12)"></i>밴드</span><span><i style="width:14px;border-top:2px dashed #5b5bf0"></i>V</span><span><i style="width:14px;height:2px;background:#1d2130"></i>평가금</span></div></div>`;
+  const rows = hs.map((x, i) => {
+    const end = i ? hs[i - 1].started : null, z = vrZone(x.eval, x.min_band, x.max_band);
+    const dq = x.open ? (x.buy_qty || 0) - (x.sell_qty || 0) : x.end_qty - x.start_qty;
+    const trade = [x.bought ? `매수 <b>${dq > 0 && !x.sold ? dq + '주 ' : ''}${usd(x.bought)}</b>` : '', x.sold ? `매도 <b>${usd(x.sold)}</b>` : ''].filter(Boolean).join(' · ') || '매매 없음';
+    return `<div class="vrr">
+      <div class="h"><b>${x.n}회차</b><span class="dt">${md(x.started)}${end ? ' ~ ' + md(end) : ' ~'}</span>${x.open ? '<span class="live">진행 중</span>' : ''}
+        <span class="pl ${cls(x.pnl)}">${sgn(x.pnl)} <small>${x.pnl_pct == null ? '' : pct(x.pnl_pct)}</small></span></div>
+      <div class="l">V <b>${usd(x.v, 0)}</b> · 밴드 ${usd(x.min_band, 0)} ~ ${usd(x.max_band, 0)}</div>
+      <div class="l">${x.open ? '지금 평가' : '종료 평가'} <b>${usd(x.eval, 0)}</b> <span class="vzone ${z[0]}">${z[1]}</span> · Pool <b>${usd(x.pool, 0)}</b></div>
+      <div class="l">${trade} · 보유 <b>${x.end_qty}</b>주${x.close ? ` · ${x.open ? '현재가' : '종가'} <b>${usd(x.close)}</b>` : ''}</div>
+      <div class="l f">적립 ${usd(x.contrib, 0)}${x.lump ? ' · 목돈 ' + usd(x.lump, 0) : ''}${x.G ? ' · G ' + x.G : ''}${x.note ? ' · ' + esc(x.note) : ''}</div></div>`;
+  }).join('');
+  return h + `<div class="sec"><span>회차 기록 <span class="meta">${hs.length}회차</span></span></div><div class="card hist2">${rows}</div>`;
+}
+let vrPts = [], vrScale = null;
+function vrChartSvg(pts) {
+  vrPts = pts;
+  if (pts.length < 2) return '<div class="empty">회차가 2개 이상이면 그래프가 생겨요</div>';
+  const vals = pts.flatMap(x => [x.min_band, x.max_band, x.eval]);
+  let lo = Math.min(...vals), hi = Math.max(...vals);
+  const pad = (hi - lo) * .06 || 1; lo -= pad; hi += pad;
+  const { W, H, L, R, T, B } = CH, pw = W - L - R, ph = H - T - B, n = pts.length, gap = pw / n;
+  const X = i => L + gap * (i + .5), Y = v => T + (hi - v) / (hi - lo) * ph;
+  vrScale = { X, n, gap };
+  let g = '';
+  for (let k = 0; k <= 4; k++) {
+    const v = lo + (hi - lo) * k / 4, y = Y(v);
+    g += `<line x1="${L}" x2="${W - R}" y1="${y}" y2="${y}" stroke="#eef0f5"/><text x="${L - 4}" y="${y + 3}" text-anchor="end">$${(v / 1000).toFixed(0)}k</text>`;
+  }
+  pts.forEach((x, i) => g += `<text x="${X(i)}" y="${H - 6}" text-anchor="middle">${x.n}회</text>`);
+  const band = pts.map((x, i) => `<rect x="${(X(i) - gap * .36).toFixed(1)}" y="${Y(x.max_band).toFixed(1)}" width="${(gap * .72).toFixed(1)}" height="${(Y(x.min_band) - Y(x.max_band)).toFixed(1)}" rx="3" fill="rgba(91,91,240,.12)"/>`).join('');
+  const vline = pts.map((x, i) => `${X(i).toFixed(1)},${Y(x.v).toFixed(1)}`).join(' ');
+  const eline = pts.map((x, i) => `${X(i).toFixed(1)},${Y(x.eval).toFixed(1)}`).join(' ');
+  const col = x => x.eval < x.min_band ? 'var(--up)' : x.eval > x.max_band ? 'var(--down)' : '#1d2130';
+  const dots = pts.map((x, i) => `<circle cx="${X(i)}" cy="${Y(x.eval)}" r="${x.open ? 4 : 3}" fill="${x.open ? '#fff' : col(x)}" stroke="${col(x)}" stroke-width="${x.open ? 2 : 0}"/>`).join('');
+  return `<svg viewBox="0 0 ${W} ${H}" id="vchartSvg">${g}${band}<polyline points="${vline}" fill="none" stroke="#5b5bf0" stroke-width="1.5" stroke-dasharray="4 3"/>
+    <polyline points="${eline}" fill="none" stroke="#1d2130" stroke-width="1.6"/>${dots}
+    <line id="vcursor" x1="0" x2="0" y1="${T}" y2="${H - B}" stroke="#8b90a0" stroke-width=".8" style="display:none"/></svg>`;
+}
+function bindVrChart() {
+  const box = $('#vchart'), svg = $('#vchartSvg');
+  if (!box || !svg || !vrScale) return;
+  const show = ev => {
+    const r = svg.getBoundingClientRect(), k = CH.W / r.width, { X, n, gap } = vrScale;
+    const i = Math.max(0, Math.min(n - 1, Math.floor(((ev.clientX - r.left) * k - CH.L) / gap)));
+    const p = vrPts[i], cur = $('#vcursor');
+    cur.setAttribute('x1', X(i)); cur.setAttribute('x2', X(i)); cur.style.display = '';
+    const tip = $('#vtip');
+    tip.innerHTML = `<div style="color:#aab">${p.n}회차 · ${p.started.replace(/-/g, '.')}${p.open ? ' (진행 중)' : ''}</div>` +
+      `<div><i style="background:#b9b9f7;border-radius:2px"></i>밴드 위 <b>${usd(p.max_band, 0)}</b></div><div><i style="background:#7c7cf5"></i>V <b>${usd(p.v, 0)}</b></div>` +
+      `<div><i style="background:#b9b9f7;border-radius:2px"></i>밴드 아래 <b>${usd(p.min_band, 0)}</b></div><div><i style="background:#fff"></i>평가금 <b>${usd(p.eval, 0)}</b></div>` +
+      `<div><i style="background:transparent"></i>Pool <b>${usd(p.pool, 0)}</b></div>`;
+    tip.style.display = 'block';
+    const px = X(i) / k, left = px > r.width / 2 ? px - tip.offsetWidth - 10 : px + 10;
+    tip.style.left = Math.max(0, left) + 'px';
+  };
+  box.onpointerdown = show; box.onpointermove = e => { if (e.pointerType === 'mouse' || e.buttons) show(e) };
+  box.onpointerleave = () => { $('#vtip').style.display = 'none'; $('#vcursor').style.display = 'none' };
 }
 
 function doneView() {
@@ -679,23 +784,29 @@ window.openCycle = id => {
   history.pushState({ tab: view.tab, cycle: id }, '', '#c=' + encodeURIComponent(id));
   render(); scrollTo(0, 0);
 };
+window.openVR = id => {
+  view.vr = id;
+  history.pushState({ tab: 'home', vr: id }, '', '#v=' + encodeURIComponent(id));
+  render(); scrollTo(0, 0);
+};
 window.goBack = () => {
-  if (history.state && (history.state.cycle || history.state.done || history.state.sheet)) return history.back();
+  if (history.state && (history.state.cycle || history.state.done || history.state.vr || history.state.sheet)) return history.back();
   if (sheetOpen()) return hideSheet();
-  view.cycle = null; view.done = null; render();
+  view.cycle = null; view.done = null; view.vr = null; render();
 };
 addEventListener('popstate', e => {
   const st = e.state || {};
   if (sheetOpen() && !st.sheet) hideSheet();
-  const cycle = st.cycle || null, done = st.done || null, tab = st.tab || 'home';
-  if (cycle !== view.cycle || done !== view.done || tab !== view.tab) { view.cycle = cycle; view.done = done; view.tab = tab; render(); scrollTo(0, 0) }
+  const cycle = st.cycle || null, done = st.done || null, vr = st.vr || null, tab = st.tab || 'home';
+  if (cycle !== view.cycle || done !== view.done || vr !== view.vr || tab !== view.tab) { view.cycle = cycle; view.done = done; view.vr = vr; view.tab = tab; render(); scrollTo(0, 0) }
 });
 (function initHistory() {
-  const m = location.hash.match(/^#c=(.+)$/), md2 = location.hash.match(/^#d=(.+)$/), h = location.hash;
+  const m = location.hash.match(/^#c=(.+)$/), md2 = location.hash.match(/^#d=(.+)$/), mv = location.hash.match(/^#v=(.+)$/), h = location.hash;
   history.replaceState({ tab: md2 ? 'done' : 'home' }, '', location.pathname + location.search);
   if (md2) view.tab = 'done';
   if (m) { view.cycle = decodeURIComponent(m[1]); history.pushState({ tab: 'home', cycle: view.cycle }, '', h) }
   if (md2) { view.done = decodeURIComponent(md2[1]); history.pushState({ tab: 'done', done: view.done }, '', h) }
+  if (mv) { view.vr = decodeURIComponent(mv[1]); history.pushState({ tab: 'home', vr: view.vr }, '', h) }
 })();
 /* 홈 화면에 추가한 앱(standalone)에는 브라우저 스와이프가 없어서 왼쪽 가장자리 스와이프를 직접 처리 */
 (function edgeSwipe() {
@@ -705,7 +816,7 @@ addEventListener('popstate', e => {
   const root = () => $('#root');
   addEventListener('touchstart', e => {
     const t = e.touches[0];
-    x0 = (e.touches.length === 1 && t.clientX < 30 && (view.cycle || view.done || sheetOpen())) ? t.clientX : null;
+    x0 = (e.touches.length === 1 && t.clientX < 30 && (view.cycle || view.done || view.vr || sheetOpen())) ? t.clientX : null;
     y0 = t.clientY; dx = 0;
   }, { passive: true });
   addEventListener('touchmove', e => {
@@ -730,7 +841,7 @@ window.logout = () => { SS('ib.token', null); cfg.token = ''; data = null; rende
 window.confirmDo = (action, id, msg) => { if (confirm(msg)) control(action, { id }) };
 window.toggleAuto = (id, on) => { if (confirm(on ? '자동 주문을 켤까요? 다음 주문 시간(프리장 시작)부터 봇이 직접 주문합니다. 같은 세션에 앱/MTS로 주문했다면 중복되니 주의하세요.' : '직접 주문으로 바꿀까요? 봇은 주문표만 계산하고, 체결은 직접 입력해야 해요.')) control('edit', { id, auto: on }) };
 document.querySelectorAll('#tabs button').forEach(b => b.onclick = () => {
-  view.tab = b.dataset.tab; view.cycle = null; view.done = null;
+  view.tab = b.dataset.tab; view.cycle = null; view.done = null; view.vr = null;
   history.replaceState({ tab: view.tab }, '', location.pathname + location.search);
   render(); scrollTo(0, 0);
 });
