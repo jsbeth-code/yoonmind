@@ -1352,6 +1352,22 @@ window.submitHistory = () => {
 };
 
 render(); load();
+/* 새 버전 자동 반영: GitHub Pages 는 페이지를 최대 10분 캐시함 → 캐시 안 거친 최신 페이지의 스크립트가
+   지금 것과 다르면 새 주소(?v=)로 다시 연다. 같은 버전으로 한 번만 시도 (무한 새로고침 방지) */
+(async function autoUpdate() {
+  try {
+    const r = await fetch(location.pathname + '?t=' + Date.now(), { cache: 'no-store' });
+    if (!r.ok) return;
+    const doc = new DOMParser().parseFromString(await r.text(), 'text/html');
+    const fresh = (doc.querySelector('script') || {}).textContent || '', cur = document.querySelector('script').textContent;
+    if (!fresh || fresh === cur) return;
+    let h = 0; for (let i = 0; i < fresh.length; i++) h = (h * 31 + fresh.charCodeAt(i)) | 0;
+    const v = (h >>> 0).toString(36);
+    if (sessionStorage.getItem('ib.updTried') === v) return;
+    sessionStorage.setItem('ib.updTried', v);
+    location.replace(location.pathname + '?v=' + v + location.hash);
+  } catch {}
+})();
 </script>
 </body>
 </html>
