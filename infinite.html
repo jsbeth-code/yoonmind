@@ -89,6 +89,19 @@
   .bc .stat .k{font-size:11.5px} .bc .stat .v{font-size:14.5px}
   .bc .badge{font-size:10.5px;padding:2px 7px}
   .blogo-s{height:14px;vertical-align:-2px;margin-right:6px}
+  /* 홈 [무한매수 | VR] 전환 */
+  .hswitch{display:inline-flex;background:#eceef3;border-radius:14px;padding:4px;gap:4px;margin:0 2px 12px}
+  .hswitch button{border:0;background:none;border-radius:11px;padding:8px 22px;font-size:14px;font-weight:700;color:var(--muted)}
+  .hswitch button.on{background:var(--surface);color:var(--text);box-shadow:0 1px 3px rgba(16,24,40,.12)}
+  .vr-empty{text-align:center;padding:28px 18px}
+  .vr-ic{width:44px;height:44px;border-radius:14px;margin:0 auto 10px;display:grid;place-items:center;font-weight:800;font-size:14px;color:#fff;background:linear-gradient(135deg,#2b4570,#5b5bf0)}
+  .vband{margin:4px 0 2px} .vtrack{position:relative;height:7px;border-radius:99px;background:linear-gradient(90deg,rgba(229,72,77,.25),rgba(255,255,255,.85) 30%,rgba(255,255,255,.85) 70%,rgba(47,111,224,.25))}
+  .vtrack .vmid{position:absolute;top:-3px;width:2px;height:13px;background:#c9cbe0;transform:translateX(-1px)}
+  .vtrack .vknob{position:absolute;top:-3px;width:6px;height:13px;border-radius:3px;background:#5b5bf0}
+  .vtrack .vknob.buy{background:var(--up)} .vtrack .vknob.sell{background:var(--down)}
+  .vlab{display:flex;justify-content:space-between;font-size:10.5px;color:var(--faint);margin-top:3px}
+  .vzone{align-self:flex-start;font-size:10.5px;font-weight:700;padding:1px 7px;border-radius:99px;background:#eef0f7;color:var(--muted)}
+  .vzone.buy{background:var(--up-soft);color:var(--up)} .vzone.sell{background:var(--sell-soft,#e9f0fd);color:var(--down)}
   .mkt{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;background:var(--surface);border:1px solid var(--border-2);border-radius:12px;padding:8px 12px;margin-bottom:10px;font-size:12.5px;color:var(--muted)}
   .mkt b{color:var(--text);font-weight:700} .mkt i{font-style:normal;color:var(--faint)}
   .mkt-t{font-weight:700;color:var(--text);margin-right:2px}
@@ -228,6 +241,7 @@
 const LS = k => { try { return localStorage.getItem(k) } catch { return null } };
 const SS = (k, v) => { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, v) } catch {} };
 const cfg = { repo: LS('ib.repo') || 'jsbeth-code/infinite-buy', token: LS('ib.token') || '' };
+let homeTab = (() => { try { return localStorage.getItem('ib.homeTab') === 'vr' ? 'vr' : 'ib' } catch { return 'ib' } })();
 let data = null, view = { tab: 'home', cycle: null, done: null }, tradesOpen = false, calMonth = null, calYear = null;
 
 const $ = s => document.querySelector(s);
@@ -341,9 +355,49 @@ function marketNotice() {
   return `<div class="mkt"><span class="mkt-t">🇺🇸 미국장</span>${soon.map(item).join('<i>·</i>')}</div>`;
 }
 
+/* ── 홈 [무한매수 | VR] 전환 ── */
+function homeSwitch() {
+  const b = (k, l) => `<button role="tab" aria-selected="${homeTab === k}" class="${homeTab === k ? 'on' : ''}" onclick="setHomeTab('${k}')">${l}</button>`;
+  return `<div class="hswitch" role="tablist">${b('ib', '무한매수')}${b('vr', 'VR')}</div>`;
+}
+function setHomeTab(k) { homeTab = k; try { localStorage.setItem('ib.homeTab', k) } catch {} render(); window.scrollTo(0, 0) }
+
+/* VR 카드: 봇이 dashboard.json 에 vr 목록을 넣으면 표시 (VR 봇 연결 전에는 빈 화면 안내).
+   항목: {id,name,broker,ticker,round,v,min_band,max_band,eval,pool,qty,avg,pnl,pnl_pct,next} */
+function vrBand(r) {
+  const lo = r.min_band, hi = r.max_band, span = hi - lo || 1;
+  const pos = Math.max(0, Math.min(1, (r.eval - lo) / span));
+  const vpos = Math.max(0, Math.min(1, (r.v - lo) / span));
+  const zone = r.eval < lo ? ['buy', '매수 구간'] : r.eval > hi ? ['sell', '매도 구간'] : ['in', '밴드 안'];
+  return `<div class="vband"><div class="vtrack"><i class="vmid" style="left:${vpos * 100}%"></i><b class="vknob ${zone[0]}" style="left:calc(${pos * 100}% - 3px)"></b></div>
+    <div class="vlab num"><span>${usd(lo, 0)}</span><span>V ${usd(r.v, 0)}</span><span>${usd(hi, 0)}</span></div></div>
+    <span class="vzone ${zone[0]}">${zone[1]}</span>`;
+}
+function vrHome() {
+  const rs = data.vr || [];
+  if (!rs.length) return `<div class="card vr-empty"><div class="vr-ic">VR</div>
+    <div class="title" style="font-size:15px">VR 사이클이 아직 없어요</div>
+    <div class="meta" style="line-height:1.6;margin-top:4px">VR 자동매매를 봇에 연결하면 여기에 회차·V·밴드·Pool 이 보여요.<br>지금은 엑셀로 기록 중인 VR 을 그대로 쓰시면 돼요.</div></div>`;
+  return rs.map(r => {
+    const br = BRAND[r.broker] || {};
+    return `<div class="card bc ${br.cls || ''}">
+      ${br.mark ? `<img class="wm" src="${br.mark}" alt="">` : ''}
+      <div class="row" style="align-items:flex-start"><div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:4px">
+        ${br.logo ? `<img class="blogo" src="${br.logo}" alt="${br.name}">` : ''}
+        <div class="one"><span class="nm">${esc(r.name || r.ticker + ' VR')}</span><span class="cap">${esc(r.round)}회차</span></div>
+        <div class="sub one">${esc(r.ticker)} · 2주 1회${r.next ? ' · 다음 ' + esc(r.next) : ''}</div></div>
+        <div class="pnl"><div class="amt num ${cls(r.pnl)}">${sgn(r.pnl)}</div><div class="pct num ${cls(r.pnl)}">${pct(r.pnl_pct)}</div></div></div>
+      ${vrBand(r)}
+      <div class="row"><div class="stats"><div class="stat"><span class="k">평가</span><span class="v num">${usd(r.eval, 0)}</span></div>
+        <div class="stat"><span class="k">Pool</span><span class="v num">${usd(r.pool, 0)}</span></div>
+        <div class="stat"><span class="k">보유</span><span class="v num">${r.qty}</span><span class="k">주</span></div></div></div></div>`;
+  }).join('');
+}
+
 function homeView() {
   const cs = data.cycles || [];
-  let h = header('무한매수', `${esc(data.updated)} 업데이트`);
+  let h = header(homeTab === 'vr' ? 'VR' : '무한매수', `${esc(data.updated)} 업데이트`) + homeSwitch();
+  if (homeTab === 'vr') return h + vrHome();
   if (data.dry_run) h += `<div class="banner">모의실행(dry_run) 중 — 주문표만 계산하고 실제 주문은 넣지 않아요.</div>`;
   h += marketNotice();
   if (!cs.length) h += '<div class="empty">진행 중인 사이클이 없어요.<br>오른쪽 아래 <b>새 사이클</b>로 시작하세요.</div>';
