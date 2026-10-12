@@ -439,7 +439,7 @@ function vrHome() {
         ${br.logo ? `<img class="blogo" src="${br.logo}" alt="${br.name}">` : ''}
         <div class="one"><span class="nm">${esc(vrName(r))}</span><span class="cap">${esc(r.round)}회차</span></div>
         <div class="sub one">${esc(r.ticker)} · 2주 1회${r.next ? ' · 다음 ' + esc(r.next) : ''}</div></div>
-        <div class="pnl"><div class="amt num ${cls(r.pnl)}">${sgn(r.pnl)}</div><div class="pct num ${cls(r.pnl)}">${pct(r.pnl_pct)}</div></div></div>
+        <div class="pnl"><div class="amt num ${cls(vrUp(r).up)}">${sgn(vrUp(r).up)}</div><div class="pct num ${cls(vrUp(r).up)}">${pct(vrUp(r).pct)}</div></div></div>
       ${vrBand(r)}
       ${r.ladder ? `<div class="sub one">매수 시작 <b class="num">${usd(r.ladder.buy_start)}</b>${r.ladder.prev_close ? ` (전일종가 ${pct((r.ladder.buy_start / r.ladder.prev_close - 1) * 100)})` : ''} · 오늘 계획 매수 ${r.ladder.buys.filter(s => s.today && s.qty > s.filled).length}건</div>` : ''}
       <div class="row"><div class="stats"><div class="stat"><span class="k">평가</span><span class="v num">${usd(r.eval, 0)}</span></div>
@@ -556,6 +556,8 @@ const n2 = n => n == null || isNaN(n) ? '-' : Number(n).toLocaleString('en-US', 
 const $0 = n => n == null || isNaN(n) ? '-' : Number(n).toLocaleString('en-US', { maximumFractionDigits: 0 });
 const pct1 = (x, d = 1) => (x >= 0 ? '+' : '−') + Math.abs(x * 100).toFixed(d) + '%';
 const vrNow = r => r.eval + r.pool;
+/* TQQQ 평가손익 = 평가금 − 보유 × 실효평단 (Pool 은 빼고). 총액(평가+Pool)은 계획 대비에서만 */
+const vrUp = r => { const cost = r.avg ? r.qty * r.avg : r.book_cost; const up = r.eval - cost; return { cost, up, pct: cost ? up / cost * 100 : 0 } };
 const vrState = r => r.eval < r.min_band ? ['매수 구간', 'b-up'] : r.eval > r.max_band ? ['매도 구간', 'b-acc'] : ['대기', 'b-gray'];
 const vrPrev = r => (r.ladder || {}).prev_close || (r.price || {}).close;
 function vrGauge(r) {
@@ -581,9 +583,9 @@ function vrStatusView(r) {
   const tot = vrNow(r), prev = vrPrev(r), L = r.ladder || {}, cur = (r.rounds || [])[0] || {}, last = (r.rounds || []).find(x => !x.open);
   const st = vrState(r), bp = r.broker_pos, P = r.plan || {};
   let h = `<div class="card">
-    <div class="row"><div class="meta">계좌총액 · 지금</div><span class="badge ${st[1]}">${st[0]}</span></div>
-    <div class="vbig num">${usd(tot)}</div>
-    <div class="meta">누적 투입 ${usd(r.invested)} · <b class="num ${cls(r.pnl)}">${sgn(r.pnl)} (${pct(r.pnl_pct)})</b></div>
+    <div class="row"><div class="meta">TQQQ 평가금 · 지금</div><span class="badge ${st[1]}">${st[0]}</span></div>
+    <div class="vbig num">${usd(r.eval)}</div>
+    <div class="meta">매입 ${usd(vrUp(r).cost)} · <b class="num ${cls(vrUp(r).up)}">${sgn(vrUp(r).up)} (${pct(vrUp(r).pct)})</b></div>
     <div class="sec" style="margin:16px 0 0"><span style="font-size:13px">평가금과 밴드</span><span class="meta num">${r.qty}주 × ${usd((r.price || {}).live || prev)}</span></div>
     ${vrGauge(r)}
     <div class="trig">
@@ -616,8 +618,9 @@ function vrStatusView(r) {
     <div class="note">${bp && !bp.ok ? `차이 ${sgn(bp.diff)} — 빠진 체결이 있는지 확인하세요. ` : ''}$1 넘게 차이 나면 경고해요.</div></div>
   <div class="card">
     <div class="row"><div><div class="title" style="font-size:15px">계획 대비</div><div class="meta num">연 ${((r.config || {}).expected_return * 100).toFixed(0)}% · 다음 적립 $${$0((r.config || {}).next_contrib ?? (r.config || {}).default_contrib)} · ${(r.config || {}).target_years}년(${P.T}회차)</div></div><button class="link" onclick="setVrSub('settings')">바꾸기</button></div>
-    <div class="meta" style="margin-top:10px">${(r.config || {}).target_years}년 후 목표금액</div>
-    <div class="num" style="font-size:24px;font-weight:700">${usd(P.target, 0)}</div>
+    <div class="grid3" style="grid-template-columns:repeat(2,minmax(0,1fr));margin-top:10px">
+      <div><div class="k">지금 계좌총액 (평가 + Pool)</div><div class="v num">${usd(tot, 0)}</div><div class="meta">누적 투입 ${usd(r.invested, 0)} · <span class="num ${cls(r.pnl)}">${pct(r.pnl_pct)}</span></div></div>
+      <div><div class="k">${(r.config || {}).target_years}년 후 목표금액</div><div class="v num">${usd(P.target, 0)}</div></div></div>
     <div class="chart" id="pchart">${vrPlanSvg(r)}<div class="tip" id="ptip"></div></div>
     <div class="legend"><span><i style="width:14px;height:2px;background:#5b5bf0"></i>실제 계좌총액</span><span><i style="width:14px;border-top:2px dashed #8a90a0"></i>계획선</span></div></div>`;
   return h;
@@ -864,7 +867,7 @@ function vrDetailView(r) {
     <div class="row" style="align-items:flex-start"><div style="min-width:0">
         <div class="one"><span class="nm">${esc(vrName(r))}</span><span class="cap">${esc(r.round)}회차</span></div>
         <div class="sub" style="margin-top:3px">${r.week}주차 · ${md(r.started)} ~ ${md(end.toISOString().slice(0, 10))} · G ${esc(r.G)}</div></div>
-      <div class="pnl"><div class="amt num ${cls(r.pnl)}">${sgn(r.pnl)}</div><div class="pct num ${cls(r.pnl)}">${pct(r.pnl_pct)}</div></div></div>
+      <div class="pnl"><div class="amt num ${cls(vrUp(r).up)}">${sgn(vrUp(r).up)}</div><div class="pct num ${cls(vrUp(r).up)}">${pct(vrUp(r).pct)}</div></div></div>
     <div class="kv2"><div>보유<b>${r.qty}</b>주</div><div>평단<b>${r.avg ? usd(r.avg) : '-'}</b></div>
       ${p.close ? `<div>종가 ${esc(fmtD(p.close_date))}<b>${usd(p.close)}</b></div>` : ''}${live}</div>
   </div>
