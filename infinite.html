@@ -714,13 +714,13 @@ function vrHistoryView(r) {
     <div class="legend"><span><i style="width:14px;height:8px;background:rgba(91,91,240,.12)"></i>밴드</span><span><i style="width:14px;border-top:2px dashed #5b5bf0"></i>V</span><span><i style="width:14px;height:2px;background:#1d2130"></i>평가금</span></div></div>`;
 }
 /* 목표금액 (봇 vr.target_amount 와 같은 식): 지금 V·마지막 확정 Pool 에서 목표 회차까지 매 회차 완전 리밸런싱 */
-function vrTarget(r, years, annual, contrib) {
+function vrTarget(r, years, annual, contrib, gh) {
   const cfg = r.config || {}, hs = r.rounds || [], T = (cfg.rounds_per_year || 26) * years, g = Math.pow(1 + annual, 1 / (cfg.rounds_per_year || 26)) - 1;
   const rec = Object.fromEntries(hs.map(x => [x.n, x.contrib])), gBy = Object.fromEntries(hs.map(x => [x.n, x.G]));
   const closed = hs.find(x => !x.open);
   let V = r.v, P = closed ? closed.pool : r.init.pool;
   for (let t = r.round + 1; t <= T; t++) {
-    const G = gBy[t] ?? r.G;
+    let G = gBy[t]; if (G == null) { G = cfg.g_default || 10; for (const [w, v] of gh || cfg.g_history || []) if (w <= 2 * t - 1) G = v }   // 앞으로 회차는 G 이력대로
     [V, P] = [V + P / G + V * g / (2 * Math.sqrt(G)) + (rec[t] ?? contrib), P * (1 - 1 / G) + V * g * (1 - 1 / (2 * Math.sqrt(G)))];
   }
   return { T, g, target: V + P };
@@ -729,7 +729,7 @@ let vrForm = null;
 function vrSettingsView(r) {
   const cfg = r.config || {};
   if (!vrForm || vrForm.id !== r.id) vrForm = { id: r.id, years: cfg.target_years, annual: cfg.expected_return, contrib: cfg.default_contrib, gh: (cfg.g_history || []).map(x => [...x]) };
-  const f = vrForm, t = vrTarget(r, f.years, f.annual, f.contrib), week = r.week;
+  const f = vrForm, t = vrTarget(r, f.years, f.annual, f.contrib, f.gh), week = r.week;
   const changed = f.years !== cfg.target_years || f.annual !== cfg.expected_return || f.contrib !== cfg.default_contrib;
   const ghChanged = JSON.stringify(f.gh) !== JSON.stringify(cfg.g_history);
   return `<div class="card">
