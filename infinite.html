@@ -107,23 +107,53 @@
   .mkt-t{font-weight:700;color:var(--text);margin-right:2px}
   .hk{font-size:10.5px;font-weight:700;padding:1px 6px;border-radius:99px}
   .hk.closed{background:var(--up-soft);color:var(--up)} .hk.early{background:var(--warn-soft);color:var(--warn)}
-  /* VR 상세: 회차 그래프 · 회차 기록 */
-  .vrr{padding:10px 0;border-bottom:1px solid var(--border-2);display:flex;flex-direction:column;gap:3px}
-  .vrr:last-child{border-bottom:0}
-  .vrr .h{display:flex;align-items:center;gap:6px;font-size:13px;white-space:nowrap}
-  .vrr .h b{font-weight:800}
-  .vrr .h .dt{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:11.5px;color:var(--muted)}
-  .vrr .h .pl{margin-left:auto;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:12.5px;font-weight:600;text-align:right}
-  .vrr .h .pl small{font-size:10.5px}
-  .vrr .l.f{font-size:11px;color:var(--faint)}
-  .vrr .l{font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .vrr .l b{font-family:'IBM Plex Mono',ui-monospace,monospace;font-weight:600;color:var(--text)}
-  .vrr .vzone{align-self:auto;font-size:10px;padding:0 6px}
-  .vrr .vf{display:flex;align-items:center;gap:6px;color:var(--text)}
-  .vrr .vf .dt{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:11.5px;color:var(--muted);width:38px}
-  .vrr .vf .chip{margin:0;font-size:10.5px;padding:1px 6px}
-  .vrr .vf i{font-style:normal;margin-left:auto;font-family:'IBM Plex Mono',ui-monospace,monospace;color:var(--muted)}
-  .vrr .live{font-size:10px;font-weight:700;padding:1px 6px;border-radius:99px;background:var(--accent-soft);color:var(--accent)}
+  /* VR 상세: 현황(게이지·비중·대조·계획) · 주문(사다리) · 기록(회차 표·체결) · 설정 */
+  .vseg{margin:2px 0 10px}
+  .vseg button{font-size:13.5px;padding:7px 4px}
+  .vbig{font-size:30px;font-weight:700;letter-spacing:-1px;line-height:1.1;margin:4px 0 2px}
+  .gauge{position:relative;height:56px;margin:16px 4px 4px}
+  .gauge .gtrack{position:absolute;left:0;right:0;top:20px;height:12px;border-radius:999px;overflow:hidden;display:flex}
+  .gauge .z{height:100%} .gauge .z.buy{background:var(--buy-soft);background:#ffe3e3} .gauge .z.hold{background:#eceefe} .gauge .z.sell{background:#e2e3ff}
+  .gauge .gtick{position:absolute;top:14px;width:2px;height:24px;background:var(--faint);border-radius:2px;margin-left:-1px}
+  .gauge .gtick.v{background:var(--accent)}
+  .gauge .gknob{position:absolute;top:12px;width:14px;height:28px;margin-left:-7px;border-radius:7px;background:var(--text);box-shadow:0 0 0 3px #fff}
+  .gauge .glbl{position:absolute;top:44px;font-size:10.5px;color:var(--muted);transform:translateX(-50%);white-space:nowrap;font-weight:600}
+  .gauge .gnow{position:absolute;top:-6px;font-size:11px;font-weight:700;transform:translateX(-50%);white-space:nowrap}
+  .trig{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px}
+  .trig>div{border-radius:14px;padding:9px 12px}
+  .trig .buy{background:var(--buy-soft)} .trig .sell{background:var(--sell-soft)}
+  .trig .k{font-size:11.5px;font-weight:700} .trig .buy .k{color:var(--buy)} .trig .sell .k{color:var(--sell)}
+  .trig .v{font-size:17px;font-weight:700;margin-top:2px} .trig .d{font-size:11.5px;color:var(--muted)}
+  .mix{display:grid;grid-template-columns:120px 1fr;gap:14px;align-items:center;margin-top:10px}
+  .mix svg{width:120px;height:120px;display:block}
+  .mix .it{display:grid;grid-template-columns:12px 1fr auto;gap:2px 8px;align-items:baseline;padding:7px 0;border-bottom:1px solid var(--border-2)}
+  .mix .it:last-child{border-bottom:0}
+  .mix .sw{width:10px;height:10px;border-radius:3px;align-self:center}
+  .mix .p{font-size:17px;font-weight:700} .mix .a{grid-column:2/4;font-size:12px;color:var(--muted)}
+  .grid3 .v small{font-size:11px}
+  .vwarn{font-size:12px;color:var(--warn);background:var(--warn-soft);border-radius:10px;padding:8px 10px;margin:8px 0 4px;line-height:1.5}
+  .link{border:0;background:none;white-space:nowrap;flex:none;color:var(--accent);font-weight:700;font-size:13px;padding:4px 0}
+  .ol .si{font-size:10px;font-weight:700;color:var(--faint);width:20px;flex:none}
+  .tbl-wrap{overflow-x:auto;margin:8px -4px 0}
+  table.vt{width:100%;border-collapse:collapse;font-size:12.5px}
+  table.vt th{font-size:11px;color:var(--muted);font-weight:700;text-align:right;padding:6px;border-bottom:1px solid var(--border);white-space:nowrap}
+  table.vt td{padding:7px 6px;border-bottom:1px solid var(--border-2);text-align:right;white-space:nowrap}
+  table.vt th:first-child,table.vt td:first-child{text-align:left}
+  table.vt tr.out td{color:var(--faint)} table.vt tr.trim td{background:var(--warn-soft)}
+  table.vt tr.tap{cursor:pointer} table.vt tr.tap:active td{background:var(--surface-2)}
+  .st{display:inline-block;font-size:10px;font-weight:700;padding:2px 6px;border-radius:999px}
+  .st.wait{background:#f0f1f5;color:var(--muted)} .st.today{background:#ffdede;color:var(--buy)}
+  .st.part{background:var(--warn-soft);color:var(--warn)} .st.done{background:var(--ok-soft);color:var(--ok)}
+  .more{width:100%;margin-top:10px;border:1px solid var(--border);background:var(--surface-2);border-radius:12px;padding:10px;font-weight:700;font-size:13px}
+  .vfl{display:flex;align-items:center;gap:7px;padding:7px 0;border-bottom:1px solid var(--border-2);font-size:13px;white-space:nowrap}
+  .vfl .dt{width:38px;color:var(--muted);font-size:12px} .vfl .chip{margin:0;font-size:10.5px;padding:2px 6px}
+  .vfl i{font-style:normal;margin-left:auto;color:var(--muted);font-size:12px}
+  .calc{background:var(--surface-2);border-radius:14px;padding:12px;margin:6px 0 10px;font-size:13px;display:grid;gap:6px}
+  .grp{font-size:12px;font-weight:800;color:var(--muted);margin:12px 0 8px}
+  .gh{display:grid;grid-template-columns:1fr 1fr 40px;gap:8px;align-items:end;margin-bottom:8px}
+  .gh .f{margin-bottom:0} .gh .x{height:44px}
+  .f input[readonly]{background:#f0f1f5;color:var(--muted)}
+  .vhint{font-size:12px;color:var(--muted);margin-top:6px}
   /* 사이클 상세: 홈 카드와 같은 증권사 카드 + 숫자 표 */
   .bc.dcard{padding:12px 14px 13px;gap:6px}
   .bc.dcard .nm{font-size:20px}
@@ -352,7 +382,7 @@ function render() {
   if (!data) return root.innerHTML = '<div class="empty">불러오는 중…</div>';
   if (data.error) return root.innerHTML = `<div class="card"><b>불러오기 실패</b><div class="note">${esc(data.error)}</div><div class="help" style="margin-top:8px">토큰 권한(Contents 읽기)과 저장소 이름을 확인하세요. 아직 봇이 한 번도 실행되지 않았다면 dashboard.json 이 없을 수 있어요.</div><div class="actions"><button class="btn" onclick="view.tab='settings';render()">설정</button><button class="btn primary" onclick="control('refresh',{})">데이터 생성</button></div></div>`;
   if (view.cycle) return root.innerHTML = detailView(data.cycles.find(c => c.id === view.cycle));
-  if (view.vr) { root.innerHTML = vrDetailView((data.vr || []).find(r => r.id === view.vr)); return bindVrChart() }
+  if (view.vr) { root.innerHTML = vrDetailView((data.vr || []).find(r => r.id === view.vr)); bindVrChart(); return bindPlanChart() }
   if (view.done) { root.innerHTML = doneDetailView((data.completed || []).find(r => r.id === view.done)); return bindChart() }
   root.innerHTML = view.tab === 'done' ? doneView() : homeView();
 }
@@ -410,6 +440,7 @@ function vrHome() {
         <div class="sub one">${esc(r.ticker)} · 2주 1회${r.next ? ' · 다음 ' + esc(r.next) : ''}</div></div>
         <div class="pnl"><div class="amt num ${cls(r.pnl)}">${sgn(r.pnl)}</div><div class="pct num ${cls(r.pnl)}">${pct(r.pnl_pct)}</div></div></div>
       ${vrBand(r)}
+      ${r.ladder ? `<div class="sub one">매수 시작 <b class="num">${usd(r.ladder.buy_start)}</b>${r.ladder.prev_close ? ` (전일종가 ${pct((r.ladder.buy_start / r.ladder.prev_close - 1) * 100)})` : ''} · 오늘 계획 매수 ${r.ladder.buys.filter(s => s.today && s.qty > s.filled).length}건</div>` : ''}
       <div class="row"><div class="stats"><div class="stat"><span class="k">평가</span><span class="v num">${usd(r.eval, 0)}</span></div>
         <div class="stat"><span class="k">Pool</span><span class="v num">${usd(r.pool, 0)}</span></div>
         <div class="stat"><span class="k">보유</span><span class="v num">${r.qty}</span><span class="k">주</span></div></div></div></div>`;
@@ -517,48 +548,307 @@ function detailView(c) {
   ${historyView(c)}`;
 }
 
-/* ── VR 상세: 카드 · 숫자 표 · 회차 그래프(밴드·V·평가) · 회차 기록 ── */
+/* ── VR 상세: [현황 | 주문 | 기록 | 설정] (시안 LswVp7ThwpNQQZRHb7N7C6) ── */
+let vrSub = (() => { try { return localStorage.getItem('ib.vrSub') || 'status' } catch { return 'status' } })(), vrLadderAll = false;
+window.setVrSub = k => { vrSub = k; try { localStorage.setItem('ib.vrSub', k) } catch {} render(); scrollTo(0, 0) };
+const n2 = n => n == null || isNaN(n) ? '-' : Number(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const $0 = n => n == null || isNaN(n) ? '-' : Number(n).toLocaleString('en-US', { maximumFractionDigits: 0 });
+const pct1 = (x, d = 1) => (x >= 0 ? '+' : '−') + Math.abs(x * 100).toFixed(d) + '%';
+const vrNow = r => r.eval + r.pool;
+const vrState = r => r.eval < r.min_band ? ['매수 구간', 'b-up'] : r.eval > r.max_band ? ['매도 구간', 'b-acc'] : ['대기', 'b-gray'];
+const vrPrev = r => (r.ladder || {}).prev_close || (r.price || {}).close;
+function vrGauge(r) {
+  const min = r.min_band * .93, max = r.max_band * 1.04, w = v => Math.min(98, Math.max(2, (v - min) / (max - min) * 100));
+  const a = w(r.min_band), b = w(r.max_band), k = w(r.eval), v = w(r.v);
+  return `<div class="gauge" role="img" aria-label="평가금 ${usd(r.eval, 0)}, 밴드 ${usd(r.min_band, 0)}~${usd(r.max_band, 0)}">
+    <div class="gtrack"><div class="z buy" style="width:${a}%"></div><div class="z hold" style="width:${b - a}%"></div><div class="z sell" style="flex:1"></div></div>
+    <div class="gtick" style="left:${a}%"></div><div class="gtick v" style="left:${v}%"></div><div class="gtick" style="left:${b}%"></div>
+    <div class="gknob" style="left:${k}%"></div><div class="gnow num" style="left:${k}%">${$0(r.eval)}</div>
+    <div class="glbl num" style="left:${a}%">${$0(r.min_band)}</div><div class="glbl num" style="left:${v}%;color:var(--accent)">V ${$0(r.v)}</div><div class="glbl num" style="left:${b}%">${$0(r.max_band)}</div></div>`;
+}
+function vrDonut(stock, pool) {
+  const tot = stock + pool, fp = tot ? pool / tot : 0, R = 52, C = 2 * Math.PI * R, gap = 2;
+  const segP = Math.max(0, fp * C - gap), segS = Math.max(0, (1 - fp) * C - gap);
+  return `<svg viewBox="0 0 132 132" role="img" aria-label="TQQQ ${(100 - fp * 100).toFixed(1)}%, Pool ${(fp * 100).toFixed(1)}%">
+    <g transform="rotate(-90 66 66)" fill="none" stroke-width="18">
+      <circle cx="66" cy="66" r="${R}" stroke="#d9822b" stroke-dasharray="${segP} ${C - segP}" stroke-dashoffset="${-gap / 2}"/>
+      <circle cx="66" cy="66" r="${R}" stroke="#5b5bf0" stroke-dasharray="${segS} ${C - segS}" stroke-dashoffset="${-(fp * C + gap / 2)}"/></g>
+    <text x="66" y="62" text-anchor="middle" font-size="11" fill="#6b7280">Pool</text>
+    <text x="66" y="80" text-anchor="middle" font-size="18" font-weight="700" fill="#161a23" font-family="IBM Plex Mono,monospace">${(fp * 100).toFixed(0)}%</text></svg>`;
+}
+function vrStatusView(r) {
+  const tot = vrNow(r), prev = vrPrev(r), L = r.ladder || {}, cur = (r.rounds || [])[0] || {}, last = (r.rounds || []).find(x => !x.open);
+  const st = vrState(r), bp = r.broker_pos, P = r.plan || {};
+  let h = `<div class="card">
+    <div class="row"><div class="meta">계좌총액 · 지금</div><span class="badge ${st[1]}">${st[0]}</span></div>
+    <div class="vbig num">${usd(tot)}</div>
+    <div class="meta">누적 투입 ${usd(r.invested)} · <b class="num ${cls(r.pnl)}">${sgn(r.pnl)} (${pct(r.pnl_pct)})</b></div>
+    <div class="sec" style="margin:16px 0 0"><span style="font-size:13px">평가금과 밴드</span><span class="meta num">${r.qty}주 × ${usd((r.price || {}).live || prev)}</span></div>
+    ${vrGauge(r)}
+    <div class="trig">
+      <div class="buy"><div class="k">매수 시작가</div><div class="v num">${L.buy_start ? usd(L.buy_start) : '–'}</div><div class="d num">${L.buy_start && prev ? '전일종가 ' + pct1(L.buy_start / prev - 1) : ''}</div></div>
+      <div class="sell"><div class="k">매도 시작가</div><div class="v num">${L.sell_start ? usd(L.sell_start) : '–'}</div><div class="d num">${L.sell_start && prev ? '전일종가 ' + pct1(L.sell_start / prev - 1) : ''}</div></div>
+    </div></div>
+  <div class="card">
+    <div class="row"><div><div class="title" style="font-size:15px">Pool / TQQQ 비중</div><div class="meta">지금 · 평가금 ${usd(r.eval, 0)} + Pool ${usd(r.pool, 0)}</div></div></div>
+    <div class="mix">${vrDonut(r.eval, r.pool)}<div>
+      <div class="it"><span class="sw" style="background:#5b5bf0"></span><span>TQQQ</span><span class="p num">${(r.eval / tot * 100).toFixed(1)}%</span><span class="a num">${usd(r.eval)} · ${r.qty}주</span></div>
+      <div class="it"><span class="sw" style="background:#d9822b"></span><span>Pool (현금)</span><span class="p num">${(r.pool / tot * 100).toFixed(1)}%</span><span class="a num">${usd(r.pool)}</span></div></div></div>
+    <div class="note">${last ? `${last.n}회차 종료 Pool ${usd(last.pool)}에 ` : ''}이번 회차 적립금 ${usd(r.contrib, 0)}을 더해 시작 Pool은 ${usd(r.start_pool)}이에요.</div></div>
+  <div class="card"><div class="grid3">
+    <div><div class="k">V (목표 평가금)</div><div class="v num">${$0(r.v)}</div></div>
+    <div><div class="k">시작 Pool</div><div class="v num">${$0(r.start_pool)}</div></div>
+    <div><div class="k">이번 적립금</div><div class="v num">${$0(r.contrib)}</div></div>
+    <div><div class="k">보유</div><div class="v num">${r.qty}<small>주</small></div></div>
+    <div><div class="k">실효평단</div><div class="v num">${r.avg ? r.avg.toFixed(2) : '–'}</div></div>
+    <div><div class="k">G · 밴드</div><div class="v num">${r.G} · ±${Math.round(((r.config || {}).band || .15) * 100)}%</div></div></div>
+    ${r.lump ? `<div class="vwarn">이번 회차 목돈 ${usd(r.lump)}: 주식 ${usd(r.lump_stock)} (${(+r.lump_shares).toFixed(2)}주) + Pool ${usd(r.lump_cash)}. V도 ${usd(r.lump)} 올라갔어요.</div>` : ''}
+    <div class="note">V = 직전V + 직전Pool/G + (시작평가금 − 직전V)/(2√G) + 적립금 + 목돈</div></div>
+  <div class="card">
+    <div class="row"><div><div class="title" style="font-size:15px">증권사 대조</div><div class="meta">${bp ? esc(bp.at) + ' 잔고' : '봇이 증권사에 접속할 때 확인'}</div></div>
+      ${bp ? (bp.ok && bp.qty === r.qty ? '<span class="badge b-ok">✓ 일치</span>' : '<span class="badge b-warn">⚠ 차이</span>') : '<span class="badge b-gray">조회 전</span>'}</div>
+    <div class="grid3" style="grid-template-columns:repeat(2,minmax(0,1fr));margin-top:10px">
+      <div><div class="k">증권사 매입금액</div><div class="v num">${bp ? n2(bp.cost) : '–'}</div></div>
+      <div><div class="k">장부 누적매수</div><div class="v num">${n2(r.book_cost)}</div></div>
+      <div><div class="k">증권사 보유</div><div class="v num">${bp ? bp.qty + '<small>주</small>' : '–'}</div></div>
+      <div><div class="k">장부 보유</div><div class="v num">${r.qty}<small>주</small></div></div></div>
+    <div class="note">${bp && !bp.ok ? `차이 ${sgn(bp.diff)} — 빠진 체결이 있는지 확인하세요. ` : ''}$1 넘게 차이 나면 경고해요.</div></div>
+  <div class="card">
+    <div class="row"><div><div class="title" style="font-size:15px">계획 대비</div><div class="meta num">연 ${((r.config || {}).expected_return * 100).toFixed(0)}% · 기본 적립 $${$0((r.config || {}).default_contrib)} · ${(r.config || {}).target_years}년(${P.T}회차)</div></div><button class="link" onclick="setVrSub('settings')">바꾸기</button></div>
+    <div class="meta" style="margin-top:10px">${(r.config || {}).target_years}년 후 목표금액</div>
+    <div class="num" style="font-size:24px;font-weight:700">${usd(P.target, 0)}</div>
+    <div class="chart" id="pchart">${vrPlanSvg(r)}<div class="tip" id="ptip"></div></div>
+    <div class="legend"><span><i style="width:14px;height:2px;background:#5b5bf0"></i>실제 계좌총액</span><span><i style="width:14px;border-top:2px dashed #8a90a0"></i>계획선</span></div></div>`;
+  return h;
+}
+let planPts = null;
+function vrPlanSvg(r) {
+  const P = r.plan; if (!P || !P.line) return '';
+  const W = 340, H = 170, L = 38, R = 34, T = 10, B = 22;
+  const done = P.actual, cur = r.round, maxT = Math.max(16, cur + 6);
+  const plan = P.line.filter(p => p[0] <= maxT), act = done.concat([[cur, P.now]]);
+  const vals = plan.map(p => p[1]).concat(act.map(a => a[1])), step = 20000;
+  const lo = Math.floor(Math.min(...vals) / step) * step, hi = Math.ceil(Math.max(...vals) / step) * step;
+  const x = t => L + t / maxT * (W - L - R), y = v => T + (1 - (v - lo) / (hi - lo)) * (H - T - B);
+  const path = pts => pts.map((p, i) => `${i ? 'L' : 'M'}${x(p[0]).toFixed(1)},${y(p[1]).toFixed(1)}`).join('');
+  let g = '';
+  for (let v = lo; v <= hi; v += step) g += `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke="#eef0f5"/><text x="${L - 5}" y="${y(v) + 3}" text-anchor="end">${v / 1000}k</text>`;
+  for (let t = 0; t <= maxT; t += 4) g += `<text x="${x(t)}" y="${H - 6}" text-anchor="middle">${t}회</text>`;
+  const e = act.at(-1);
+  planPts = { plan, act, x, maxT, W, L, R };
+  return `<svg viewBox="0 0 ${W} ${H}" id="pchartSvg">${g}
+    <path d="${path(plan)}" fill="none" stroke="#8a90a0" stroke-width="1.8" stroke-dasharray="5 4"/>
+    <path d="${path(done)}" fill="none" stroke="#5b5bf0" stroke-width="2" stroke-linejoin="round"/>
+    <path d="${path(act.slice(-2))}" fill="none" stroke="#5b5bf0" stroke-width="2" stroke-dasharray="2 3"/>
+    <circle cx="${x(e[0])}" cy="${y(e[1])}" r="4.5" fill="#fff" stroke="#5b5bf0" stroke-width="2"/>
+    <text x="${x(e[0]) + 7}" y="${y(e[1]) + 14}" style="font-size:10px;font-weight:700;fill:#161a23">${$0(e[1])}</text>
+    <line id="pcur" x1="0" x2="0" y1="${T}" y2="${H - B}" stroke="#8b90a0" stroke-width=".8" style="display:none"/></svg>`;
+}
+function bindPlanChart() {
+  const box = $('#pchart'), svg = $('#pchartSvg'); if (!box || !svg || !planPts) return;
+  const { plan, act, x, maxT, W, L, R } = planPts;
+  const show = ev => {
+    const r = svg.getBoundingClientRect(), px = (ev.clientX - r.left) / r.width * W;
+    const t = Math.max(0, Math.min(maxT, Math.round((px - L) / (W - L - R) * maxT)));
+    const p = plan.find(q => q[0] === t), a = act.filter(q => q[0] === t).at(-1);
+    const cur = $('#pcur'); cur.setAttribute('x1', x(t)); cur.setAttribute('x2', x(t)); cur.style.display = '';
+    const tip = $('#ptip');
+    tip.innerHTML = `<div style="color:#aab">${t}회차</div>${p ? `<div>계획 <b>${usd(p[1], 0)}</b></div>` : ''}${a ? `<div>실제 <b>${usd(a[1], 0)}</b></div>` : ''}`;
+    tip.style.display = 'block';
+    const pxl = x(t) / W * r.width; tip.style.left = Math.max(0, pxl > r.width / 2 ? pxl - tip.offsetWidth - 10 : pxl + 10) + 'px';
+  };
+  box.onpointerdown = show; box.onpointermove = e => { if (e.pointerType === 'mouse' || e.buttons) show(e) };
+  box.onpointerleave = () => { $('#ptip').style.display = 'none'; $('#pcur').style.display = 'none' };
+}
+function vrOrdersView(r) {
+  const L = r.ladder;
+  if (!L) return '<div class="card"><div class="empty">사다리를 만들 수 없어요 (보유 0주)</div></div>';
+  const cfg = r.config || {}, tb = L.buys.filter(s => s.today && s.qty > s.filled), ts = L.sells.filter(s => s.today && s.qty > s.filled);
+  const col = (rows, side) => rows.length ? rows.map(s => `<div class="ol"><span class="si num">${s.i}</span><span class="p num">${usd(s.price)}</span><span class="q num">${s.qty - s.filled}주</span></div>`).join('')
+    : `<div class="help" style="padding:4px 0">${side === 'sell' && L.sells[0] ? `매도점이 ${usd(L.sells[0].price)}부터라 오늘 범위(${usd(L.hi)}) 밖이에요.` : '오늘 범위 안에 계단이 없어요.'}</div>`;
+  const amt = tb.reduce((a, s) => a + s.price * (s.qty - s.filled), 0);
+  const n = vrLadderAll ? L.buys.length : 20;
+  let cum = r.start_qty, pool = r.available_pool, rows = '';
+  L.buys.forEach((s, k) => {
+    cum += s.qty; pool -= s.price * s.qty; if (s.i > n) return;
+    const trim = k === L.buys.length - 1 && L.trimmed, full = s.filled >= s.qty;
+    const tag = full ? '<span class="st done">체결</span>' : s.filled ? `<span class="st part">${s.filled}/${s.qty}</span>` : s.today ? '<span class="st today">오늘 주문</span>' : '<span class="st wait">범위 밖</span>';
+    rows += `<tr class="${s.today || s.filled ? '' : 'out'} ${trim ? 'trim' : ''}"><td class="num">${s.i}</td><td class="num">${usd(s.price)}</td><td class="num">${s.qty}${trim ? ` <span class="st part">−${L.trimmed}</span>` : ''}</td><td class="num">${$0(cum)}</td><td class="num">${n2(pool)}</td><td>${tag}</td></tr>`;
+  });
+  return `<div class="banner" style="font-size:12.5px">VR 주문은 아직 봇이 넣지 않아요. 아래는 봇이 계산한 계획표예요 (자동 주문은 10/19 주에 정하기로).</div>
+  <div class="card">
+    <div class="row"><div><div class="title" style="font-size:16px">오늘 넣을 주문</div><div class="meta">지정가 · 전일종가 ${usd(L.prev_close)} ±${Math.round((cfg.reach || .15) * 100)}% 안의 남은 수량</div></div><span class="badge b-acc num">${tb.length + ts.length}건</span></div>
+    <div class="orders" style="margin-top:12px">
+      <div class="ocol buy"><h4>매수 ${tb.length}건 · ${usd(amt, 0)}</h4>${col(tb, 'buy')}</div>
+      <div class="ocol sell"><h4>매도 ${ts.length}건</h4>${col(ts, 'sell')}</div></div>
+    <div class="note">DB증권 API엔 며칠 유효한 예약주문이 없어서, 자동으로 하면 매일 남은 수량만 다시 넣어요. 체결된 계단은 빼고, 일부 체결된 계단은 남은 수량만.</div></div>
+  <div class="sec"><span>매수 사다리 · ${cfg.steps}계단</span><span class="meta num">${L.K}주 · 계단당 ${L.N}주</span></div>
+  <div class="card">
+    <div class="row"><div class="meta">주문 총액 <b class="num" style="color:var(--text)">${usd(L.cost)}</b> / 가용 Pool <span class="num">${usd(r.available_pool)}</span></div><span class="badge ${L.cost <= r.available_pool + 1e-6 ? 'b-ok' : 'b-warn'}">Pool 안</span></div>
+    <div class="tbl-wrap"><table class="vt"><thead><tr><th>계단</th><th>매수가</th><th>수량</th><th>누적보유</th><th>남은 Pool</th><th>상태</th></tr></thead><tbody>${rows}</tbody></table></div>
+    ${vrLadderAll || L.buys.length <= 20 ? '' : `<button class="more" onclick="vrLadderAll=true;render()">21~${L.buys.length}계단 더 보기</button>`}
+    <div class="note">계단 가격은 묶음의 첫 주 가격이에요. 총액이 가용 Pool을 넘으면 마지막 계단부터 줄여요.${L.trimmed ? ` 이번엔 ${L.trimmed}주 줄였어요.` : ''} 회차 체결은 높은 계단부터 채워요.</div></div>
+  <div class="sec"><span>매도 사다리 · ${cfg.steps}계단</span><span class="meta num">보유 ${Math.floor(r.start_qty)}주 전량 · 계단당 ${L.Ns}주</span></div>
+  <div class="card"><div class="tbl-wrap"><table class="vt"><thead><tr><th>계단</th><th>매도가</th><th>수량</th><th>전일종가 대비</th></tr></thead>
+    <tbody>${L.sells.slice(0, 5).map(s => `<tr class="out"><td class="num">${s.i}</td><td class="num">${usd(s.price)}</td><td class="num">${s.qty}</td><td class="num">${pct1(s.price / L.prev_close - 1)}</td></tr>`).join('')}
+    ${L.sells.length > 5 ? `<tr class="out"><td colspan="4" style="text-align:center">… ${L.sells.length}계단까지 · 마지막 ${usd(L.sells.at(-1).price)} × ${L.sells.at(-1).qty}주</td></tr>` : ''}</tbody></table></div></div>`;
+}
+function vrHistoryView(r) {
+  const hs = r.rounds || [], ov = hs.some(x => x.pool_override);
+  const rows = hs.map(x => `<tr class="tap" onclick="openVrRound('${esc(r.id)}',${x.n})">
+    <td class="num">${x.n} <span class="meta">(${2 * x.n - 1}주)</span></td><td class="num">${md(x.started)}</td><td class="num">${$0(x.contrib)}</td>
+    <td class="num">${x.lump ? $0(x.lump) : '–'}</td><td class="num">${x.open ? '<span class="st today">진행 중</span>' : x.close}</td><td class="num">${x.open ? '–' : x.end_qty}</td>
+    <td class="num">${x.G}</td><td class="num">${n2(x.v)}</td><td class="num">${x.open ? '–' : n2(x.pool) + (x.pool_override ? ' *' : '')}</td><td class="num">${x.open ? '–' : n2(x.total)}</td></tr>`).join('');
+  const fills = hs.flatMap(x => (x.fills || []).map(f => ({ ...f, n: x.n }))).reverse();
+  const fl = fills.length ? fills.map(f => `<div class="vfl"><span class="dt num">${md(f.date)}</span><span class="meta">${f.n}회</span><span class="chip ${f.side}">${f.side === 'buy' ? '매수' : '매도'}</span><b class="num">${f.qty}주</b><span class="num">@${usd(f.price)}</span><i class="num">${usd(f.amount)}</i></div>`).join('')
+    : '<div class="help">아직 날짜별 체결이 없어요.</div>';
+  const cur = hs[0] || {};
+  return `<div class="card">
+    <div class="row"><div><div class="title" style="font-size:16px">회차 기록</div><div class="meta">줄을 누르면 고칠 수 있어요</div></div></div>
+    <div class="tbl-wrap"><table class="vt"><thead><tr><th>회차</th><th>시작</th><th>추가 Pool</th><th>목돈</th><th>종가</th><th>보유</th><th>G</th><th>V</th><th>마지막 Pool</th><th>계좌총액</th></tr></thead><tbody>${rows}</tbody></table></div>
+    ${ov ? '<div class="note">* 장부 기록값으로 고정한 마지막 Pool이에요(계산값과 다름). 과거 V가 바뀌지 않게 그대로 둡니다.</div>' : ''}</div>
+  <div class="actions" style="grid-template-columns:1fr 1fr">${cur.open ? `<button class="btn" onclick="openVrRound('${esc(r.id)}',${cur.n})">${cur.n}회차 고치기</button><button class="btn primary" onclick="openVrClose('${esc(r.id)}')">${cur.n}회차 종료</button>` : ''}</div>
+  <div class="sec"><span>체결 기록 <span class="meta">날짜별</span></span><button class="mini" onclick="openVrFill('${esc(r.id)}')">＋ 체결 입력</button></div>
+  <div class="card">${fl}<div class="note">1~6회차는 엑셀에 회차 합계만 있어 날짜별 체결이 없어요.</div></div>
+  <div class="sec"><span>회차별 V · 평가</span></div><div class="card"><div class="chart" id="vchart">${vrChartSvg(hs.slice().reverse())}<div class="tip" id="vtip"></div></div>
+    <div class="legend"><span><i style="width:14px;height:8px;background:rgba(91,91,240,.12)"></i>밴드</span><span><i style="width:14px;border-top:2px dashed #5b5bf0"></i>V</span><span><i style="width:14px;height:2px;background:#1d2130"></i>평가금</span></div></div>`;
+}
+/* 목표금액 (봇 vr.target_amount 와 같은 식): 지금 V·마지막 확정 Pool 에서 목표 회차까지 매 회차 완전 리밸런싱 */
+function vrTarget(r, years, annual, contrib) {
+  const cfg = r.config || {}, hs = r.rounds || [], T = (cfg.rounds_per_year || 26) * years, g = Math.pow(1 + annual, 1 / (cfg.rounds_per_year || 26)) - 1;
+  const rec = Object.fromEntries(hs.map(x => [x.n, x.contrib])), gBy = Object.fromEntries(hs.map(x => [x.n, x.G]));
+  const closed = hs.find(x => !x.open);
+  let V = r.v, P = closed ? closed.pool : r.init.pool;
+  for (let t = r.round + 1; t <= T; t++) {
+    const G = gBy[t] ?? r.G;
+    [V, P] = [V + P / G + V * g / (2 * Math.sqrt(G)) + (rec[t] ?? contrib), P * (1 - 1 / G) + V * g * (1 - 1 / (2 * Math.sqrt(G)))];
+  }
+  return { T, g, target: V + P };
+}
+let vrForm = null;
+function vrSettingsView(r) {
+  const cfg = r.config || {};
+  if (!vrForm || vrForm.id !== r.id) vrForm = { id: r.id, years: cfg.target_years, annual: cfg.expected_return, contrib: cfg.default_contrib, gh: (cfg.g_history || []).map(x => [...x]) };
+  const f = vrForm, t = vrTarget(r, f.years, f.annual, f.contrib), week = r.week;
+  const changed = f.years !== cfg.target_years || f.annual !== cfg.expected_return || f.contrib !== cfg.default_contrib;
+  const ghChanged = JSON.stringify(f.gh) !== JSON.stringify(cfg.g_history);
+  return `<div class="card">
+    <div class="title" style="font-size:15px">목표</div>
+    <div class="f2" style="margin-top:10px">
+      <label class="f"><span>목표 기간 (년)</span><input inputmode="numeric" value="${f.years}" onchange="vrSet('years',this.value)"></label>
+      <label class="f"><span>기대 연수익률 (%)</span><input inputmode="decimal" value="${+(f.annual * 100).toFixed(2)}" onchange="vrSet('annual',this.value)"></label></div>
+    <label class="f"><span>기본 적립금 ($ / 회차)</span><input inputmode="decimal" value="${f.contrib}" onchange="vrSet('contrib',this.value)"></label>
+    <div class="calc"><div class="row"><span class="meta">${f.years}년(${t.T}회차) 후 목표금액</span><b class="num">${usd(t.target, 0)}</b></div><div class="row"><span class="meta">회차 기대수익률 (복리 환산)</span><span class="num">${(t.g * 100).toFixed(3)}%</span></div></div>
+    <div class="help">기대수익률은 가정값이에요. TQQQ 과거 실적(연 40%대)은 저금리 구간이라 그대로 쓰면 안 되고, 연 12~18%가 합리적인 범위예요.</div>
+    ${changed ? `<div class="actions" style="grid-template-columns:1fr 1fr"><button class="btn" onclick="vrForm=null;render()">되돌리기</button><button class="btn primary" onclick="vrSaveGoal('${esc(r.id)}')">저장</button></div>` : ''}</div>
+  <div class="card">
+    <div class="row"><div class="title" style="font-size:15px">G 변경 이력</div><button class="mini" onclick="vrAddG(${week})">＋ 추가</button></div>
+    <div style="margin-top:10px">${f.gh.map(([w, g], i) => `<div class="gh">
+      <label class="f"><span>적용 시작 주차</span><input inputmode="numeric" value="${w}" onchange="vrSetG(${i},0,this.value)"></label>
+      <label class="f"><span>G</span><input inputmode="decimal" value="${g}" onchange="vrSetG(${i},1,this.value)"></label>
+      <button class="x" aria-label="${w}주차 삭제" onclick="vrDelG(${i})" ${f.gh.length === 1 ? 'disabled' : ''}>✕</button></div>
+      ${w < week && !(cfg.g_history || []).some(b => b[0] === w && b[1] === g) ? `<div class="vwarn">${w}주차는 이미 지났어요. 지난 회차 V가 다시 계산됩니다. 지금부터 바꾸려면 ${week + 2}주차(다음 회차)를 넣으세요.</div>` : ''}`).join('')}</div>
+    <div class="note">주차는 홀수(1, 3, 5 …)예요. 회차 n의 주차 = 2n − 1. 지금은 ${r.round}회차 = ${week}주차.</div>
+    ${ghChanged ? `<div class="actions" style="grid-template-columns:1fr 1fr"><button class="btn" onclick="vrForm=null;render()">되돌리기</button><button class="btn primary" onclick="vrSaveG('${esc(r.id)}')">G 이력 저장</button></div>` : ''}</div>
+  <div class="card">
+    <div class="title" style="font-size:15px">매매 규칙</div>
+    <div class="grid3" style="margin-top:10px">
+      <div><div class="k">종목 · 계좌</div><div class="v">${esc(r.ticker)} · ${esc(BROKER[r.broker] || r.broker)}</div></div>
+      <div><div class="k">밴드</div><div class="v num">±${Math.round(cfg.band * 100)}%</div></div>
+      <div><div class="k">계단 수</div><div class="v num">${cfg.steps}</div></div>
+      <div><div class="k">Pool 한도</div><div class="v num">${Math.round(cfg.pool_limit * 100)}%</div></div>
+      <div><div class="k">주문 범위</div><div class="v num">±${Math.round(cfg.reach * 100)}%</div></div>
+      <div><div class="k">자동 주문</div><div class="v"><span class="badge b-gray">아직 안 함</span></div></div></div></div>`;
+}
+const vrNum = v => { const n = parseFloat(String(v).replace(/[,$%]/g, '')); return isFinite(n) ? n : null };
+window.vrSet = (k, v) => {
+  const n = vrNum(v); if (n == null || n < 0) { toast('숫자를 넣어 주세요'); return render() }
+  if (k === 'years') { if (n < 1 || n > 40) { toast('목표 기간은 1~40년'); return render() } vrForm.years = Math.round(n) }
+  if (k === 'annual') { if (n > 100) { toast('연수익률은 % 단위로 (예: 15)'); return render() } vrForm.annual = n / 100 }
+  if (k === 'contrib') vrForm.contrib = n;
+  render();
+};
+window.vrSetG = (i, j, v) => {
+  const n = vrNum(v); if (n == null || n <= 0) { toast('0보다 큰 숫자를 넣어 주세요'); return render() }
+  if (j === 0 && n % 2 !== 1) { toast('주차는 홀수예요 (1, 3, 5 …)'); return render() }
+  vrForm.gh[i][j] = n; vrForm.gh.sort((a, b) => a[0] - b[0]); render();
+};
+window.vrAddG = week => { const w = week + 2, r = data.vr.find(x => x.id === vrForm.id); vrForm.gh.push([w, r.G]); vrForm.gh.sort((a, b) => a[0] - b[0]); render(); toast(`${w}주차(다음 회차)부터 적용할 G를 넣으세요`) };
+window.vrDelG = i => { vrForm.gh.splice(i, 1); render() };
+window.vrSaveGoal = id => { if (confirm('목표를 저장할까요?')) control('vr_config', { id, target_years: vrForm.years, expected_return: vrForm.annual, default_contrib: vrForm.contrib }) };
+window.vrSaveG = id => {
+  const past = vrForm.gh.some(([w]) => w < data.vr.find(x => x.id === id).week);
+  if (confirm(past ? 'G 이력을 저장할까요? 지난 주차가 바뀌면 지난 회차 V가 다시 계산돼요.' : 'G 이력을 저장할까요?')) control('vr_config', { id, g_history: vrForm.gh });
+};
+/* 회차 고치기 · 회차 종료 시트 */
+window.openVrRound = (id, n) => {
+  const r = data.vr.find(x => x.id === id), x = r.rounds.find(y => y.n === n);
+  openSheet(`<h3>${n}회차 (${2 * n - 1}주차)</h3><div class="help" style="margin-bottom:6px">${md(x.started)} 시작 · G ${x.G} · V ${usd(x.v)}${x.open ? '' : ' · 지난 회차를 고치면 그 뒤 회차 V가 다시 계산돼요'}</div>
+    <div class="grp">회차 시작 때</div>
+    <label class="f"><span>추가 Pool (이번 적립금)</span><input id="rContrib" inputmode="decimal" value="${x.contrib ?? ''}"></label>
+    <div class="f2"><label class="f"><span>목돈 (넣기 + / 빼기 −)</span><input id="rLump" inputmode="decimal" placeholder="없음" value="${x.lump || ''}"></label>
+      <label class="f"><span>목돈 실행가</span><input id="rLprice" inputmode="decimal" placeholder="$" value="${x.lump_price || ''}"></label></div>
+    ${x.open ? '' : `<div class="grp">회차 끝날 때</div>
+    <div class="f2"><label class="f"><span>종가</span><input id="rClose" inputmode="decimal" value="${x.close ?? ''}"></label><label class="f"><span>보유 수</span><input id="rQty" inputmode="numeric" value="${x.end_qty ?? ''}"></label></div>`}
+    <div class="f2"><label class="f"><span>이번 매수금 (체결 합계)</span><input readonly value="${n2(x.bought || 0)}"></label><label class="f"><span>배당</span><input id="rDiv" inputmode="decimal" placeholder="0" value="${x.dividend || ''}"></label></div>
+    <div class="help" style="margin-bottom:10px">매수·매도금은 날짜별 체결(＋ 체결 입력)에서 합산돼요.</div>
+    <div class="actions" style="grid-template-columns:1fr 1fr"><button class="btn" onclick="closeSheet()">취소</button><button class="btn primary" onclick="saveVrRound('${esc(id)}',${n},${x.open})">저장</button></div>`);
+};
+window.saveVrRound = (id, n, open) => {
+  const g = k => val(k), contrib = vrNum(g('rContrib')), lump = g('rLump') ? vrNum(g('rLump')) : 0, lp = g('rLprice') ? vrNum(g('rLprice')) : 0, div = g('rDiv') ? vrNum(g('rDiv')) : 0;
+  if (contrib == null) return toast('추가 Pool을 넣어 주세요. 없으면 0이에요');
+  if (lump && !lp) return toast('목돈 실행가를 넣어 주세요');
+  const round = { n, contrib, lump: lump || 0, lump_price: lp || 0, dividend: div || 0 };
+  if (!open) {
+    const close = vrNum(g('rClose')), qty = vrNum(g('rQty'));
+    if (!close || !qty) return toast('종가와 보유 수를 넣어 주세요');
+    Object.assign(round, { close, end_qty: qty });
+  }
+  if (confirm(`${n}회차 기록을 저장할까요?`)) control('vr_round', { id, round });
+};
+window.openVrClose = id => {
+  const r = data.vr.find(x => x.id === id), next = r.round + 1, nd = new Date(r.started + 'T00:00:00Z');
+  nd.setUTCDate(nd.getUTCDate() + 14); const ns = nd.toISOString().slice(0, 10);
+  openSheet(`<h3>${r.round}회차 종료</h3><div class="help" style="margin-bottom:6px">회차 마지막 날(금) 장 마감 뒤 종가와 보유 수를 넣으세요.</div>
+    <div class="f2"><label class="f"><span>종료일 종가</span><input id="cClose" inputmode="decimal" value="${(r.price || {}).close || ''}"></label><label class="f"><span>종료 보유</span><input id="cQty" inputmode="numeric" value="${r.qty}"></label></div>
+    <div class="grp">${next}회차 시작 (${md(ns)})</div>
+    <div class="f2"><label class="f"><span>추가 Pool (적립금)</span><input id="cContrib" inputmode="decimal" value="${(r.config || {}).default_contrib}"></label><label class="f"><span>목돈 (선택)</span><input id="cLump" inputmode="decimal" placeholder="없음"></label></div>
+    <label class="f"><span>목돈 실행가 (목돈 있을 때)</span><input id="cLprice" inputmode="decimal" placeholder="$"></label>
+    <div class="help" style="margin-bottom:10px">저장하면 ${next}회차의 V·밴드·사다리가 바로 계산돼요.</div>
+    <div class="actions" style="grid-template-columns:1fr 1fr"><button class="btn" onclick="closeSheet()">취소</button><button class="btn primary" onclick="doVrClose('${esc(id)}')">종료하고 ${next}회차 시작</button></div>`);
+};
+window.doVrClose = id => {
+  const close = vrNum(val('cClose')), qty = vrNum(val('cQty')), contrib = vrNum(val('cContrib')), lump = val('cLump') ? vrNum(val('cLump')) : 0, lp = val('cLprice') ? vrNum(val('cLprice')) : 0;
+  if (!close || !qty) return toast('종가와 보유 수를 넣어 주세요');
+  if (contrib == null) return toast('적립금을 넣어 주세요. 없으면 0이에요');
+  if (lump && !lp) return toast('목돈 실행가를 넣어 주세요');
+  const p = { id, close, end_qty: qty, contrib };
+  if (lump) Object.assign(p, { lump, lump_price: lp });
+  if (confirm(`종가 ${usd(close)} · 보유 ${qty}주로 회차를 끝내고 다음 회차를 시작할까요?`)) control('vr_close', p);
+};
+
 function vrDetailView(r) {
   if (!r) { view.vr = null; return homeView() }
-  const br = BRAND[r.broker] || {}, p = r.price || {}, hs = r.rounds || [];
-  const tile = (k, v, klass = '') => `<div><span class="k">${k}</span><span class="v ${klass}">${v}</span></div>`;
+  const br = BRAND[r.broker] || {}, p = r.price || {}, st = vrState(r);
+  const subs = [['status', '현황'], ['orders', '주문'], ['history', '기록'], ['settings', '설정']];
   const live = p.live ? `<div>현재가<b>${usd(p.live)}</b>${p.close ? `<small class="${cls(p.live - p.close)}">${pct((p.live / p.close - 1) * 100)}</small>` : ''}</div>` : '';
-  const cur = hs[0] || {};
-  let h = `<div class="dhead"><button class="backbtn" aria-label="뒤로" onclick="goBack()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></button><div class="dtitle">VR</div></div>
+  const end = new Date(r.started + 'T00:00:00Z'); end.setUTCDate(end.getUTCDate() + 11);
+  const body = { status: vrStatusView, orders: vrOrdersView, history: vrHistoryView, settings: vrSettingsView }[vrSub] || vrStatusView;
+  return `<div class="dhead"><button class="backbtn" aria-label="뒤로" onclick="goBack()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></button><div class="dtitle">VR</div><span class="badge ${st[1]}">${st[0]}</span></div>
   <div class="card bc dcard ${br.cls || ''}">
     ${br.mark ? `<img class="wm" src="${br.mark}" alt="">` : ''}
     ${br.logo ? `<img class="blogo" src="${br.logo}" alt="${br.name}">` : `<div class="meta">${esc(r.broker)}</div>`}
     <div class="row" style="align-items:flex-start"><div style="min-width:0">
         <div class="one"><span class="nm">${esc(vrName(r))}</span><span class="cap">${esc(r.round)}회차</span></div>
-        <div class="sub" style="margin-top:3px">${esc(r.ticker)} · 2주 1회 · G ${esc(r.G)}${r.next ? ' · 다음 ' + esc(r.next) : ''}</div></div>
+        <div class="sub" style="margin-top:3px">${r.week}주차 · ${md(r.started)} ~ ${md(end.toISOString().slice(0, 10))} · G ${esc(r.G)}</div></div>
       <div class="pnl"><div class="amt num ${cls(r.pnl)}">${sgn(r.pnl)}</div><div class="pct num ${cls(r.pnl)}">${pct(r.pnl_pct)}</div></div></div>
-    ${vrBand(r)}
     <div class="kv2"><div>보유<b>${r.qty}</b>주</div><div>평단<b>${r.avg ? usd(r.avg) : '-'}</b></div>
       ${p.close ? `<div>종가 ${esc(fmtD(p.close_date))}<b>${usd(p.close)}</b></div>` : ''}${live}</div>
   </div>
-  <div class="tiles">
-    ${tile('V (목표)', usd(r.v, 0))}${tile('평가금', usd(r.eval, 0))}${tile('Pool', usd(r.pool, 0))}
-    ${tile('누적 투입', usd(r.invested, 0))}${tile('계좌 총액', usd(r.eval + r.pool, 0))}${tile('이번 적립', usd(cur.contrib, 0))}
-  </div>
-  <div class="meta" style="margin:0 2px">밴드 ${usd(r.min_band, 0)} ~ ${usd(r.max_band, 0)} · 손익 = 평가금 + Pool − 누적 투입${p.updated ? ' · ' + esc(p.updated) + ' 기준' : ''}</div>`;
-  if (!hs.length) return h;
-  h += `<div class="sec"><span>회차별 V · 평가</span></div><div class="card"><div class="chart" id="vchart">${vrChartSvg(hs.slice().reverse())}<div class="tip" id="vtip"></div></div>
-    <div class="legend"><span><i style="width:14px;height:8px;background:rgba(91,91,240,.12)"></i>밴드</span><span><i style="width:14px;border-top:2px dashed #5b5bf0"></i>V</span><span><i style="width:14px;height:2px;background:#1d2130"></i>평가금</span></div></div>`;
-  const rows = hs.map((x, i) => {
-    const end = i ? hs[i - 1].started : null, z = vrZone(x.eval, x.min_band, x.max_band);
-    const dq = x.open ? (x.buy_qty || 0) - (x.sell_qty || 0) : x.end_qty - x.start_qty;
-    const trade = [x.bought ? `매수 <b>${dq > 0 && !x.sold ? dq + '주 ' : ''}${usd(x.bought)}</b>` : '', x.sold ? `매도 <b>${usd(x.sold)}</b>` : ''].filter(Boolean).join(' · ') || '매매 없음';
-    return `<div class="vrr">
-      <div class="h"><b>${x.n}회차</b><span class="dt">${md(x.started)}${end ? ' ~ ' + md(end) : ' ~'}</span>${x.open ? '<span class="live">진행 중</span>' : ''}
-        <span class="pl ${cls(x.pnl)}">${sgn(x.pnl)} <small>${x.pnl_pct == null ? '' : pct(x.pnl_pct)}</small></span></div>
-      <div class="l">V <b>${usd(x.v, 0)}</b> · 밴드 ${usd(x.min_band, 0)} ~ ${usd(x.max_band, 0)}</div>
-      <div class="l">${x.open ? '지금 평가' : '종료 평가'} <b>${usd(x.eval, 0)}</b> <span class="vzone ${z[0]}">${z[1]}</span> · Pool <b>${usd(x.pool, 0)}</b></div>
-      <div class="l">${trade} · 보유 <b>${x.end_qty}</b>주${x.close ? ` · ${x.open ? '현재가' : '종가'} <b>${usd(x.close)}</b>` : ''}</div>
-      ${(x.fills || []).map(f => `<div class="l vf"><span class="dt">${md(f.date)}</span><span class="chip ${f.side}">${f.side === 'buy' ? '매수' : '매도'}</span><b>${f.qty}주</b> @${usd(f.price)}<i>${usd(f.amount)}</i></div>`).join('')}
-      <div class="l f">적립 ${usd(x.contrib, 0)}${x.lump ? ' · 목돈 ' + usd(x.lump, 0) : ''}${x.G ? ' · G ' + x.G : ''}${x.note ? ' · ' + esc(x.note) : ''}</div></div>`;
-  }).join('');
-  return h + `<div class="sec"><span>회차 기록 <span class="meta">${hs.length}회차</span></span><button class="mini" onclick="openVrFill('${esc(r.id)}')">＋ 체결 입력</button></div><div class="card hist2">${rows}</div>`;
+  <div class="seg vseg" role="tablist">${subs.map(([k, l]) => `<button role="tab" aria-selected="${vrSub === k}" class="${vrSub === k ? 'on' : ''}" onclick="setVrSub('${k}')">${l}</button>`).join('')}</div>
+  ${body(r)}`;
 }
+
 let vrPts = [], vrScale = null;
 function vrChartSvg(pts) {
   vrPts = pts;
