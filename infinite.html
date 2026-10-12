@@ -614,7 +614,7 @@ function vrStatusView(r) {
       <div><div class="k">장부 보유</div><div class="v num">${r.qty}<small>주</small></div></div></div>
     <div class="note">${bp && !bp.ok ? `차이 ${sgn(bp.diff)} — 빠진 체결이 있는지 확인하세요. ` : ''}$1 넘게 차이 나면 경고해요.</div></div>
   <div class="card">
-    <div class="row"><div><div class="title" style="font-size:15px">계획 대비</div><div class="meta num">연 ${((r.config || {}).expected_return * 100).toFixed(0)}% · 기본 적립 $${$0((r.config || {}).default_contrib)} · ${(r.config || {}).target_years}년(${P.T}회차)</div></div><button class="link" onclick="setVrSub('settings')">바꾸기</button></div>
+    <div class="row"><div><div class="title" style="font-size:15px">계획 대비</div><div class="meta num">연 ${((r.config || {}).expected_return * 100).toFixed(0)}% · 다음 적립 $${$0((r.config || {}).next_contrib ?? (r.config || {}).default_contrib)} · ${(r.config || {}).target_years}년(${P.T}회차)</div></div><button class="link" onclick="setVrSub('settings')">바꾸기</button></div>
     <div class="meta" style="margin-top:10px">${(r.config || {}).target_years}년 후 목표금액</div>
     <div class="num" style="font-size:24px;font-weight:700">${usd(P.target, 0)}</div>
     <div class="chart" id="pchart">${vrPlanSvg(r)}<div class="tip" id="ptip"></div></div>
@@ -714,37 +714,47 @@ function vrHistoryView(r) {
     <div class="legend"><span><i style="width:14px;height:8px;background:rgba(91,91,240,.12)"></i>밴드</span><span><i style="width:14px;border-top:2px dashed #5b5bf0"></i>V</span><span><i style="width:14px;height:2px;background:#1d2130"></i>평가금</span></div></div>`;
 }
 /* 목표금액 (봇 vr.target_amount 와 같은 식): 지금 V·마지막 확정 Pool 에서 목표 회차까지 매 회차 완전 리밸런싱 */
-function vrTarget(r, years, annual, contrib, gh) {
+const histAt = (h, week, dflt) => { let v = dflt; for (const [w, x] of h || []) if (w <= week) v = x; return v };
+function vrTarget(r, years, annual, ch, gh) {
   const cfg = r.config || {}, hs = r.rounds || [], T = (cfg.rounds_per_year || 26) * years, g = Math.pow(1 + annual, 1 / (cfg.rounds_per_year || 26)) - 1;
   const rec = Object.fromEntries(hs.map(x => [x.n, x.contrib])), gBy = Object.fromEntries(hs.map(x => [x.n, x.G]));
   const closed = hs.find(x => !x.open);
   let V = r.v, P = closed ? closed.pool : r.init.pool;
   for (let t = r.round + 1; t <= T; t++) {
     let G = gBy[t]; if (G == null) { G = cfg.g_default || 10; for (const [w, v] of gh || cfg.g_history || []) if (w <= 2 * t - 1) G = v }   // 앞으로 회차는 G 이력대로
-    [V, P] = [V + P / G + V * g / (2 * Math.sqrt(G)) + (rec[t] ?? contrib), P * (1 - 1 / G) + V * g * (1 - 1 / (2 * Math.sqrt(G)))];
+    [V, P] = [V + P / G + V * g / (2 * Math.sqrt(G)) + (rec[t] ?? histAt(ch || cfg.contrib_history, 2 * t - 1, cfg.default_contrib)), P * (1 - 1 / G) + V * g * (1 - 1 / (2 * Math.sqrt(G)))];
   }
   return { T, g, target: V + P };
 }
 let vrForm = null;
 function vrSettingsView(r) {
   const cfg = r.config || {};
-  if (!vrForm || vrForm.id !== r.id) vrForm = { id: r.id, years: cfg.target_years, annual: cfg.expected_return, contrib: cfg.default_contrib, gh: (cfg.g_history || []).map(x => [...x]) };
-  const f = vrForm, t = vrTarget(r, f.years, f.annual, f.contrib, f.gh), week = r.week;
-  const changed = f.years !== cfg.target_years || f.annual !== cfg.expected_return || f.contrib !== cfg.default_contrib;
+  if (!vrForm || vrForm.id !== r.id) vrForm = { id: r.id, years: cfg.target_years, annual: cfg.expected_return, ch: (cfg.contrib_history || []).map(x => [...x]), gh: (cfg.g_history || []).map(x => [...x]) };
+  const f = vrForm, t = vrTarget(r, f.years, f.annual, f.ch, f.gh), week = r.week;
+  const changed = f.years !== cfg.target_years || f.annual !== cfg.expected_return;
+  const chChanged = JSON.stringify(f.ch) !== JSON.stringify(cfg.contrib_history);
   const ghChanged = JSON.stringify(f.gh) !== JSON.stringify(cfg.g_history);
   return `<div class="card">
     <div class="title" style="font-size:15px">목표</div>
     <div class="f2" style="margin-top:10px">
       <label class="f"><span>목표 기간 (년)</span><input inputmode="numeric" value="${f.years}" onchange="vrSet('years',this.value)"></label>
       <label class="f"><span>기대 연수익률 (%)</span><input inputmode="decimal" value="${+(f.annual * 100).toFixed(2)}" onchange="vrSet('annual',this.value)"></label></div>
-    <label class="f"><span>기본 적립금 ($ / 회차)</span><input inputmode="decimal" value="${f.contrib}" onchange="vrSet('contrib',this.value)"></label>
     <div class="calc"><div class="row"><span class="meta">${f.years}년(${t.T}회차) 후 목표금액</span><b class="num">${usd(t.target, 0)}</b></div><div class="row"><span class="meta">회차 기대수익률 (복리 환산)</span><span class="num">${(t.g * 100).toFixed(3)}%</span></div></div>
     <div class="help">기대수익률은 가정값이에요. TQQQ 과거 실적(연 40%대)은 저금리 구간이라 그대로 쓰면 안 되고, 연 12~18%가 합리적인 범위예요.</div>
     ${changed ? `<div class="actions" style="grid-template-columns:1fr 1fr"><button class="btn" onclick="vrForm=null;render()">되돌리기</button><button class="btn primary" onclick="vrSaveGoal('${esc(r.id)}')">저장</button></div>` : ''}</div>
   <div class="card">
+    <div class="row"><div class="title" style="font-size:15px">적립금 변경 이력</div><button class="mini" onclick="vrAddC(${week})">＋ 추가</button></div>
+    <div style="margin-top:10px">${f.ch.map(([w, c], i) => `<div class="gh">
+      <label class="f"><span>적용 시작 주차 <b class="num" style="color:var(--text)">(${(w + 1) / 2}회차~)</b></span><input inputmode="numeric" value="${w}" onchange="vrSetC(${i},0,this.value)"></label>
+      <label class="f"><span>적립금 ($ / 회차)</span><input inputmode="decimal" value="${c}" onchange="vrSetC(${i},1,this.value)"></label>
+      <button class="x" aria-label="${w}주차 삭제" onclick="vrDelC(${i})" ${f.ch.length === 1 ? 'disabled' : ''}>✕</button></div>
+      ${w <= week && !(cfg.contrib_history || []).some(b => b[0] === w && b[1] === c) ? `<div class="vwarn">${w}주차 회차는 이미 시작했어요. 시작한 회차 적립금은 바뀌지 않으니 기록 탭에서 그 회차를 고치세요. 다음 회차부터면 ${week + 2}주차를 넣으세요.</div>` : ''}`).join('')}</div>
+    <div class="note">이미 시작한 회차는 회차 기록의 적립금을 써요. 이력은 다음 회차 시작(회차 종료) 때 기본값과 목표금액 계산에 쓰여요. 다음 ${r.round + 1}회차 적립금: <b class="num">${usd(histAt(f.ch, week + 2, cfg.default_contrib), 0)}</b></div>
+    ${chChanged ? `<div class="actions" style="grid-template-columns:1fr 1fr"><button class="btn" onclick="vrForm=null;render()">되돌리기</button><button class="btn primary" onclick="vrSaveC('${esc(r.id)}')">적립금 이력 저장</button></div>` : ''}</div>
+  <div class="card">
     <div class="row"><div class="title" style="font-size:15px">G 변경 이력</div><button class="mini" onclick="vrAddG(${week})">＋ 추가</button></div>
     <div style="margin-top:10px">${f.gh.map(([w, g], i) => `<div class="gh">
-      <label class="f"><span>적용 시작 주차</span><input inputmode="numeric" value="${w}" onchange="vrSetG(${i},0,this.value)"></label>
+      <label class="f"><span>적용 시작 주차 <b class="num" style="color:var(--text)">(${(w + 1) / 2}회차~)</b></span><input inputmode="numeric" value="${w}" onchange="vrSetG(${i},0,this.value)"></label>
       <label class="f"><span>G</span><input inputmode="decimal" value="${g}" onchange="vrSetG(${i},1,this.value)"></label>
       <button class="x" aria-label="${w}주차 삭제" onclick="vrDelG(${i})" ${f.gh.length === 1 ? 'disabled' : ''}>✕</button></div>
       ${w < week && !(cfg.g_history || []).some(b => b[0] === w && b[1] === g) ? `<div class="vwarn">${w}주차는 이미 지났어요. 지난 회차 V가 다시 계산됩니다. 지금부터 바꾸려면 ${week + 2}주차(다음 회차)를 넣으세요.</div>` : ''}`).join('')}</div>
@@ -773,9 +783,20 @@ window.vrSetG = (i, j, v) => {
   if (j === 0 && n % 2 !== 1) { toast('주차는 홀수예요 (1, 3, 5 …)'); return render() }
   vrForm.gh[i][j] = n; vrForm.gh.sort((a, b) => a[0] - b[0]); render();
 };
-window.vrAddG = week => { const w = week + 2, r = data.vr.find(x => x.id === vrForm.id); vrForm.gh.push([w, r.G]); vrForm.gh.sort((a, b) => a[0] - b[0]); render(); toast(`${w}주차(다음 회차)부터 적용할 G를 넣으세요`) };
+window.vrAddG = week => { const w = Math.max(week + 2, ...vrForm.gh.map(x => x[0] + 2)), r = data.vr.find(x => x.id === vrForm.id); vrForm.gh.push([w, r.G]); vrForm.gh.sort((a, b) => a[0] - b[0]); render(); toast(`${w}주차(다음 회차)부터 적용할 G를 넣으세요`) };
 window.vrDelG = i => { vrForm.gh.splice(i, 1); render() };
-window.vrSaveGoal = id => { if (confirm('목표를 저장할까요?')) control('vr_config', { id, target_years: vrForm.years, expected_return: vrForm.annual, default_contrib: vrForm.contrib }) };
+window.vrSaveGoal = id => { if (confirm('목표를 저장할까요?')) control('vr_config', { id, target_years: vrForm.years, expected_return: vrForm.annual }) };
+window.vrSetC = (i, j, v) => {
+  const n = vrNum(v); if (n == null || n < 0 || (j === 0 && n <= 0)) { toast('숫자를 넣어 주세요'); return render() }
+  if (j === 0 && n % 2 !== 1) { toast('주차는 홀수예요 (1, 3, 5 …)'); return render() }
+  vrForm.ch[i][j] = n; vrForm.ch.sort((a, b) => a[0] - b[0]); render();
+};
+window.vrAddC = week => { const w = Math.max(week + 2, ...vrForm.ch.map(x => x[0] + 2)), r = data.vr.find(x => x.id === vrForm.id); vrForm.ch.push([w, histAt(vrForm.ch, w, r.config.default_contrib)]); vrForm.ch.sort((a, b) => a[0] - b[0]); render(); toast(`${w}주차(${(w + 1) / 2}회차)부터 적용할 적립금을 넣으세요`) };
+window.vrDelC = i => { vrForm.ch.splice(i, 1); render() };
+window.vrSaveC = id => {
+  if (new Set(vrForm.ch.map(x => x[0])).size !== vrForm.ch.length) return toast('같은 주차가 두 번 있어요');
+  if (confirm('적립금 이력을 저장할까요?')) control('vr_config', { id, contrib_history: vrForm.ch });
+};
 window.vrSaveG = id => {
   const past = vrForm.gh.some(([w]) => w < data.vr.find(x => x.id === id).week);
   if (confirm(past ? 'G 이력을 저장할까요? 지난 주차가 바뀌면 지난 회차 V가 다시 계산돼요.' : 'G 이력을 저장할까요?')) control('vr_config', { id, g_history: vrForm.gh });
@@ -812,7 +833,7 @@ window.openVrClose = id => {
   openSheet(`<h3>${r.round}회차 종료</h3><div class="help" style="margin-bottom:6px">회차 마지막 날(금) 장 마감 뒤 종가와 보유 수를 넣으세요.</div>
     <div class="f2"><label class="f"><span>종료일 종가</span><input id="cClose" inputmode="decimal" value="${(r.price || {}).close || ''}"></label><label class="f"><span>종료 보유</span><input id="cQty" inputmode="numeric" value="${r.qty}"></label></div>
     <div class="grp">${next}회차 시작 (${md(ns)})</div>
-    <div class="f2"><label class="f"><span>추가 Pool (적립금)</span><input id="cContrib" inputmode="decimal" value="${(r.config || {}).default_contrib}"></label><label class="f"><span>목돈 (선택)</span><input id="cLump" inputmode="decimal" placeholder="없음"></label></div>
+    <div class="f2"><label class="f"><span>추가 Pool (적립금)</span><input id="cContrib" inputmode="decimal" value="${(r.config || {}).next_contrib ?? (r.config || {}).default_contrib}"></label><label class="f"><span>목돈 (선택)</span><input id="cLump" inputmode="decimal" placeholder="없음"></label></div>
     <label class="f"><span>목돈 실행가 (목돈 있을 때)</span><input id="cLprice" inputmode="decimal" placeholder="$"></label>
     <div class="help" style="margin-bottom:10px">저장하면 ${next}회차의 V·밴드·사다리가 바로 계산돼요.</div>
     <div class="actions" style="grid-template-columns:1fr 1fr"><button class="btn" onclick="closeSheet()">취소</button><button class="btn primary" onclick="doVrClose('${esc(id)}')">종료하고 ${next}회차 시작</button></div>`);
