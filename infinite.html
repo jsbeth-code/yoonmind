@@ -137,6 +137,7 @@
   .tbl-wrap{overflow-x:auto;margin:8px -4px 0}
   table.vt{width:100%;border-collapse:collapse;font-size:12.5px}
   table.vt th{font-size:11px;color:var(--muted);font-weight:700;text-align:right;padding:6px;border-bottom:1px solid var(--border);white-space:nowrap}
+  table.vt.vh th,table.vt.vh td{padding:7px 4px}
   table.vt td{padding:7px 6px;border-bottom:1px solid var(--border-2);text-align:right;white-space:nowrap}
   table.vt th:first-child,table.vt td:first-child{text-align:left}
   table.vt tr.out td{color:var(--faint)} table.vt tr.trim td{background:var(--warn-soft)}
@@ -695,17 +696,19 @@ function vrOrdersView(r) {
 }
 function vrHistoryView(r) {
   const hs = r.rounds || [], ov = hs.some(x => x.pool_override);
+  const lumpCol = hs.some(x => x.lump);          // 목돈은 넣은 적이 있을 때만 칸을 보여 줌
   const rows = hs.map(x => `<tr class="tap" onclick="openVrRound('${esc(r.id)}',${x.n})">
-    <td class="num">${x.n} <span class="meta">(${2 * x.n - 1}주)</span></td><td class="num">${md(x.started)}</td><td class="num">${$0(x.contrib)}</td>
-    <td class="num">${x.lump ? $0(x.lump) : '–'}</td><td class="num">${x.open ? '<span class="st today">진행 중</span>' : x.close}</td><td class="num">${x.open ? '–' : x.end_qty}</td>
-    <td class="num">${x.G}</td><td class="num">${n2(x.v)}</td><td class="num">${x.open ? '–' : n2(x.pool) + (x.pool_override ? ' *' : '')}</td><td class="num">${x.open ? '–' : n2(x.total)}</td></tr>`).join('');
+    <td class="num">${x.n}</td><td class="num">${md(x.started)}</td>
+    <td class="num">${x.open ? '<span class="st today">진행 중</span>' : $0(x.eval)}</td><td class="num">${$0(x.v)}</td>
+    <td class="num">${x.open ? '–' : $0(x.pool) + (x.pool_override ? '*' : '')}</td><td class="num">${x.open ? '–' : x.end_qty}</td>
+    <td class="num">${x.open ? '–' : Number(x.close).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 3 })}</td><td class="num">${x.G}</td>${lumpCol ? `<td class="num">${x.lump ? $0(x.lump) : '–'}</td>` : ''}</tr>`).join('');
   const fills = hs.flatMap(x => (x.fills || []).map(f => ({ ...f, n: x.n }))).reverse();
   const fl = fills.length ? fills.map(f => `<div class="vfl"><span class="dt num">${md(f.date)}</span><span class="meta">${f.n}회</span><span class="chip ${f.side}">${f.side === 'buy' ? '매수' : '매도'}</span><b class="num">${f.qty}주</b><span class="num">@${usd(f.price)}</span><i class="num">${usd(f.amount)}</i></div>`).join('')
     : '<div class="help">아직 날짜별 체결이 없어요.</div>';
   const cur = hs[0] || {};
   return `<div class="card">
-    <div class="row"><div><div class="title" style="font-size:16px">회차 기록</div><div class="meta">줄을 누르면 고칠 수 있어요</div></div></div>
-    <div class="tbl-wrap"><table class="vt"><thead><tr><th>회차</th><th>시작</th><th>추가 Pool</th><th>목돈</th><th>종가</th><th>보유</th><th>G</th><th>V</th><th>마지막 Pool</th><th>계좌총액</th></tr></thead><tbody>${rows}</tbody></table></div>
+    <div class="row"><div><div class="title" style="font-size:16px">회차 기록</div><div class="meta">평가액 = 회차 종료 보유 × 종가 · 금액은 $ · 줄을 누르면 고칠 수 있어요</div></div></div>
+    <div class="tbl-wrap"><table class="vt vh"><thead><tr><th>회차</th><th>시작</th><th>평가액</th><th>V</th><th>마지막<br>Pool</th><th>보유</th><th>종가</th><th>G</th>${lumpCol ? '<th>목돈</th>' : ''}</tr></thead><tbody>${rows}</tbody></table></div>
     ${ov ? '<div class="note">* 장부 기록값으로 고정한 마지막 Pool이에요(계산값과 다름). 과거 V가 바뀌지 않게 그대로 둡니다.</div>' : ''}</div>
   <div class="actions" style="grid-template-columns:1fr 1fr">${cur.open ? `<button class="btn" onclick="openVrRound('${esc(r.id)}',${cur.n})">${cur.n}회차 고치기</button><button class="btn primary" onclick="openVrClose('${esc(r.id)}')">${cur.n}회차 종료</button>` : ''}</div>
   <div class="sec"><span>체결 기록 <span class="meta">날짜별</span></span><button class="mini" onclick="openVrFill('${esc(r.id)}')">＋ 체결 입력</button></div>
@@ -807,8 +810,8 @@ window.openVrRound = (id, n) => {
   openSheet(`<h3>${n}회차 (${2 * n - 1}주차)</h3><div class="help" style="margin-bottom:6px">${md(x.started)} 시작 · G ${x.G} · V ${usd(x.v)}${x.open ? '' : ' · 지난 회차를 고치면 그 뒤 회차 V가 다시 계산돼요'}</div>
     <div class="grp">회차 시작 때</div>
     <label class="f"><span>추가 Pool (이번 적립금)</span><input id="rContrib" inputmode="decimal" value="${x.contrib ?? ''}"></label>
-    <div class="f2"><label class="f"><span>목돈 (넣기 + / 빼기 −)</span><input id="rLump" inputmode="decimal" placeholder="없음" value="${x.lump || ''}"></label>
-      <label class="f"><span>목돈 실행가</span><input id="rLprice" inputmode="decimal" placeholder="$" value="${x.lump_price || ''}"></label></div>
+    ${x.lump ? `<div class="f2"><label class="f"><span>목돈 (넣기 + / 빼기 −)</span><input id="rLump" inputmode="decimal" placeholder="없음" value="${x.lump || ''}"></label>
+      <label class="f"><span>목돈 실행가</span><input id="rLprice" inputmode="decimal" placeholder="$" value="${x.lump_price || ''}"></label></div>` : ''}
     ${x.open ? '' : `<div class="grp">회차 끝날 때</div>
     <div class="f2"><label class="f"><span>종가</span><input id="rClose" inputmode="decimal" value="${x.close ?? ''}"></label><label class="f"><span>보유 수</span><input id="rQty" inputmode="numeric" value="${x.end_qty ?? ''}"></label></div>`}
     <div class="f2"><label class="f"><span>이번 매수금 (체결 합계)</span><input readonly value="${n2(x.bought || 0)}"></label><label class="f"><span>배당</span><input id="rDiv" inputmode="decimal" placeholder="0" value="${x.dividend || ''}"></label></div>
@@ -833,8 +836,7 @@ window.openVrClose = id => {
   openSheet(`<h3>${r.round}회차 종료</h3><div class="help" style="margin-bottom:6px">회차 마지막 날(금) 장 마감 뒤 종가와 보유 수를 넣으세요.</div>
     <div class="f2"><label class="f"><span>종료일 종가</span><input id="cClose" inputmode="decimal" value="${(r.price || {}).close || ''}"></label><label class="f"><span>종료 보유</span><input id="cQty" inputmode="numeric" value="${r.qty}"></label></div>
     <div class="grp">${next}회차 시작 (${md(ns)})</div>
-    <div class="f2"><label class="f"><span>추가 Pool (적립금)</span><input id="cContrib" inputmode="decimal" value="${(r.config || {}).next_contrib ?? (r.config || {}).default_contrib}"></label><label class="f"><span>목돈 (선택)</span><input id="cLump" inputmode="decimal" placeholder="없음"></label></div>
-    <label class="f"><span>목돈 실행가 (목돈 있을 때)</span><input id="cLprice" inputmode="decimal" placeholder="$"></label>
+    <label class="f"><span>추가 Pool (적립금)</span><input id="cContrib" inputmode="decimal" value="${(r.config || {}).next_contrib ?? (r.config || {}).default_contrib}"></label>
     <div class="help" style="margin-bottom:10px">저장하면 ${next}회차의 V·밴드·사다리가 바로 계산돼요.</div>
     <div class="actions" style="grid-template-columns:1fr 1fr"><button class="btn" onclick="closeSheet()">취소</button><button class="btn primary" onclick="doVrClose('${esc(id)}')">종료하고 ${next}회차 시작</button></div>`);
 };
