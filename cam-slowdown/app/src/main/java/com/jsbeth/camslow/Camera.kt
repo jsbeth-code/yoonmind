@@ -26,9 +26,13 @@ object CameraCsv {
         val utf8 = String(bytes, Charsets.UTF_8)
         // UTF-8로 깨지면(대체문자 다수) CP949로 다시 읽는다
         val broken = utf8.count { it == '�' }
-        val text = if (broken > 5) String(bytes, Charset.forName("MS949")) else utf8
+        val text = if (broken > 5) String(bytes, cp949()) else utf8
         return text.removePrefix("﻿")
     }
+
+    /** JVM은 MS949, 안드로이드(ICU)는 x-windows-949로 부른다. 둘 다 없으면 EUC-KR. */
+    private fun cp949(): Charset = listOf("x-windows-949", "MS949", "EUC-KR")
+        .firstNotNullOf { n -> runCatching { Charset.forName(n) }.getOrNull() }
 
     fun parse(text: String): List<Camera> {
         val rows = splitCsv(text)
