@@ -121,6 +121,8 @@ class Outputs(ctx: Context, private val logInit: Boolean = false) {
         private set
     private var scoActive = false
     private val scoStop = Runnable { stopSco() }
+    /** 마지막 감속 신호로 차를 내려 둔 프로필. 복귀 클릭 수는 그때 실제로 내린 만큼으로 계산한다(그 사이 설정이 바뀌어도). */
+    @Volatile private var sentDown: Profile? = null
 
     companion object {
         /** 통화 채널이 열리고 소리가 나기까지 기다리는 시간(ms). */
@@ -263,6 +265,7 @@ class Outputs(ctx: Context, private val logInit: Boolean = false) {
             else "▼ 카메라 ${distM.toInt()}m 앞, 제한 ${cam.limitKmh}. 감속 → ${s.slow.label} (${cam.name})")
         DriveState.carProfile = s.slow
         DriveState.lastDownAt = SystemClock.elapsedRealtime()
+        sentDown = s.slow
         announce(ToneGenerator.TONE_PROP_BEEP2, 300, if (zone) "어린이보호구역. 감속합니다" else "과속 카메라, 제한속도 ${cam.limitKmh}. 감속합니다", "down")
         if (s.ble) S3xyButton.press(S3xyButton.Press.SINGLE, s.downPresses, s.pressGapMs)
     }
@@ -283,11 +286,15 @@ class Outputs(ctx: Context, private val logInit: Boolean = false) {
             announce(ToneGenerator.TONE_PROP_ACK, 200, "카메라 통과. 직접 복귀하세요", "up")
             return
         }
-        DriveState.log("▲ 복귀 → ${s.usual.label} ($reason)")
+        // 올릴 단수 = 지금 평소 프로필 − 실제로 내려 둔 프로필 (감속 중에 평소 프로필을 바꿨어도 정확히 거기로 간다)
+        val from = sentDown ?: s.slow
+        val presses = (s.usual.ordinal - from.ordinal).coerceAtLeast(0)
+        DriveState.log("▲ 복귀 → ${s.usual.label} ($reason)" + (if (from != s.slow) " · ${from.label}에서 ${presses}번" else ""))
         DriveState.carProfile = s.usual
         DriveState.lastUpAt = SystemClock.elapsedRealtime()
+        sentDown = null
         announce(ToneGenerator.TONE_PROP_ACK, 200, "복귀합니다", "up")
-        if (s.ble) S3xyButton.press(S3xyButton.Press.DOUBLE, s.upPresses, s.pressGapMs)
+        if (s.ble) S3xyButton.press(S3xyButton.Press.DOUBLE, presses, s.pressGapMs)
     }
 
     fun shutdown() {
@@ -308,6 +315,8 @@ class DriveService : Service(), LocationListener {
         const val ACTION_STOP = "stop"
         /** 운전자가 "지금 복귀"를 누름: 감속 상태를 풀고 복귀 신호를 보낸다. */
         const val ACTION_RELEASE = "release"
+        /** 메인 화면에서 설정(평소 프로필)을 바꿈: 감시 중이어도 바로 적용한다. */
+        const val ACTION_SETTINGS_CHANGED = "settings_changed"
         /** 차 블루투스가 끊김 → 잠시 뒤 자동 정지 예약. 다시 붙으면 취소. */
         const val ACTION_CAR_DISCONNECTED = "car_disconnected"
         const val ACTION_CAR_CONNECTED = "car_connected"
@@ -321,7 +330,7 @@ class DriveService : Service(), LocationListener {
         fun send(ctx: Context, action: String) {
             val i = Intent(ctx, DriveService::class.java).setAction(action)
             // 이미 떠 있는 서비스에 보내는 명령은 startService로(포그라운드 승격 의무가 없다)
-            if (action == ACTION_STOP || action == ACTION_RELEASE) ctx.startService(i) else ctx.startForegroundService(i)
+            if (action == ACTION_STOP || action == ACTION_RELEASE || action == ACTION_SETTINGS_CHANGED) ctx.startService(i) else ctx.startForegroundService(i)
         }
     }
 
@@ -370,6 +379,21 @@ class DriveService : Service(), LocationListener {
                     if (e.release() || DriveState.carProfile != outputs.settings.usual) outputs.up("직접 복귀", force = true)
                     else DriveState.log("복귀할 감속 상태가 아닙니다")
                     DriveState.status = e.status
+                    DriveState.changed()
+                } else if (!DriveState.running) stopSelf()
+                return START_STICKY
+            }
+            ACTION_SETTINGS_CHANGED -> {
+                val e = engine
+                if (DriveState.running && e != null) {
+                    val out = outputs.refresh()
+                    val cfg = Prefs.engine(this).copy(bleLatencyS = out.bleDownSeconds())
+                    e.config = cfg
+                    DriveState.config = cfg
+                    DriveState.outputs = out
+                    // 감속 중이 아니면 차가 (새) 평소 프로필에 있다고 본다. 감속 중이면 복귀 때 내린 만큼 올려 새 평소 프로필로 간다.
+                    if (!e.isSlowed) DriveState.carProfile = out.usual
+                    DriveState.log("설정 바로 적용 — ${out.describe()}")
                     DriveState.changed()
                 } else if (!DriveState.running) stopSelf()
                 return START_STICKY

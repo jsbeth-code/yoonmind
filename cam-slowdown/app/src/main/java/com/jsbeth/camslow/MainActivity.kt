@@ -50,6 +50,8 @@ class MainActivity : Activity() {
         ui = Ui(this)
         gauges = ui.gauges()
         profileChips = ui.profileRow()
+        for ((i, v) in profileChips.withIndex()) v.setOnClickListener { setUsualProfile(Profile.values()[i]) }
+        ui.hint("칸을 누르면 그 프로필이 평소 프로필이 됩니다 (차의 실제 프로필과 같아야 합니다)").apply { textSize = 11.5f; setPadding(0, 0, 0, ui.dp(4)) }
         band = ui.band()
         bandBar = ui.trackBar(8)
         val (d, i) = ui.bigRow(); distView = d; infoView = i
@@ -111,6 +113,21 @@ class MainActivity : Activity() {
         val ok = S3xyButton.start(this, { DriveState.log(it) }, Prefs.renameAdapter(this))
         S3xyButton.pairingMode = ok
         Toast.makeText(this, if (ok) "ENH_BTN 광고 중 — 커맨더 앱에서 Add S3XY Button" else "시작 실패 — 기록을 보세요", Toast.LENGTH_LONG).show()
+        render()
+    }
+
+    /** 메인 화면에서 평소 프로필 바꾸기. 내릴 프로필보다 높아야 한다. 감시 중이면 서비스에 바로 적용시킨다. */
+    private fun setUsualProfile(p: Profile) {
+        val slow = Prefs.slowProfile(this)
+        if (p.ordinal <= slow.ordinal) {
+            Toast.makeText(this, "평소 프로필은 내릴 프로필(${slow.label})보다 높아야 합니다. 설정에서 내릴 프로필을 먼저 바꾸세요", Toast.LENGTH_LONG).show()
+            return
+        }
+        if (Prefs.usualProfile(this) == p) return
+        Prefs.setUsualProfile(this, p)
+        outputs.refresh()
+        if (DriveState.running) DriveService.send(this, DriveService.ACTION_SETTINGS_CHANGED)
+        Toast.makeText(this, "평소 프로필: ${p.label} (휠 아래 ${Prefs.downPresses(this)}번 ↔ 위 ${Prefs.upPresses(this)}번)", Toast.LENGTH_SHORT).show()
         render()
     }
 
