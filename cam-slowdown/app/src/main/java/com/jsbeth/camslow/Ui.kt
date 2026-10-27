@@ -4,11 +4,13 @@ import android.app.Activity
 import android.graphics.Typeface
 import android.text.InputType
 import android.view.View
+import android.widget.ArrayAdapter
 import android.widget.Button
 import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
+import android.widget.Spinner
 import android.widget.TextView
 
 /** XML 레이아웃 없이 코드로 화면을 짜기 위한 작은 도우미. */
@@ -52,6 +54,15 @@ class Ui(private val act: Activity) {
 
     fun check(label: String, value: Boolean): CheckBox =
         CheckBox(act).apply { text = label; isChecked = value }.also { root.addView(it) }
+
+    /** 목록에서 하나 고르기. */
+    fun choice(label: String, options: List<String>, selected: Int): Spinner {
+        text(label, 13f)
+        return Spinner(act).apply {
+            adapter = ArrayAdapter(act, android.R.layout.simple_spinner_dropdown_item, options)
+            setSelection(selected.coerceIn(0, options.size - 1))
+        }.also { root.addView(it) }
+    }
 
     fun multiline(label: String, value: String): EditText {
         text(label, 13f)

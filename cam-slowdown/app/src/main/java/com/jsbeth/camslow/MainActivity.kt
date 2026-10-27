@@ -13,6 +13,7 @@ class MainActivity : Activity() {
 
     private lateinit var stateView: TextView
     private lateinit var nextView: TextView
+    private lateinit var setupView: TextView
     private lateinit var dataView: TextView
     private lateinit var logView: TextView
     private lateinit var outputs: Outputs
@@ -24,9 +25,10 @@ class MainActivity : Activity() {
         val ui = Ui(this)
         stateView = ui.text("대기", 30f, bold = true)
         nextView = ui.text("", 18f)
+        setupView = ui.text("", 13f)
         dataView = ui.text("", 13f)
         ui.row(
-            ui.button("주행 시작") { DriveService.send(this, DriveService.ACTION_START) },
+            ui.button("주행 시작") { startDrive() },
             ui.button("정지") { DriveService.send(this, DriveService.ACTION_STOP) },
         )
         ui.button("카메라 데이터 불러오기 (CSV)") {
@@ -37,11 +39,14 @@ class MainActivity : Activity() {
         }
         ui.row(
             ui.button("테스트: 감속 신호") {
+                outputs.refresh()
                 outputs.down(Camera(0.0, 0.0, 100, CamKind.SPOT, 0, "테스트"), 300.0)
             },
-            ui.button("테스트: 복귀 신호") { outputs.up("테스트") },
+            ui.button("테스트: 복귀 신호") { outputs.refresh(); outputs.up("테스트", force = true) },
         )
-        ui.button("가상 주행 테스트 (주차 중)") { DriveService.send(this, DriveService.ACTION_SIMULATE) }
+        ui.button("가상 주행 테스트 (주차 중 — 끝나면 감시도 꺼짐)") {
+            if (hasLocationPermission()) DriveService.send(this, DriveService.ACTION_SIMULATE) else askPermissions()
+        }
         ui.row(
             ui.button("설정") { startActivity(Intent(this, SettingsActivity::class.java)) },
             ui.button("버튼 신호 캡처") { startActivity(Intent(this, CaptureActivity::class.java)) },
@@ -50,6 +55,20 @@ class MainActivity : Activity() {
         logView = ui.text("", 12f)
         ui.show()
         askPermissions()
+    }
+
+    private fun hasLocationPermission() =
+        checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+
+    private fun startDrive() {
+        if (!hasLocationPermission()) {
+            Toast.makeText(this, "위치 권한을 먼저 허용하세요", Toast.LENGTH_LONG).show()
+            askPermissions(); return
+        }
+        if (CameraRepo.cachedCount() == 0) {
+            Toast.makeText(this, "카메라 데이터가 없습니다 — CSV를 먼저 불러오세요", Toast.LENGTH_LONG).show(); return
+        }
+        DriveService.send(this, DriveService.ACTION_START)
     }
 
     private fun askPermissions() {
@@ -66,9 +85,11 @@ class MainActivity : Activity() {
     override fun onResume() {
         super.onResume()
         DriveState.addListener(listener)
+        outputs.refresh()
+        render()
         Thread {
-            val n = CameraRepo.count(this)
-            runOnUiThread { dataView.text = if (n == 0) "카메라 데이터 없음 — CSV를 불러오세요" else "카메라 ${n}개 로드됨"; render() }
+            val summary = CameraRepo.summary(this)
+            runOnUiThread { dataView.text = summary; render() }
         }.start()
     }
 
@@ -86,15 +107,31 @@ class MainActivity : Activity() {
         val st = DriveState.status
         stateView.text = when {
             !DriveState.running -> "꺼짐"
-            st == null -> "GPS 대기"
+            st == null -> if (DriveState.simulating) "가상 주행 준비" else "GPS 대기"
             st.slowed -> "▼ 감속 중"
             else -> "대기"
         }
         nextView.text = if (st == null) "" else buildString {
             append("현재 ${st.speedKmh.toInt()} km/h · ${st.note}\n")
             val c = st.nextCamera
-            if (c != null) append("다음 카메라 ${st.nextDistM?.toInt()}m · 제한 ${c.limitKmh}\n${c.name}")
-            else append("2km 안에 카메라 없음")
+            if (c != null) {
+                append("다음 카메라 ${st.nextDistM?.toInt()}m · 제한 ${c.limitKmh}")
+                if (c.kind == CamKind.SECTION_START) append(" · 구간단속 ${if (c.sectionLenM > 0) "${c.sectionLenM}m" else "길이 모름"}")
+                append("\n${c.name}")
+                DriveState.config?.let { cfg ->
+                    val d = SlowdownEngine(CameraIndex(emptyList()), cfg).triggerDistance(st.speedKmh / 3.6, c.limitKmh)
+                    append("\n감속 신호 시작: ${d.toInt()}m 앞 (지금 속도 기준)")
+                }
+            } else append("2km 안에 카메라 없음")
+        }
+        val out = DriveState.outputs ?: outputs.settings
+        val cfg = DriveState.config ?: Prefs.engine(this)
+        setupView.text = buildString {
+            append(out.describe())
+            append("\n감속 시작: ")
+            append(if (cfg.fixedTriggerM > 0) "카메라 ${cfg.fixedTriggerM}m 앞(고정)" else "속도별 자동(감속도 ${cfg.decelMps2}, 반응 ${cfg.reactionS}s, 여유 ${cfg.marginM.toInt()}m)")
+            if (cfg.bleLatencyS > 0) append(" + BLE 송출 ${"%.1f".format(cfg.bleLatencyS)}s")
+            append(" · 통과 후 ${cfg.restoreAfterM.toInt()}m")
         }
         logView.text = DriveState.log.joinToString("\n")
     }
@@ -108,7 +145,8 @@ class MainActivity : Activity() {
         Thread {
             val msg = try {
                 val bytes = contentResolver.openInputStream(uri)!!.use { it.readBytes() }
-                "카메라 ${CameraRepo.import(this, bytes)}개 로드됨"
+                CameraRepo.import(this, bytes)
+                CameraRepo.summary(this)
             } catch (e: Exception) {
                 "불러오기 실패: ${e.message}"
             }

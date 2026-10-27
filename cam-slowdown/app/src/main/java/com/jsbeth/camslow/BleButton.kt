@@ -23,6 +23,8 @@ import java.util.concurrent.Executors
  *   "gapMs": 900,                    // 누름과 누름 사이 간격
  *   "counterByte": -1                // 누를 때마다 1씩 올라가는 바이트 위치(없으면 -1)
  * }
+ * click과 doubleClick 페이로드가 같다면 커맨더가 타이밍으로 클릭/더블클릭을 가르는 것이다.
+ * 그 경우 gapMs를 커맨더의 더블클릭 판정 시간보다 길게(1500 이상) 두지 않으면 클릭 4번이 더블클릭 2번(휠 위!)으로 읽힐 수 있다.
  */
 data class BleProfile(
     val manufacturerId: Int,
@@ -34,6 +36,16 @@ data class BleProfile(
     val gapMs: Long,
     val counterByte: Int,
 ) {
+    /** 누름 한 종류를 times번 보내는 데 걸리는 시간(초). */
+    fun pressesSeconds(kind: BleButtonEmulator.Press, times: Int): Double {
+        val frames = if (kind == BleButtonEmulator.Press.CLICK) click.size else doubleClick.size
+        return times * (frames * frameMs + gapMs) / 1000.0
+    }
+
+    /** 클릭과 더블클릭 페이로드가 구분되는지(같으면 커맨더가 타이밍으로 가른다는 뜻). */
+    val payloadsDiffer: Boolean
+        get() = click.size != doubleClick.size || click.zip(doubleClick).any { (a, b) -> !a.contentEquals(b) }
+
     companion object {
         fun parse(json: String): BleProfile {
             val o = JSONObject(json)
@@ -41,7 +53,7 @@ data class BleProfile(
                 val a = o.getJSONArray(key)
                 return (0 until a.length()).map { hex(a.getString(it)) }
             }
-            return BleProfile(
+            val p = BleProfile(
                 manufacturerId = o.getInt("manufacturerId"),
                 serviceUuid = o.optString("serviceUuid", ""),
                 includeName = o.optBoolean("includeName", false),
@@ -51,6 +63,9 @@ data class BleProfile(
                 gapMs = o.optLong("gapMs", 900),
                 counterByte = o.optInt("counterByte", -1),
             )
+            require(p.click.isNotEmpty() && p.doubleClick.isNotEmpty()) { "click/doubleClick 프레임이 비어 있음" }
+            require(p.frameMs in 20..5000 && p.gapMs in 0..10_000) { "frameMs/gapMs 범위 오류" }
+            return p
         }
 
         fun hex(s: String): ByteArray {
@@ -68,10 +83,11 @@ class BleButtonEmulator(private val ctx: Context) {
 
     enum class Press { CLICK, DOUBLE }
 
-    fun press(kind: Press, times: Int, log: (String) -> Unit) {
-        val json = Prefs.bleProfile(ctx)
-        if (json.isBlank()) { log("BLE 프로필이 비어 있음 — 설정에서 캡처 값을 넣어야 합니다"); return }
-        val profile = try { BleProfile.parse(json) } catch (e: Exception) {
+    /** profileJson은 주행 시작 때 떠 둔 스냅샷을 넘긴다(주행 중 설정 변경이 반쯤 적용되지 않도록). */
+    fun press(kind: Press, times: Int, profileJson: String, log: (String) -> Unit) {
+        if (times <= 0) { log("BLE ${kind.name} 0회 — 보낼 것 없음"); return }
+        if (profileJson.isBlank()) { log("BLE 프로필이 비어 있음 — 설정에서 캡처 값을 넣어야 합니다"); return }
+        val profile = try { BleProfile.parse(profileJson) } catch (e: Exception) {
             log("BLE 프로필 오류: ${e.message}"); return
         }
         worker.execute {
