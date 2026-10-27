@@ -705,7 +705,9 @@ function vrHistoryView(r) {
     <td class="num">${x.open ? '<span class="st today">진행 중</span>' : $0(x.eval)}</td><td class="num">${$0(x.v)}</td>
     <td class="num">${x.open ? '–' : $0(x.pool) + (x.pool_override ? '*' : '')}</td><td class="num">${x.open ? '–' : x.end_qty}</td>
     <td class="num">${x.open ? '–' : Number(x.close).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 3 })}</td><td class="num">${x.G}</td>${lumpCol ? `<td class="num">${x.lump ? $0(x.lump) : '–'}</td>` : ''}</tr>`).join('');
-  const fills = hs.flatMap(x => (x.fills || []).map(f => ({ ...f, n: x.n }))).reverse();
+  // 최근 체결이 위로: 날짜 내림차순(같은 날은 회차·계단 순서 유지). 회차 배열이 최신 회차부터라 단순 reverse 하면 옛 회차가 위로 올라감
+  const fills = hs.flatMap(x => (x.fills || []).map((f, i) => ({ ...f, n: x.n, _i: i })))
+    .sort((a, b) => (b.date || '').localeCompare(a.date || '') || b.n - a.n || a._i - b._i);
   const fl = fills.length ? fills.map(f => `<div class="vfl"><span class="dt num">${md(f.date)}</span><span class="meta">${f.n}회</span><span class="chip ${f.side}">${f.side === 'buy' ? '매수' : '매도'}</span><b class="num">${f.qty}주</b><span class="num">@${usd(f.price)}</span><i class="num">${usd(f.amount)}</i></div>`).join('')
     : '<div class="help">아직 날짜별 체결이 없어요.</div>';
   const cur = hs[0] || {};
