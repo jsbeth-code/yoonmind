@@ -200,15 +200,20 @@ class Ui(private val act: Activity) {
         return g
     }
 
-    /** 목록에서 하나 고르기. 사용자가 바꿀 때만 onSelect. */
+    /**
+     * 목록에서 하나 고르기. 사용자가 실제로 바꿀 때만 onSelect.
+     * (예전엔 "첫 콜백은 초기 선택이니 무시"했는데, setSelection(pos, false)를 리스너보다 먼저 부르면 초기 콜백이
+     *  아예 안 와서 사용자의 첫 선택이 무시됐다 — 평소 프로필·차 고르기가 저장 안 되던 원인. 지금은 값이 바뀌었는지로 판단.)
+     */
     fun choice(label: String, options: List<String>, selected: Int, onSelect: ((Int) -> Unit)? = null): Spinner {
         if (label.isNotEmpty()) text(label, 13f)
+        val initial = selected.coerceIn(0, maxOf(0, options.size - 1))
         return Spinner(act).apply {
             adapter = ArrayAdapter(act, android.R.layout.simple_spinner_dropdown_item, options)
-            setSelection(selected.coerceIn(0, maxOf(0, options.size - 1)), false)
+            setSelection(initial, false)
             if (onSelect != null) onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-                var first = true
-                override fun onItemSelected(p: AdapterView<*>?, v: View?, pos: Int, id: Long) { if (first) { first = false; return }; onSelect(pos) }
+                var current = initial
+                override fun onItemSelected(p: AdapterView<*>?, v: View?, pos: Int, id: Long) { if (pos == current) return; current = pos; onSelect(pos) }
                 override fun onNothingSelected(p: AdapterView<*>?) {}
             }
         }.also { parent.addView(it) }
