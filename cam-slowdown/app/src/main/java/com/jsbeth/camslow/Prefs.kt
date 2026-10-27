@@ -24,6 +24,20 @@ enum class Timing(val label: String, val decel: Double, val reaction: Double, va
     companion object { fun byName(n: String?) = values().firstOrNull { it.name == n } ?: AUTO }
 }
 
+/**
+ * 안내 소리를 어디로 낼지.
+ *  - SPEAKER: 알람 채널. 폰 스피커로 나오고 진동 모드·차 블루투스 연결과 무관하게 항상 들린다(기본).
+ *  - CAR_CALL: 통화 채널. 안내 몇 초 동안 전화처럼 차가 받아 차 스피커로 튼다(음악은 잠시 멈춤). 연결에 1초쯤 걸린다. 실험용.
+ *  - MEDIA: 미디어 채널. 차 미디어 소스가 "블루투스(폰)"일 때만 차에서 들린다(아니면 아무 데서도 안 남).
+ */
+enum class VoiceRoute(val label: String, val sub: String) {
+    SPEAKER("폰 스피커 (알람 채널)", "진동 모드·차 연결과 상관없이 항상 폰에서 남. 기본"),
+    CAR_CALL("차 스피커 (통화 채널, 실험)", "전화처럼 차가 받아서 틂. 1초쯤 늦고 음악이 잠시 멈춤"),
+    MEDIA("미디어 채널", "차 소스가 블루투스(폰)일 때만 차에서 들림");
+
+    companion object { fun byName(n: String?) = values().firstOrNull { it.name == n } ?: SPEAKER }
+}
+
 /** 설정 저장소. 바꾸는 즉시 저장한다. 기본값은 EngineConfig와 같다. */
 object Prefs {
     private fun sp(ctx: Context): SharedPreferences = ctx.getSharedPreferences("camslow", Context.MODE_PRIVATE)
@@ -95,6 +109,12 @@ object Prefs {
     /** 도로공사 구간에 경찰청 제한속도를 못 찾았을 때 쓰는 값. */
     fun kecLimitKmh(ctx: Context) = sp(ctx).getInt("kecLimit", 100)
     fun setKecLimitKmh(ctx: Context, v: Int) = put(ctx) { putInt("kecLimit", v.coerceIn(30, 130)) }
+    /** 제한 40 이하(좁은 길) 카메라의 오른쪽 허용폭. */
+    fun narrowRightTol(ctx: Context) = sp(ctx).f("narrowRight", 15.0)
+    fun setNarrowRightTol(ctx: Context, v: Double) = put(ctx) { putFloat("narrowRight", v.coerceIn(5.0, 150.0).toFloat()) }
+    /** 길이도 짝 종점도 모르는 구간단속의 최대 유지 거리(m). */
+    fun maxSectionHoldM(ctx: Context) = sp(ctx).getInt("maxHold", 10_000)
+    fun setMaxSectionHoldM(ctx: Context, v: Int) = put(ctx) { putInt("maxHold", v.coerceIn(1000, 30_000)) }
 
     // ---- 어린이보호구역
     fun schoolZoneOn(ctx: Context) = sp(ctx).getBoolean("zoneOn", false)
@@ -113,6 +133,8 @@ object Prefs {
     // ---- 출력·연결
     fun alertsOn(ctx: Context) = sp(ctx).getBoolean("alerts", true)
     fun setAlertsOn(ctx: Context, v: Boolean) = put(ctx) { putBoolean("alerts", v) }
+    fun voiceRoute(ctx: Context) = VoiceRoute.byName(sp(ctx).getString("voiceRoute", null))
+    fun setVoiceRoute(ctx: Context, v: VoiceRoute) = put(ctx) { putString("voiceRoute", v.name) }
     fun keepScreenOn(ctx: Context) = sp(ctx).getBoolean("keepScreen", true)
     fun setKeepScreenOn(ctx: Context, v: Boolean) = put(ctx) { putBoolean("keepScreen", v) }
     fun bleOn(ctx: Context) = sp(ctx).getBoolean("ble", false)
@@ -135,8 +157,8 @@ object Prefs {
     fun resetAdvanced(ctx: Context) {
         val keepFixed = timing(ctx) == Timing.FIXED
         put(ctx) {
-            for (k in listOf("decel", "reaction", "margin", "restoreAfter", "cityLeft", "cityRight", "hwyLeft", "hwyRight", "maxAcc")) remove(k)
-            for (k in listOf("kecLimit", "extraDown", "pressGap", "deadReckonMax", "zoneRadius")) remove(k)
+            for (k in listOf("decel", "reaction", "margin", "restoreAfter", "cityLeft", "cityRight", "hwyLeft", "hwyRight", "maxAcc", "narrowRight")) remove(k)
+            for (k in listOf("kecLimit", "extraDown", "pressGap", "deadReckonMax", "zoneRadius", "maxHold")) remove(k)
             remove("renameAdapter"); remove("deadReckon")
             if (!keepFixed) putString("timing", Timing.AUTO.name)
         }
@@ -152,6 +174,7 @@ object Prefs {
             minLimitKmh = minLimitKmh(ctx), skipIfBelowLimit = skipIfBelowLimit(ctx), includeSignalCams = includeSignal(ctx),
             cityLeftTolM = cityLeftTol(ctx), cityRightTolM = cityRightTol(ctx),
             hwyLeftTolM = hwyLeftTol(ctx), hwyRightTolM = hwyRightTol(ctx),
+            narrowRightTolM = narrowRightTol(ctx), maxSectionHoldM = maxSectionHoldM(ctx).toDouble(),
             maxAccM = maxAccM(ctx),
             schoolZoneOn = schoolZoneOn(ctx), schoolZoneRadiusM = schoolZoneRadiusM(ctx).toDouble(),
         )
@@ -237,7 +260,7 @@ object CameraRepo {
                     val kec = KecCsv.inheritLimits(kecRaw, police, Prefs.kecLimitKmh(ctx))
                     police = KecCsv.assignBearings(police, routes)
                     val directed = police.count { it.bearingDeg != null }
-                    kecNote = "도로공사 구간 ${kec.size / 2}건 적용, 고속도로 카메라 ${directed}개에 방향 부여" +
+                    kecNote = "도로공사 구간 ${kec.size / 2}건 적용, 고속도로 카메라 ${directed}개에 방향 부여(중심선 기준)" +
                         (if (warn.isNotEmpty()) ", 건너뜀 ${warn.size}건: ${warn.take(3).joinToString("; ")}" else "")
                     all = KecCsv.merge(police, kec)
                 } catch (e: Exception) {
@@ -281,10 +304,11 @@ object CameraRepo {
         val zones = loadZones(ctx).cameras.size
         if (cams.isEmpty()) return "카메라 데이터 없음 — 메뉴에서 경찰청 전국 CSV를 불러오세요"
         val sec = cams.count { it.kind == CamKind.SECTION_START }
+        val secDir = cams.count { it.kind == CamKind.SECTION_START && it.bearingDeg != null }
         val sig = cams.count { it.signalOnly }
         val kec = cams.count { it.fromKec && it.kind == CamKind.SECTION_START }
-        return "카메라 ${cams.size}개 로드됨 (구간단속 시점 ${sec}, 신호 표시 ${sig}" +
-            (if (kec > 0) ", 도로공사 방향 있는 구간 $kec" else "") + ")" +
+        return "카메라 ${cams.size}개 로드됨 (구간단속 시점 ${sec}, 그중 방향 아는 것 ${secDir}, 신호 표시 ${sig}" +
+            (if (kec > 0) ", 도로공사 구간 $kec" else "") + ")" +
             (if (zones > 0) "\n어린이보호구역 ${zones}곳" else "") +
             (if (kecNote.isNotEmpty()) "\n$kecNote" else "")
     }

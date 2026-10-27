@@ -29,7 +29,7 @@ class SlowdownEngineTest {
         var n = fromN
         while (n <= toN) {
             val (la, lo) = at(0.0, n)
-            e.update(Fix(la, lo, v, 0.0, acc)).forEach { out += it to n }
+            e.update(Fix(la, lo, v, 0.0, acc)).filter { it !is EngineEvent.Hold }.forEach { out += it to n }
             n += v
         }
         return out
@@ -318,6 +318,165 @@ class SlowdownEngineTest {
         assertEquals("서울OO초등학교 초등학교", z[0].name); assertEquals(ZoneCsv.CODE, z[0].code); assertEquals(30, z[0].limitKmh)
     }
 
+    // ---- v0.6: 구간단속 방향·유지 검사·상한·좁은 길·직접 복귀
+
+    /** 동부간선도로형 데이터: 의정부 방향 구간(시점 남쪽 → 종점 북쪽, 방향 코드 1)과 서울 방향 구간(방향 코드 2). */
+    private val dirHeader = "무인교통단속카메라관리번호,시도명,도로노선명,도로노선방향,설치장소,단속구분,제한속도,단속구간위치구분,과속단속구간길이,위도,경도\n"
+    private fun dongbuCsv(): String {
+        fun row(id: String, dir: String, place: String, pos: String, len: String, east: Double, north: Double): String {
+            val (la, lo) = at(east, north); return "$id,서울,동부간선도로,$dir,$place,99,80,$pos,$len,$la,$lo\n"
+        }
+        return dirHeader +
+            row("N1", "1", "면목삼익아파트 3차로", "1", "7", 8.0, 2000.0) +      // 북진 시점(7 km)
+            row("N2", "1", "면목삼익아파트 1,2차로", "1", "7", 8.0, 2000.0) +
+            row("N3", "1", "상계마들아파트 3차로", "2", "7", 8.0, 9000.0) +      // 북진 종점
+            row("N4", "1", "상계마들아파트 1,2차로", "2", "7", 8.0, 9000.0) +
+            row("S1", "2", "상계근린공원 시점", "1", "3", -10.0, 12000.0) +      // 남진 시점(3 km)
+            row("S2", "2", "초안산지하차도 종점", "2", "3", -10.0, 9000.0)        // 남진 종점
+    }
+
+    @Test fun pairing_derivesSectionDirection() {
+        val list = CameraCsv.parse(dongbuCsv())
+        val byName = list.associateBy { it.name }
+        val n1 = byName.getValue("동부간선도로 면목삼익아파트 3차로")
+        assertEquals(CamKind.SECTION_START, n1.kind); assertEquals(7000, n1.sectionLenM)
+        assertEquals("북진 시점 방향", 0.0, n1.bearingDeg!!, 1.0)
+        assertEquals(CameraCsv.LOOSE_HEADING_DEG, n1.headingTolDeg!!, 1e-9)
+        assertTrue(n1.hasPartner); assertEquals(at(8.0, 9000.0).first, n1.partnerLat!!, 1e-9)
+        val n3 = byName.getValue("동부간선도로 상계마들아파트 3차로")
+        assertEquals(0.0, n3.bearingDeg!!, 1.0); assertTrue(n3.hasPartner)
+        val s1 = byName.getValue("동부간선도로 상계근린공원 시점")
+        assertEquals("남진 시점 방향", 180.0, s1.bearingDeg!!, 1.0)
+    }
+
+    @Test fun pairing_oppositeDirectionStart_ignoredWhileDriving() {
+        val cams = CameraCsv.parse(dongbuCsv())
+        val e = SlowdownEngine(CameraIndex(cams))
+        val v = 80 / 3.6
+        val ev = ArrayList<Pair<EngineEvent, Double>>()
+        // 남진(성수 방향): 북진 구간 시점(2000)을 반대로 지나친다. 아무 일도 없어야 한다(2026-10 실제 사고 재현).
+        var n = 4000.0
+        while (n >= 500) { val (la, lo) = at(0.0, n); e.update(Fix(la, lo, v, 180.0)).forEach { ev += it to n }; n -= v }
+        assertEquals("남진 이벤트 ${ev.map { it.first::class.simpleName + "@" + it.second.toInt() }}", 0, ev.size)
+        // 북진: 시점에서 내리고 종점(9000) 지나 복귀
+        val e2 = SlowdownEngine(CameraIndex(cams))
+        n = 0.0
+        while (n <= 11_000) { val (la, lo) = at(0.0, n); e2.update(Fix(la, lo, v, 0.0)).forEach { ev += it to n }; n += v }
+        assertTrue(ev.any { it.first is EngineEvent.Down && 2000.0 - it.second in 100.0..600.0 })
+        assertTrue(ev.any { it.first is EngineEvent.Hold })
+        val up = ev.first { it.first is EngineEvent.Up }
+        assertTrue("북진 복귀 ${up.second}", up.second - 9000.0 in 90.0..200.0)
+    }
+
+    @Test fun pairing_noBearingWhenAmbiguousOrMismatch() {
+        fun row(id: String, road: String, dir: String, pos: String, len: String, east: Double, north: Double): String {
+            val (la, lo) = at(east, north); return "$id,서울,$road,$dir,x,99,80,$pos,$len,$la,$lo\n"
+        }
+        val csv = dirHeader +
+            row("A1", "길A", "", "1", "7", 8.0, 0.0) + row("A2", "길A", "", "2", "7", 8.0, 2000.0) +        // 길이 7 km인데 종점 2 km → 안 맞음
+            row("B1", "길B", "", "1", "", 8.0, 0.0) + row("B2", "길B", "", "2", "", 8.0, 3000.0) + row("B3", "길B", "", "2", "", 8.0, -3000.0) + // 길이 모름, 양쪽에 종점 → 모호
+            row("C1", "길C", "", "1", "", 8.0, 0.0) + row("C2", "길C", "", "2", "", 8.0, 4000.0)           // 길이 모름, 종점 하나 → 방향 붙음
+        val byName = CameraCsv.parse(csv).associateBy { it.name.substringBefore(" ") + it.lat.toString() }
+        val cams = CameraCsv.parse(csv)
+        fun find(id: Double, road: String) = cams.first { it.name.startsWith(road) && Math.abs(it.lat - at(0.0, id).first) < 1e-7 }
+        assertEquals(null, find(0.0, "길A").bearingDeg)
+        assertEquals(null, find(0.0, "길B").bearingDeg)
+        assertEquals(0.0, find(0.0, "길C").bearingDeg!!, 1.0)
+        assertTrue(byName.isNotEmpty())
+    }
+
+    @Test fun looseHeading_curvedApproachStillCaught() {
+        // 느슨한 방향(120도): 추정 방향이 북(0)인데 100도 방향으로 접근해도 잡는다. 150도면(사실상 반대) 무시.
+        val start = cam(0.0, 0.0, kind = CamKind.SECTION_START, len = 3000).copy(bearingDeg = 0.0, headingTolDeg = 120.0)
+        fun drive(course: Double): Int {
+            val e = SlowdownEngine(CameraIndex(listOf(start)))
+            val v = 60 / 3.6; var d = -1500.0; var c = 0
+            val rad = Math.toRadians(course)
+            while (d <= 300) { val (la, lo) = at(d * Math.sin(rad), d * Math.cos(rad)); c += e.update(Fix(la, lo, v, course)).count { it is EngineEvent.Down }; d += v }
+            return c
+        }
+        assertEquals(1, drive(100.0))
+        assertEquals(0, drive(150.0))
+    }
+
+    @Test fun holdProgress_wrongWayWithoutBearing_releasesQuickly() {
+        // 방향을 못 붙인 시점(짝만 있음)을 반대로 지나침 → 종점 반대쪽으로 300 m 멀어지면 "반대 방향" 복귀
+        val start = cam(-8.0, 2000.0, kind = CamKind.SECTION_START, len = 7000).copy(partnerLat = at(0.0, 9000.0).first, partnerLon = at(0.0, 9000.0).second)
+        val e = SlowdownEngine(CameraIndex(listOf(start)))
+        val v = 80 / 3.6
+        val ev = ArrayList<Pair<EngineEvent, Double>>()
+        var n = 4000.0
+        while (n >= 0) { val (la, lo) = at(0.0, n); e.update(Fix(la, lo, v, 180.0)).forEach { ev += it to n }; n -= v }
+        val up = ev.first { it.first is EngineEvent.Up }
+        assertEquals("반대 방향", (up.first as EngineEvent.Up).reason)
+        // 진행 방향이 구간 방향과 뒤집힌 fix 5개(약 110 m) 뒤, 늦어도 300 m 멀어졌을 때
+        assertTrue("복귀 위치 ${up.second}", 2000.0 - up.second in 100.0..420.0)
+    }
+
+    @Test fun holdProgress_uTurnWithoutPartner_releases() {
+        // 짝도 길이도 모르는 시점: 지난 뒤 유턴하면 5 fix 안에 복귀
+        val start = cam(8.0, 2000.0, kind = CamKind.SECTION_START)
+        val e = SlowdownEngine(CameraIndex(listOf(start)))
+        val v = 60 / 3.6
+        val events = ArrayList<EngineEvent>()
+        var n = 0.0
+        while (n <= 2600) { val (la, lo) = at(0.0, n); events += e.update(Fix(la, lo, v, 0.0)); n += v }
+        assertTrue(e.isSlowed); assertTrue(events.any { it is EngineEvent.Hold })
+        var cnt = 0
+        while (cnt < 12 && e.isSlowed) { n -= v; val (la, lo) = at(20.0, n); events += e.update(Fix(la, lo, v, 180.0)); cnt++ }
+        assertTrue("유턴 뒤 $cnt fix", cnt in 5..6)
+        assertEquals("반대 방향", (events.last() as EngineEvent.Up).reason)
+    }
+
+    @Test fun holdProgress_partnerReached_shortensHold() {
+        // 종점 카메라가 데이터에 없어도(또는 못 봐도) 짝 종점 위치에 닿으면 복귀 거리만 남긴다. 길이 20 km가 틀려도.
+        val start = cam(8.0, 2000.0, kind = CamKind.SECTION_START, len = 20_000).copy(partnerLat = at(8.0, 6000.0).first, partnerLon = at(8.0, 6000.0).second)
+        val ev = driveNorth(listOf(start), 100.0, 0.0, 12_000.0)
+        val up = ev.first { it.first is EngineEvent.Up }
+        assertTrue("짝 종점 기준 복귀 ${up.second}", up.second - 6000.0 in 90.0..200.0)
+    }
+
+    @Test fun unknownLengthNoPartner_cappedAt10km() {
+        val ev = driveNorth(listOf(cam(8.0, 1000.0, kind = CamKind.SECTION_START)), 100.0, 0.0, 14_000.0)
+        val up = ev.first { it.first is EngineEvent.Up }
+        assertTrue("상한 복귀 ${up.second}", up.second - 11_000.0 in 90.0..200.0)
+    }
+
+    @Test fun narrowRoadCamera_notCaughtFromParallelRoad() {
+        // 제한 30 카메라가 오른쪽 30 m(옆 길)에 있으면 무시. 제한 60이면 도심 허용폭 40 m 안이라 잡는다. 제한 30이라도 12 m면 잡는다.
+        assertEquals(0, driveNorth(listOf(cam(30.0, 3000.0, limit = 30)), 60.0, 0.0, 5000.0).size)
+        assertEquals(2, driveNorth(listOf(cam(30.0, 3000.0, limit = 60)), 60.0, 0.0, 5000.0).size)
+        assertEquals(2, driveNorth(listOf(cam(12.0, 3000.0, limit = 30)), 60.0, 0.0, 5000.0).size)
+    }
+
+    @Test fun manualRelease_noRetriggerUntilPassed() {
+        val e = SlowdownEngine(CameraIndex(listOf(cam(8.0, 1000.0), cam(8.0, 3000.0))))
+        val v = 25.0
+        val events = ArrayList<EngineEvent>()
+        var n = 0.0
+        while (n < 800) { val (la, lo) = at(0.0, n); events += e.update(Fix(la, lo, v, 0.0)); n += v }
+        assertTrue(e.isSlowed)
+        assertTrue(e.release()); assertFalse(e.isSlowed); assertFalse(e.release())
+        // 같은 카메라(1000)를 지날 때까지 다시 안 잡고, 다음 카메라(3000)는 정상
+        while (n < 4000) { val (la, lo) = at(0.0, n); events += e.update(Fix(la, lo, v, 0.0)); n += v }
+        val downs = events.filterIsInstance<EngineEvent.Down>()
+        assertEquals("Down 수 $downs", 2, downs.size)
+        assertEquals(1, events.filterIsInstance<EngineEvent.Up>().size)
+    }
+
+    @Test fun status_exposesTriggerAndHold() {
+        val e = SlowdownEngine(CameraIndex(listOf(cam(8.0, 2000.0, kind = CamKind.SECTION_START, len = 5000))))
+        val v = 100 / 3.6
+        var n = 500.0
+        val (la, lo) = at(0.0, n)
+        e.update(Fix(la, lo, v, 0.0))
+        assertEquals(e.triggerDistance(v, 100), e.status.triggerM!!, 1e-9)
+        while (n < 2500) { val (a, b) = at(0.0, n); e.update(Fix(a, b, v, 0.0)); n += v }
+        assertEquals("구간단속", e.status.holdKind)
+        assertTrue("남은 거리 ${e.status.holdRemainM}", e.status.holdRemainM!! in 4400.0..4700.0)
+        assertTrue(e.status.note.contains("종점까지"))
+    }
+
     @Test fun csvParse_lengthUnitsAndClamp() {
         assertEquals(7500, CameraCsv.lenToMeters(7.5))
         assertEquals(300, CameraCsv.lenToMeters(0.3))
@@ -396,7 +555,7 @@ class KecCsvTest {
         val v = 100 / 3.6
         val ev = ArrayList<Pair<EngineEvent, Double>>()
         var n = 0.0
-        while (n <= 15_000) { val (la, lo) = at(0.0, n); e.update(Fix(la, lo, v, 0.0)).forEach { ev += it to n }; n += v }
+        while (n <= 15_000) { val (la, lo) = at(0.0, n); e.update(Fix(la, lo, v, 0.0)).filter { it !is EngineEvent.Hold }.forEach { ev += it to n }; n += v }
         // 북진: 남진 구간의 시점(12 km, 방위 180)과 종점(5 km)은 무시. 내 구간 5 km에서 내리고 12 km 종점 지나 복귀.
         assertEquals(2, ev.size)
         assertTrue(ev[0].first is EngineEvent.Down); assertTrue(5000.0 - ev[0].second in 200.0..700.0)
@@ -405,7 +564,7 @@ class KecCsvTest {
         val e2 = SlowdownEngine(CameraIndex(cams))
         val ev2 = ArrayList<Pair<EngineEvent, Double>>()
         n = 15_000.0
-        while (n >= 0) { val (la, lo) = at(0.0, n); e2.update(Fix(la, lo, v, 180.0)).forEach { ev2 += it to n }; n -= v }
+        while (n >= 0) { val (la, lo) = at(0.0, n); e2.update(Fix(la, lo, v, 180.0)).filter { it !is EngineEvent.Hold }.forEach { ev2 += it to n }; n -= v }
         assertEquals(2, ev2.size)
         assertTrue(ev2[0].second - 12_000.0 in 200.0..700.0)
         assertTrue("남진 복귀 ${ev2[1].second}", 5000.0 - ev2[1].second in 90.0..170.0)
