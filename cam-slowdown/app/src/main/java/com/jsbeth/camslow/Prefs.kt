@@ -84,17 +84,20 @@ object Prefs {
 
     fun alertsOn(ctx: Context) = sp(ctx).getBoolean("alerts", true)
     fun bleOn(ctx: Context) = sp(ctx).getBoolean("ble", false)
-    fun bleProfile(ctx: Context) = sp(ctx).getString("bleProfile", "") ?: ""
+    /** 버튼 누름 사이 간격(ms). 커맨더가 한 번씩 처리할 시간. */
+    fun pressGapMs(ctx: Context) = sp(ctx).getInt("pressGap", 400).toLong()
+    /** 광고할 때 폰 블루투스 이름을 ENH_BTN으로 바꿀지(실제 버튼 이름. 끄면 되돌린다). */
+    fun renameAdapter(ctx: Context) = sp(ctx).getBoolean("renameAdapter", true)
 
     fun saveOutputs(
         ctx: Context, usual: Profile, slow: Profile, extraDown: Int, autoRestore: Boolean,
-        alerts: Boolean, ble: Boolean, profile: String,
+        alerts: Boolean, ble: Boolean, pressGapMs: Int, renameAdapter: Boolean,
     ) {
         sp(ctx).edit()
             .putInt("usualProfile", usual.ordinal).putInt("slowProfile", slow.ordinal)
             .putInt("extraDown", extraDown).putBoolean("autoRestore", autoRestore)
             .putBoolean("alerts", alerts).putBoolean("ble", ble)
-            .putString("bleProfile", profile)
+            .putInt("pressGap", pressGapMs).putBoolean("renameAdapter", renameAdapter)
             .apply()
     }
 }

@@ -58,21 +58,20 @@ data class OutputSettings(
     val downPresses: Int,
     val upPresses: Int,
     val autoRestore: Boolean,
-    val profileJson: String,
+    val pressGapMs: Long,
+    val renameAdapter: Boolean,
 ) {
     companion object {
         fun load(ctx: Context) = OutputSettings(
             alerts = Prefs.alertsOn(ctx), ble = Prefs.bleOn(ctx),
             usual = Prefs.usualProfile(ctx), slow = Prefs.slowProfile(ctx),
             downPresses = Prefs.downPresses(ctx), upPresses = Prefs.upPresses(ctx),
-            autoRestore = Prefs.autoRestore(ctx), profileJson = Prefs.bleProfile(ctx),
+            autoRestore = Prefs.autoRestore(ctx), pressGapMs = Prefs.pressGapMs(ctx), renameAdapter = Prefs.renameAdapter(ctx),
         )
     }
 
-    val profile: BleProfile? get() = if (!ble || profileJson.isBlank()) null else runCatching { BleProfile.parse(profileJson) }.getOrNull()
-
-    /** BLE로 감속 클릭을 다 보내는 데 걸리는 시간(초). BLE가 꺼져 있거나 프로필이 없으면 0. */
-    fun bleDownSeconds(): Double = profile?.pressesSeconds(BleButtonEmulator.Press.CLICK, downPresses) ?: 0.0
+    /** BLE로 감속 클릭을 다 보내는 데 걸리는 시간(초). BLE가 꺼져 있으면 0. */
+    fun bleDownSeconds(): Double = if (ble) S3xyButton.pressSeconds(downPresses, pressGapMs) else 0.0
 
     fun describe(): String = buildString {
         append("${usual.label} → ${slow.label}: 클릭 ${downPresses}회")
@@ -85,7 +84,6 @@ data class OutputSettings(
 class Outputs(private val ctx: Context) {
     private var tts: TextToSpeech? = null
     private val tone = ToneGenerator(AudioManager.STREAM_NOTIFICATION, 90)
-    val ble = BleButtonEmulator(ctx)
     @Volatile var settings: OutputSettings = OutputSettings.load(ctx)
         private set
 
@@ -107,7 +105,7 @@ class Outputs(private val ctx: Context) {
             tone.startTone(ToneGenerator.TONE_PROP_BEEP2, 300)
             tts?.speak("과속 카메라, 제한속도 ${cam.limitKmh}. 감속합니다", TextToSpeech.QUEUE_FLUSH, null, "down")
         }
-        if (s.ble) ble.press(BleButtonEmulator.Press.CLICK, s.downPresses, s.profileJson) { DriveState.log(it) }
+        if (s.ble) S3xyButton.press(S3xyButton.Press.SINGLE, s.downPresses, s.pressGapMs)
     }
 
     /** force: 테스트 버튼처럼 자동 복귀 설정과 무관하게 복귀 신호를 보낼 때. */
@@ -126,7 +124,7 @@ class Outputs(private val ctx: Context) {
             tone.startTone(ToneGenerator.TONE_PROP_ACK, 200)
             tts?.speak("복귀합니다", TextToSpeech.QUEUE_FLUSH, null, "up")
         }
-        if (s.ble) ble.press(BleButtonEmulator.Press.DOUBLE, s.upPresses, s.profileJson) { DriveState.log(it) }
+        if (s.ble) S3xyButton.press(S3xyButton.Press.DOUBLE, s.upPresses, s.pressGapMs)
     }
 
     fun shutdown() { tts?.shutdown(); tone.release() }
@@ -260,6 +258,7 @@ class DriveService : Service(), LocationListener {
         val cfg = Prefs.engine(this).let { c -> c.copy(bleLatencyS = out.bleDownSeconds()) }
         DriveState.config = cfg
         DriveState.outputs = out
+        if (out.ble) S3xyButton.start(this, { DriveState.log(it) }, out.renameAdapter)
         Thread {
             val idx = CameraRepo.load(this)
             main.post {
@@ -293,8 +292,7 @@ class DriveService : Service(), LocationListener {
             val s = outputs.settings
             DriveState.log("주행 감시 시작 — 카메라 ${e.cameraCount}개, ${s.describe()}")
             if (e.cameraCount == 0) { DriveState.log("카메라 데이터가 없습니다 — CSV를 불러오세요"); outputs.say("카메라 데이터가 없습니다") }
-            if (s.ble && s.profile == null) DriveState.log("BLE가 켜져 있지만 프로필이 없거나 잘못됨 — 신호가 나가지 않습니다")
-            if (s.ble && s.profile?.payloadsDiffer == false) DriveState.log("주의: 클릭과 더블클릭 페이로드가 같음 — gapMs를 길게 두지 않으면 클릭이 더블클릭으로 읽힐 수 있음")
+            if (s.ble && !S3xyButton.ready) DriveState.log("BLE 켜짐, 커맨더 대기 중 (${S3xyButton.status}) — 커맨더가 붙어야 신호가 나갑니다")
             notify("GPS 대기")
         }
     }
@@ -412,6 +410,7 @@ class DriveService : Service(), LocationListener {
         engine?.reset()
         DriveState.running = false
         DriveState.status = null
+        if (S3xyButton.running && !S3xyButton.pairingMode) S3xyButton.stop()
         DriveState.log("주행 감시 정지")
         DriveState.changed()
     }

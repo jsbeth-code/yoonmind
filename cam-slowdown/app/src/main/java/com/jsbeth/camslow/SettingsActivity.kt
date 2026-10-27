@@ -60,8 +60,10 @@ class SettingsActivity : Activity() {
 
         ui.text("출력", 18f, bold = true)
         val alerts = ui.check("음성·효과음 안내", Prefs.alertsOn(this))
-        val ble = ui.check("가상 S3XY 버튼 신호 보내기 (BLE)", Prefs.bleOn(this))
-        val profile = ui.multiline("BLE 프로필 (JSON — 캡처 결과로 채움)", Prefs.bleProfile(this))
+        val ble = ui.check("가상 S3XY 버튼(ENH_BTN)으로 커맨더에 신호 보내기 (BLE)", Prefs.bleOn(this))
+        val pressGap = ui.number("누름 사이 간격(ms) — 커맨더가 한 번씩 처리할 시간", Prefs.pressGapMs(this).toString(), decimal = false)
+        val rename = ui.check("광고할 때 폰 블루투스 이름을 ENH_BTN으로 바꾸기 (실제 버튼 이름. 끄면 되돌림)", Prefs.renameAdapter(this))
+        ui.text("페어링: 메인 화면 [커맨더 페어링 모드] → enhauto 앱 Buttons → Add S3XY Button → 폰에 뜨는 페어링 요청 승인. 그 뒤 클릭 = 오른쪽 휠 아래, 더블클릭 = 오른쪽 휠 위로 지정.", 12f)
 
         ui.button("저장") {
             try {
@@ -92,16 +94,15 @@ class SettingsActivity : Activity() {
                 require(cfg.rightTolM in 5.0..150.0) { "오른쪽 허용폭은 5~150m" }
                 val kecLimitN = kecLimit.text.toString().toInt()
                 require(kecLimitN in 30..130) { "도로공사 제한속도는 30~130" }
-                val json = profile.text.toString().trim()
-                if (json.isNotEmpty()) BleProfile.parse(json) // 형식 검증
-                require(!(ble.isChecked && json.isEmpty())) { "BLE를 켜려면 프로필(JSON)이 필요합니다" }
+                val gapN = pressGap.text.toString().toInt()
+                require(gapN in 100..3000) { "누름 간격은 100~3000ms" }
                 val pick = device.selectedItemPosition - 1
                 val (addr, name) = if (pick in devices.indices) devices[pick] else "" to ""
                 require(!(autoOn.isChecked && addr.isEmpty())) { "자동 시작하려면 차 블루투스 기기를 고르세요" }
                 val kecChanged = kecLimitN != Prefs.kecLimitKmh(this)
                 Prefs.saveEngine(this, cfg)
                 Prefs.saveKecLimit(this, kecLimitN)
-                Prefs.saveOutputs(this, usualP, slowP, extraN, autoRestore.isChecked, alerts.isChecked, ble.isChecked, json)
+                Prefs.saveOutputs(this, usualP, slowP, extraN, autoRestore.isChecked, alerts.isChecked, ble.isChecked, gapN, rename.isChecked)
                 Prefs.saveAuto(this, autoOn.isChecked, autoStop.isChecked, addr, name)
                 if (kecChanged) CameraRepo.invalidate()
                 val msg = if (DriveState.running) "저장됨 — 주행 중엔 적용되지 않습니다. [정지] 후 [주행 시작]을 다시 누르세요"

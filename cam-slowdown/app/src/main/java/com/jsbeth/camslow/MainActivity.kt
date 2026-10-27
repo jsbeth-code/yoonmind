@@ -46,9 +46,10 @@ class MainActivity : Activity() {
         ui.button("가상 주행 테스트 (주차 중 — 끝나면 감시도 꺼짐)") {
             if (hasLocationPermission()) DriveService.send(this, DriveService.ACTION_SIMULATE) else askPermissions()
         }
+        ui.button("커맨더 페어링 모드 (ENH_BTN 광고 켜기/끄기)") { togglePairing() }
         ui.row(
             ui.button("설정") { startActivity(Intent(this, SettingsActivity::class.java)) },
-            ui.button("버튼 신호 캡처") { startActivity(Intent(this, CaptureActivity::class.java)) },
+            ui.button("BLE 스캔 (진단용)") { startActivity(Intent(this, CaptureActivity::class.java)) },
         )
         ui.text("기록", 13f, bold = true)
         logView = ui.text("", 12f)
@@ -65,6 +66,18 @@ class MainActivity : Activity() {
     private fun pickCsv(req: Int) = startActivityForResult(
         Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*"), req,
     )
+
+    /** 주행과 무관하게 ENH_BTN 광고를 켜 둔다. 커맨더 앱에서 버튼을 추가할 때 쓴다. */
+    private fun togglePairing() {
+        if (S3xyButton.running && S3xyButton.pairingMode) {
+            S3xyButton.stop(); render(); return
+        }
+        if (S3xyButton.running) { Toast.makeText(this, "주행 감시가 켜 둔 상태입니다 — 이미 광고 중", Toast.LENGTH_SHORT).show(); return }
+        val ok = S3xyButton.start(this, { DriveState.log(it) }, Prefs.renameAdapter(this))
+        S3xyButton.pairingMode = ok
+        Toast.makeText(this, if (ok) "ENH_BTN 광고 중 — 커맨더 앱에서 Add S3XY Button" else "시작 실패 — 기록을 보세요", Toast.LENGTH_LONG).show()
+        render()
+    }
 
     private fun hasLocationPermission() =
         checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
@@ -141,6 +154,7 @@ class MainActivity : Activity() {
             append(if (cfg.fixedTriggerM > 0) "카메라 ${cfg.fixedTriggerM}m 앞(고정)" else "속도별 자동(감속도 ${cfg.decelMps2}, 반응 ${cfg.reactionS}s, 여유 ${cfg.marginM.toInt()}m)")
             if (cfg.bleLatencyS > 0) append(" + BLE 송출 ${"%.1f".format(cfg.bleLatencyS)}s")
             append(" · 통과 후 ${cfg.restoreAfterM.toInt()}m")
+            if (out.ble || S3xyButton.running) append("\n가상 버튼: ${S3xyButton.status}")
         }
         logView.text = DriveState.log.joinToString("\n")
     }
