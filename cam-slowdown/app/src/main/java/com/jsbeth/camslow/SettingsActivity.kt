@@ -9,118 +9,164 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
+import android.view.View
+import android.widget.EditText
 import android.widget.TextView
 import android.widget.Toast
 
+/** 질문 7개로 끝나는 기본 설정 + 접힌 고급 설정. 바꾸는 즉시 저장된다. */
 class SettingsActivity : Activity() {
-    private lateinit var autoStatus: TextView
+    private lateinit var ui: Ui
+    private lateinit var outputs: Outputs
+    private lateinit var resultView: TextView
+    private lateinit var cmdStatus: TextView
+    private lateinit var permStatus: TextView
+    private lateinit var zoneStatus: TextView
+    private var fixedEdit: EditText? = null
+    private var limitEdit: EditText? = null
+    private val listener = { refreshStatus() }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val ui = Ui(this)
-        val c = Prefs.engine(this)
+        outputs = Outputs(this)
+        ui = Ui(this)
+        actionBar?.setDisplayHomeAsUpEnabled(true)
+        if (DriveState.running) ui.banner("감시 중입니다. 바꾼 설정은 다음에 켤 때부터 적용됩니다.")
 
-        ui.text("프로필 (FSD v14 오른쪽 휠 = 속도 프로필)", 18f, bold = true)
-        val usual = ui.choice("평소 프로필 (복귀 목표)", Profile.labels, Prefs.usualProfile(this).ordinal)
-        val slow = ui.choice("카메라 앞에서 내릴 프로필", Profile.labels, Prefs.slowProfile(this).ordinal)
-        val extra = ui.number("여분 클릭 (내릴 프로필이 Sloth일 때만, 클릭 유실 대비. 바닥에선 추가 클릭이 무시됨)", Prefs.extraDownClicks(this).toString(), decimal = false)
-        val autoRestore = ui.check("카메라 통과 후 자동으로 평소 프로필로 올리기 (끄면 음성만, 휠로 직접)", Prefs.autoRestore(this))
-        ui.text("클릭 수는 두 프로필의 차이로 정해진다. 예: Hurry→Sloth = 아래 3번(+여분), 복귀 위 3번. 복귀는 정확히 내린 만큼만 올린다.", 12f)
+        // 1·2 프로필
+        ui.question(1, "평소 어떤 프로필로 달리나요?")
+        ui.choice("", Profile.labels, Prefs.usualProfile(this).ordinal) { i -> Prefs.setUsualProfile(this, Profile.values()[i]); showResult() }
+        ui.question(2, "카메라 앞에서는 어디까지 내릴까요?")
+        ui.choice("", Profile.labels, Prefs.slowProfile(this).ordinal) { i -> Prefs.setSlowProfile(this, Profile.values()[i]); showResult() }
+        resultView = ui.text("", 13f).apply {
+            val p = ui.dp(8); setPadding(ui.dp(10), p, ui.dp(10), p)
+            background = android.graphics.drawable.GradientDrawable().apply { setColor(0x1A009688); cornerRadius = ui.dp(4).toFloat() }
+        }
+        showResult()
 
-        ui.text("감속 시작 시점", 18f, bold = true)
-        val fixed = ui.number("고정 거리(m) — 카메라 이만큼 앞에서 신호. 0이면 아래 공식으로 속도별 자동 계산", c.fixedTriggerM.toString(), decimal = false)
-        ui.text("자동 계산 = (현재속도² − 제한속도²)/(2×감속도) + 속도×반응시간 + 여유. BLE를 켜면 클릭 송출 시간만큼 둘 다 더 일찍 시작한다.", 12f)
-        val decel = ui.number("감속도 m/s² (작을수록 일찍·천천히 내림)", c.decelMps2.toString())
-        val reaction = ui.number("반응 여유 시간(초)", c.reactionS.toString())
-        val margin = ui.number("추가 여유 거리(m)", c.marginM.toString())
-        val restore = ui.number("통과 후 복귀 거리(m)", c.restoreAfterM.toString())
+        // 3 복귀
+        ui.question(3, "카메라를 지나면 다시 올릴까요?")
+        ui.switchRow("자동으로 평소 프로필로 올리기", "끄면 \"카메라 통과\" 음성만 나오고 휠은 직접 올립니다", Prefs.autoRestore(this)) { Prefs.setAutoRestore(this, it) }
 
-        ui.text("카메라 선별", 18f, bold = true)
-        val minLimit = ui.number("이 제한속도 미만 카메라 무시 (80 → 고속도로만, 0 → 전부)", c.minLimitKmh.toString(), decimal = false)
-        val skip = ui.check("이미 제한속도 이하로 달리면 신호 생략", c.skipIfBelowLimit)
-        val includeSignal = ui.check("신호 단속으로 표시된 카메라(단속구분 2)도 포함 — 대부분 신호·과속 겸용", c.includeSignalCams)
-        val leftTol = ui.number("진행 방향 왼쪽 허용폭(m) — 작을수록 반대 차로 카메라를 잘 거르지만 넓은 도로에서 놓칠 수 있음", c.leftTolM.toString())
-        val rightTol = ui.number("진행 방향 오른쪽 허용폭(m)", c.rightTolM.toString())
-        val kecLimit = ui.number("도로공사 구간단속 제한속도 (그 데이터엔 제한속도가 없음)", Prefs.kecLimitKmh(this).toString(), decimal = false)
+        // 4 시점
+        ui.question(4, "얼마나 미리 줄일까요?")
+        val timings = Timing.values()
+        ui.radioGroup(timings.map { it.label }, Prefs.timing(this).ordinal) { i ->
+            Prefs.setTiming(this, timings[i]); fixedEdit?.visibility = if (timings[i] == Timing.FIXED) View.VISIBLE else View.GONE
+        }
+        fixedEdit = ui.numberRow("카메라 앞 거리(m)", "속도와 상관없이 이 거리에서 신호", Prefs.fixedTriggerM(this).toString(), false) { Prefs.setFixedTriggerM(this, it.toInt()) }
+        fixedEdit?.visibility = if (Prefs.timing(this) == Timing.FIXED) View.VISIBLE else View.GONE
+        ui.hint("자동 = 제동거리 + 반응거리 + 여유. 110→100 카메라면 약 390m 앞. 커맨더를 쓰면 클릭 보내는 시간만큼 더 일찍.")
 
-        ui.text("차 블루투스 연결 시 자동 시작", 18f, bold = true)
-        val autoOn = ui.check("아래 기기가 연결되면 주행 감시 자동 시작", Prefs.autoStart(this))
-        val devices = bondedDevices()
-        val labels = listOf("(선택 안 함)") + devices.map { (addr, name) -> "$name  $addr" }
-        val cur = devices.indexOfFirst { it.first.equals(Prefs.autoDeviceAddress(this), ignoreCase = true) }
-        val device = ui.choice("차 블루투스 기기 (페어링된 목록)", labels, if (cur >= 0) cur + 1 else 0)
-        val autoStop = ui.check("연결이 끊기고 60초 지나면 자동 정지", Prefs.autoStop(this))
-        autoStatus = ui.text("", 12f)
-        ui.row(
-            ui.button("위치 '항상 허용' 요청") { requestBackgroundLocation() },
-            ui.button("배터리 최적화 제외 요청") { requestBatteryExemption() },
-        )
-        ui.text("앱이 꺼진 상태에서 GPS를 받으려면 위치를 '항상 허용'으로, Android 12 이상에서 백그라운드에서 감시를 띄우려면 배터리 최적화 제외가 필요하다. " +
-            "둘 중 하나라도 없으면 연결 때 '탭해서 시작' 알림만 뜬다.", 12f)
+        // 5 카메라 선별
+        ui.question(5, "어떤 카메라에 반응할까요?")
+        val minLimit = Prefs.minLimitKmh(this)
+        val sel = when (minLimit) { 0 -> 0; 80 -> 1; else -> 2 }
+        ui.radioGroup(listOf("모든 과속 카메라", "고속도로·자동차전용도로만 (제한속도 80 이상)", "제한속도가 아래 값 이상인 것만"), sel) { i ->
+            when (i) { 0 -> Prefs.setMinLimitKmh(this, 0); 1 -> Prefs.setMinLimitKmh(this, 80); else -> limitEdit?.text?.toString()?.toIntOrNull()?.let { Prefs.setMinLimitKmh(this, it) } }
+            limitEdit?.visibility = if (i == 2) View.VISIBLE else View.GONE
+            CameraRepo.invalidate()
+        }
+        limitEdit = ui.numberRow("제한속도 기준(km/h)", "", (if (sel == 2) minLimit else 60).toString(), false) { Prefs.setMinLimitKmh(this, it.toInt()) }
+        limitEdit?.visibility = if (sel == 2) View.VISIBLE else View.GONE
+        ui.switchRow("교차로 신호 카메라도 포함", "대부분 과속도 같이 단속합니다", Prefs.includeSignal(this)) { Prefs.setIncludeSignal(this, it) }
+        ui.switchRow("이미 제한속도 이하로 달리면 신호 생략", "", Prefs.skipIfBelowLimit(this)) { Prefs.setSkipIfBelowLimit(this, it) }
 
-        ui.text("출력", 18f, bold = true)
-        val alerts = ui.check("음성·효과음 안내", Prefs.alertsOn(this))
-        val ble = ui.check("가상 S3XY 버튼(ENH_BTN)으로 커맨더에 신호 보내기 (BLE)", Prefs.bleOn(this))
-        val pressGap = ui.number("누름 사이 간격(ms) — 커맨더가 한 번씩 처리할 시간", Prefs.pressGapMs(this).toString(), decimal = false)
-        val rename = ui.check("광고할 때 폰 블루투스 이름을 ENH_BTN으로 바꾸기 (실제 버튼 이름. 끄면 되돌림)", Prefs.renameAdapter(this))
-        ui.text("페어링: 메인 화면 [커맨더 페어링 모드] → enhauto 앱 Buttons → Add S3XY Button → 폰에 뜨는 페어링 요청 승인. 그 뒤 클릭 = 오른쪽 휠 아래, 더블클릭 = 오른쪽 휠 위로 지정.", 12f)
-
-        ui.button("저장") {
-            try {
-                val usualP = Profile.of(usual.selectedItemPosition)
-                val slowP = Profile.of(slow.selectedItemPosition)
-                require(slowP.ordinal < usualP.ordinal) { "내릴 프로필은 평소 프로필보다 낮아야 합니다" }
-                val extraN = extra.text.toString().toInt()
-                require(extraN in 0..4) { "여분 클릭은 0~4" }
-                val cfg = c.copy(
-                    decelMps2 = decel.text.toString().toDouble(),
-                    reactionS = reaction.text.toString().toDouble(),
-                    marginM = margin.text.toString().toDouble(),
-                    fixedTriggerM = fixed.text.toString().toInt(),
-                    restoreAfterM = restore.text.toString().toDouble(),
-                    minLimitKmh = minLimit.text.toString().toInt(),
-                    skipIfBelowLimit = skip.isChecked,
-                    leftTolM = leftTol.text.toString().toDouble(),
-                    rightTolM = rightTol.text.toString().toDouble(),
-                    includeSignalCams = includeSignal.isChecked,
-                )
-                require(cfg.decelMps2 in 0.2..3.0) { "감속도는 0.2~3.0" }
-                require(cfg.reactionS in 0.0..15.0) { "반응 시간은 0~15초" }
-                require(cfg.marginM in 0.0..1000.0) { "여유 거리는 0~1000m" }
-                require(cfg.fixedTriggerM in 0..3000) { "고정 거리는 0~3000m" }
-                require(cfg.restoreAfterM in 0.0..2000.0) { "복귀 거리는 0~2000m" }
-                require(cfg.minLimitKmh in 0..130) { "제한속도 기준은 0~130" }
-                require(cfg.leftTolM in 5.0..60.0) { "왼쪽 허용폭은 5~60m" }
-                require(cfg.rightTolM in 5.0..150.0) { "오른쪽 허용폭은 5~150m" }
-                val kecLimitN = kecLimit.text.toString().toInt()
-                require(kecLimitN in 30..130) { "도로공사 제한속도는 30~130" }
-                val gapN = pressGap.text.toString().toInt()
-                require(gapN in 100..3000) { "누름 간격은 100~3000ms" }
-                val pick = device.selectedItemPosition - 1
-                val (addr, name) = if (pick in devices.indices) devices[pick] else "" to ""
-                require(!(autoOn.isChecked && addr.isEmpty())) { "자동 시작하려면 차 블루투스 기기를 고르세요" }
-                val kecChanged = kecLimitN != Prefs.kecLimitKmh(this)
-                Prefs.saveEngine(this, cfg)
-                Prefs.saveKecLimit(this, kecLimitN)
-                Prefs.saveOutputs(this, usualP, slowP, extraN, autoRestore.isChecked, alerts.isChecked, ble.isChecked, gapN, rename.isChecked)
-                Prefs.saveAuto(this, autoOn.isChecked, autoStop.isChecked, addr, name)
-                if (kecChanged) CameraRepo.invalidate()
-                val msg = if (DriveState.running) "저장됨 — 주행 중엔 적용되지 않습니다. [정지] 후 [주행 시작]을 다시 누르세요"
-                    else "저장됨"
-                Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
-                finish()
-            } catch (e: Exception) {
-                Toast.makeText(this, "입력 오류: ${e.message}", Toast.LENGTH_LONG).show()
+        // 6 차와 연결
+        ui.question(6, "차와 연결")
+        ui.group {
+            switchRow("S3XY 커맨더로 차 휠 조작", "끄면 음성 안내만", Prefs.bleOn(this@SettingsActivity)) { Prefs.setBleOn(this@SettingsActivity, it); refreshStatus() }
+            cmdStatus = text("", 13f)
+            row(
+                button("페어링하기") { togglePairing() },
+                button("감속 신호 테스트") { outputs.refresh(); outputs.down(Camera(0.0, 0.0, 100, CamKind.SPOT, 0, "테스트"), 300.0) },
+                button("복귀 신호 테스트") { outputs.refresh(); outputs.up("테스트", force = true) },
+            )
+            hint("페어링: 위 버튼으로 ENH_BTN 광고를 켜고, enhauto 앱 Buttons → Add S3XY Button → 폰에 뜨는 페어링 요청 승인. 그 뒤 클릭 = 오른쪽 휠 아래, 더블클릭 = 오른쪽 휠 위로 지정. 차 프로필 화면을 보며 테스트 버튼으로 단수를 세어 보세요.")
+            switchRow("차 블루투스에 연결되면 자동 시작", "끊기고 60초 지나면 자동 정지", Prefs.autoStart(this@SettingsActivity)) { Prefs.setAutoStart(this@SettingsActivity, it); refreshStatus() }
+            val devices = bondedDevices()
+            val labels = listOf("(차 고르기)") + devices.map { (addr, name) -> "$name  $addr" }
+            val cur = devices.indexOfFirst { it.first.equals(Prefs.autoDeviceAddress(this@SettingsActivity), ignoreCase = true) }
+            choice("", labels, if (cur >= 0) cur + 1 else 0) { i ->
+                val d = devices.getOrNull(i - 1)
+                Prefs.setAutoDevice(this@SettingsActivity, d?.first ?: "", d?.second ?: ""); refreshStatus()
             }
+            switchRow("연결이 끊기고 60초 지나면 자동 정지", "", Prefs.autoStop(this@SettingsActivity)) { Prefs.setAutoStop(this@SettingsActivity, it) }
+            permStatus = text("", 13f)
+            row(
+                button("위치 '항상 허용' 요청") { requestBackgroundLocation() },
+                button("배터리 최적화 제외 요청") { requestBatteryExemption() },
+            )
+        }
+
+        // 7 안내
+        ui.question(7, "안내")
+        ui.switchRow("음성·효과음", "", Prefs.alertsOn(this)) { Prefs.setAlertsOn(this, it) }
+        ui.switchRow("감시 중 화면 켜 두기", "거치대에 올려 두고 볼 때", Prefs.keepScreenOn(this)) { Prefs.setKeepScreenOn(this, it) }
+
+        // 8 어린이보호구역
+        ui.question(8, "어린이보호구역에서 감속")
+        ui.switchRow("보호구역 시설 반경 안에 들어가면 내리기", "카메라가 없어도. 메뉴에서 '어린이보호구역 CSV'를 넣어야 동작", Prefs.schoolZoneOn(this)) { Prefs.setSchoolZoneOn(this, it); refreshStatus() }
+        ui.numberRow("반경(m)", "법적 보호구역은 시설 정문 300m 안. 큰길 오탐이 잦으면 줄이세요", Prefs.schoolZoneRadiusM(this).toString(), false) { Prefs.setSchoolZoneRadiusM(this, it.toInt()) }
+        zoneStatus = ui.text("", 13f)
+
+        // 고급
+        ui.collapsible("고급 설정") {
+            hint("보통은 건드릴 필요 없습니다. 괄호 안이 기본값.")
+            numberRow("감속도 m/s²", "작을수록 일찍, 천천히 줄임 (0.7)", Prefs.decel(this@SettingsActivity).toString(), true) { Prefs.setDecel(this@SettingsActivity, it) }
+            numberRow("반응 여유 시간(초)", "신호 뒤 차가 줄이기 시작할 때까지 (4)", Prefs.reaction(this@SettingsActivity).toString(), true) { Prefs.setReaction(this@SettingsActivity, it) }
+            numberRow("추가 여유 거리(m)", "계산한 거리에 더함 (150)", Prefs.margin(this@SettingsActivity).toInt().toString(), false) { Prefs.setMargin(this@SettingsActivity, it) }
+            numberRow("통과 후 복귀 거리(m)", "카메라 지나고 이만큼 가서 올림 (100)", Prefs.restoreAfter(this@SettingsActivity).toInt().toString(), false) { Prefs.setRestoreAfter(this@SettingsActivity, it) }
+            numberRow("도심 왼쪽 허용폭(m)", "제한 80 미만 카메라. 작을수록 반대 차로를 잘 거름 (8)", Prefs.cityLeftTol(this@SettingsActivity).toInt().toString(), false) { Prefs.setCityLeftTol(this@SettingsActivity, it) }
+            numberRow("도심 오른쪽 허용폭(m)", "(40)", Prefs.cityRightTol(this@SettingsActivity).toInt().toString(), false) { Prefs.setCityRightTol(this@SettingsActivity, it) }
+            numberRow("고속도로 왼쪽 허용폭(m)", "제한 80 이상이면서 방향을 모르는 카메라 (15)", Prefs.hwyLeftTol(this@SettingsActivity).toInt().toString(), false) { Prefs.setHwyLeftTol(this@SettingsActivity, it) }
+            numberRow("고속도로 오른쪽 허용폭(m)", "(60)", Prefs.hwyRightTol(this@SettingsActivity).toInt().toString(), false) { Prefs.setHwyRightTol(this@SettingsActivity, it) }
+            numberRow("도로공사 구간 제한속도", "경찰청 데이터에서 못 찾았을 때 (100)", Prefs.kecLimitKmh(this@SettingsActivity).toString(), false) { Prefs.setKecLimitKmh(this@SettingsActivity, it.toInt()); CameraRepo.invalidate() }
+            numberRow("여분 클릭", "나무늘보까지 내릴 때만, 유실 대비 (1)", Prefs.extraDownClicks(this@SettingsActivity).toString(), false) { Prefs.setExtraDownClicks(this@SettingsActivity, it.toInt()); showResult() }
+            numberRow("누름 사이 간격(ms)", "커맨더가 한 번씩 처리할 시간 (400)", Prefs.pressGapMs(this@SettingsActivity).toString(), false) { Prefs.setPressGapMs(this@SettingsActivity, it.toInt()) }
+            switchRow("폰 블루투스 이름을 ENH_BTN으로", "실제 버튼 이름. 커맨더가 못 찾을 때만 끔", Prefs.renameAdapter(this@SettingsActivity)) { Prefs.setRenameAdapter(this@SettingsActivity, it) }
+            switchRow("터널에서 추측 항법", "GPS 끊기면 마지막 속도·방향으로 추정. 감속만 하고 복귀는 GPS 복귀 후", Prefs.deadReckoning(this@SettingsActivity)) { Prefs.setDeadReckoning(this@SettingsActivity, it) }
+            numberRow("추측 항법 최대 거리(m)", "이보다 길게 끊기면 포기 (2000)", Prefs.deadReckonMaxM(this@SettingsActivity).toString(), false) { Prefs.setDeadReckonMaxM(this@SettingsActivity, it.toInt()) }
+            numberRow("GPS 정확도 기준(m)", "이보다 나쁜 위치는 무시 (40)", Prefs.maxAccM(this@SettingsActivity).toInt().toString(), false) { Prefs.setMaxAccM(this@SettingsActivity, it) }
+            button("고급 설정 기본값으로") { Prefs.resetAdvanced(this@SettingsActivity); CameraRepo.invalidate(); recreate() }
         }
         ui.show()
     }
 
-    override fun onResume() {
-        super.onResume()
+    override fun onOptionsItemSelected(item: android.view.MenuItem): Boolean {
+        if (item.itemId == android.R.id.home) { finish(); return true }
+        return super.onOptionsItemSelected(item)
+    }
+
+    override fun onResume() { super.onResume(); DriveState.addListener(listener); refreshStatus() }
+    override fun onPause() { DriveState.removeListener(listener); super.onPause() }
+    override fun onDestroy() { outputs.shutdown(); super.onDestroy() }
+
+    private fun showResult() {
+        val u = Prefs.usualProfile(this); val s = Prefs.slowProfile(this)
+        resultView.text = if (s.ordinal >= u.ordinal) "⚠ 내릴 프로필이 평소 프로필보다 낮아야 합니다. 지금은 신호를 보내지 않습니다."
+            else "휠 아래 ${u.ordinal - s.ordinal}번" + (if (s == Profile.SLOTH && Prefs.extraDownClicks(this) > 0) "(+여분 ${Prefs.extraDownClicks(this)}번)" else "") +
+                "으로 ${s.label}까지 내리고, 지나면 휠 위 ${u.ordinal - s.ordinal}번으로 ${u.label}로 돌아옵니다."
+    }
+
+    private fun refreshStatus() {
+        cmdStatus.text = if (!Prefs.bleOn(this)) "–  커맨더 안 씀 (음성만)"
+            else if (S3xyButton.ready) "✔  커맨더 연결됨 · 버튼 준비" else "✖  ${S3xyButton.status}"
         val missing = AutoStart.missing(this)
-        autoStatus.text = if (missing.isEmpty()) "자동 시작 조건: 모두 충족 ✔"
-            else "자동 시작에 아직 필요한 것: ${missing.joinToString(", ")}"
+        permStatus.text = if (!Prefs.autoStart(this)) "–  자동 시작 꺼짐"
+            else if (Prefs.autoDeviceAddress(this).isEmpty()) "✖  차를 골라야 합니다"
+            else if (missing.isEmpty()) "✔  자동 시작 조건 모두 충족" else "✖  아직 필요: ${missing.joinToString(", ")}"
+        val zones = CameraRepo.cachedZoneCount()
+        zoneStatus.text = if (!Prefs.schoolZoneOn(this)) "" else when (zones) { null -> "보호구역 파일 확인 중"; 0 -> "✖  보호구역 파일 없음 — 메인 메뉴에서 '어린이보호구역 CSV'"; else -> "✔  보호구역 ${zones}곳" }
+    }
+
+    private fun togglePairing() {
+        if (S3xyButton.running && S3xyButton.pairingMode) { S3xyButton.stop(); refreshStatus(); return }
+        if (S3xyButton.running) { Toast.makeText(this, "이미 광고 중", Toast.LENGTH_SHORT).show(); return }
+        val ok = S3xyButton.start(this, { DriveState.log(it) }, Prefs.renameAdapter(this))
+        S3xyButton.pairingMode = ok
+        Toast.makeText(this, if (ok) "ENH_BTN 광고 중 — enhauto 앱에서 Add S3XY Button" else "시작 실패 — 블루투스를 확인하세요", Toast.LENGTH_LONG).show()
+        refreshStatus()
     }
 
     /** 페어링된 블루투스 기기 (주소, 이름). 권한이 없으면 빈 목록. */
@@ -134,7 +180,6 @@ class SettingsActivity : Activity() {
         if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
             Toast.makeText(this, "먼저 위치 권한을 허용하세요", Toast.LENGTH_LONG).show(); return
         }
-        // Android 11+에서는 설정 화면이 열린다. 거기서 '항상 허용'을 고른다.
         requestPermissions(arrayOf(Manifest.permission.ACCESS_BACKGROUND_LOCATION), 2)
     }
 

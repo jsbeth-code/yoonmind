@@ -30,6 +30,12 @@ object DriveState {
     /** 지금 쓰는 엔진 설정(화면에 감속 시작 거리를 보여 주기 위해). */
     var config: EngineConfig? = null
     var outputs: OutputSettings? = null
+    /** 마지막 실제 GPS fix 시각(elapsedRealtime). 0이면 아직 없음. */
+    @Volatile var lastFixAt = 0L
+    @Volatile var lastAccM: Double? = null
+    /** 추측 항법으로 가고 있는 중. */
+    @Volatile var drActive = false
+    @Volatile var zoneCount = 0
     val log = ArrayDeque<String>()
     private val listeners = mutableSetOf<() -> Unit>()
     private val main = Handler(Looper.getMainLooper())
@@ -100,10 +106,12 @@ class Outputs(private val ctx: Context) {
 
     fun down(cam: Camera, distM: Double) {
         val s = settings
-        DriveState.log("▼ 카메라 ${distM.toInt()}m 앞, 제한 ${cam.limitKmh}. 감속 → ${s.slow.label} (${cam.name})")
+        val zone = cam.code == ZoneCsv.CODE
+        DriveState.log(if (zone) "▼ 어린이보호구역 진입. 감속 → ${s.slow.label} (${cam.name})"
+            else "▼ 카메라 ${distM.toInt()}m 앞, 제한 ${cam.limitKmh}. 감속 → ${s.slow.label} (${cam.name})")
         if (s.alerts) {
             tone.startTone(ToneGenerator.TONE_PROP_BEEP2, 300)
-            tts?.speak("과속 카메라, 제한속도 ${cam.limitKmh}. 감속합니다", TextToSpeech.QUEUE_FLUSH, null, "down")
+            tts?.speak(if (zone) "어린이보호구역. 감속합니다" else "과속 카메라, 제한속도 ${cam.limitKmh}. 감속합니다", TextToSpeech.QUEUE_FLUSH, null, "down")
         }
         if (s.ble) S3xyButton.press(S3xyButton.Press.SINGLE, s.downPresses, s.pressGapMs)
     }
@@ -162,6 +170,16 @@ class DriveService : Service(), LocationListener {
     private var loadSeq = 0
     private var lastFixAt = 0L
     private var gpsWarned = false
+    // 추측 항법: 마지막 실제 fix
+    private var lastFix: Fix? = null
+    private var drLat = 0.0
+    private var drLon = 0.0
+    private var drDistM = 0.0
+    private var drOn = false
+    private var drMaxM = 2000.0
+    private val drRunnable = object : Runnable {
+        override fun run() { deadReckonStep(); main.postDelayed(this, 1_000) }
+    }
     private val watchdog = object : Runnable {
         override fun run() { checkGps(); main.postDelayed(this, 5_000) }
     }
@@ -258,13 +276,17 @@ class DriveService : Service(), LocationListener {
         val cfg = Prefs.engine(this).let { c -> c.copy(bleLatencyS = out.bleDownSeconds()) }
         DriveState.config = cfg
         DriveState.outputs = out
+        drOn = Prefs.deadReckoning(this)
+        drMaxM = Prefs.deadReckonMaxM(this).toDouble()
         if (out.ble) S3xyButton.start(this, { DriveState.log(it) }, out.renameAdapter)
         Thread {
             val idx = CameraRepo.load(this)
+            val zones = CameraRepo.loadZones(this)
             main.post {
                 if (seq != loadSeq) return@post
-                val e = SlowdownEngine(idx, cfg)
+                val e = SlowdownEngine(idx, cfg, zones)
                 engine = e
+                DriveState.zoneCount = zones.cameras.size
                 onReady(e)
             }
         }.start()
@@ -287,11 +309,15 @@ class DriveService : Service(), LocationListener {
                 DriveState.log("위치 권한 없음"); stopAll(); stopSelf(); return@loadEngine
             }
             lastFixAt = SystemClock.elapsedRealtime()
+            DriveState.lastFixAt = 0L
             gpsWarned = false
+            lastFix = null; DriveState.drActive = false
             main.postDelayed(watchdog, 5_000)
+            main.removeCallbacks(drRunnable); main.postDelayed(drRunnable, 1_000)
             val s = outputs.settings
             DriveState.log("주행 감시 시작 — 카메라 ${e.cameraCount}개, ${s.describe()}")
             if (e.cameraCount == 0) { DriveState.log("카메라 데이터가 없습니다 — CSV를 불러오세요"); outputs.say("카메라 데이터가 없습니다") }
+            if (e.config.schoolZoneOn && e.zoneCount == 0) DriveState.log("어린이보호구역 감속이 켜져 있지만 보호구역 파일이 없습니다")
             if (s.ble && !S3xyButton.ready) DriveState.log("BLE 켜짐, 커맨더 대기 중 (${S3xyButton.status}) — 커맨더가 붙어야 신호가 나갑니다")
             notify("GPS 대기")
         }
@@ -299,11 +325,44 @@ class DriveService : Service(), LocationListener {
 
     override fun onLocationChanged(loc: Location) {
         lastFixAt = SystemClock.elapsedRealtime()
-        if (gpsWarned) { gpsWarned = false; DriveState.log("GPS 복구") }
+        DriveState.lastFixAt = lastFixAt
+        val acc = if (loc.hasAccuracy()) loc.accuracy.toDouble() else null
+        DriveState.lastAccM = acc
+        if (gpsWarned || DriveState.drActive) { gpsWarned = false; DriveState.drActive = false; DriveState.log("GPS 복구") }
         val speed = if (loc.hasSpeed()) loc.speed.toDouble() else 0.0
         val course = if (loc.hasBearing() && speed >= 3.0) loc.bearing.toDouble() else null
-        val acc = if (loc.hasAccuracy()) loc.accuracy.toDouble() else null
-        handle(Fix(loc.latitude, loc.longitude, speed, course, acc))
+        val fix = Fix(loc.latitude, loc.longitude, speed, course, acc)
+        lastFix = fix
+        handle(fix)
+    }
+
+    /**
+     * 추측 항법: 실제 GPS가 3초 넘게 끊기면 마지막 속도·방향으로 1초마다 위치를 추정해 엔진에 넣는다.
+     * 엔진은 추정 위치로 감속만 하고(놓치지 않기 위해) 통과·복귀는 실제 GPS가 돌아온 뒤에 판단한다.
+     * 최대 거리(기본 2 km)를 넘기면 멈춘다.
+     */
+    private fun deadReckonStep() {
+        if (!drOn || !DriveState.running || DriveState.simulating) return
+        val e = engine ?: return
+        val f = lastFix ?: return
+        val course = f.courseDeg ?: return
+        val silent = SystemClock.elapsedRealtime() - lastFixAt
+        if (silent < 3_000 || f.speedMps < 5.0) return
+        if (!DriveState.drActive) {
+            DriveState.drActive = true
+            drLat = f.lat; drLon = f.lon; drDistM = 0.0
+            // 끊긴 시점까지의 시간만큼 먼저 전진
+            val (la, lo) = Geo.offset(drLat, drLon, course, f.speedMps * silent / 1000.0)
+            drLat = la; drLon = lo; drDistM += f.speedMps * silent / 1000.0
+            val next = e.status.nextDistM?.toInt()
+            DriveState.log("GPS 끊김 — 추측 항법 시작 (${f.speedMps.times(3.6).toInt()}km/h, 최대 ${drMaxM.toInt()}m)")
+            outputs.say(if (next != null) "GPS 끊김. ${next}미터 앞 카메라, 추측으로 감속합니다" else "GPS 끊김, 추측 항법")
+        } else {
+            if (drDistM >= drMaxM) return
+            val (la, lo) = Geo.offset(drLat, drLon, course, f.speedMps)
+            drLat = la; drLon = lo; drDistM += f.speedMps
+        }
+        handle(Fix(drLat, drLon, f.speedMps, course, 5.0, estimated = true))
     }
 
     override fun onProviderEnabled(provider: String) {}
@@ -347,6 +406,7 @@ class DriveService : Service(), LocationListener {
         val lm = getSystemService(LocationManager::class.java)
         lm.removeUpdates(this)
         main.removeCallbacks(watchdog)
+        main.removeCallbacks(drRunnable)
         stopSimulation()
         DriveState.simulating = true
         DriveState.running = true
@@ -398,6 +458,8 @@ class DriveService : Service(), LocationListener {
 
     private fun stopAll() {
         main.removeCallbacks(watchdog)
+        main.removeCallbacks(drRunnable)
+        DriveState.drActive = false
         main.removeCallbacks(autoStopRunnable); autoStopPending = false
         stopSimulation()
         getSystemService(LocationManager::class.java).removeUpdates(this)

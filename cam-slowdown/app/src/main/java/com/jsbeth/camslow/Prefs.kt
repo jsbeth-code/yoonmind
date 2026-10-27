@@ -1,116 +1,177 @@
 package com.jsbeth.camslow
 
 import android.content.Context
+import android.content.SharedPreferences
 import java.io.File
 
-/** FSD v14 속도 프로필. 오른쪽 휠 한 칸 = 한 단계. */
+/** FSD 오른쪽 휠 속도 프로필 4단계. 휠 아래 = 느린 쪽. (한국 FSD 기준: 나무늘보·스탠다드·신속주행·Mad Max) */
 enum class Profile(val label: String) {
-    SLOTH("Sloth(나무늘보)"), CHILL("Chill"), STANDARD("Standard"), HURRY("Hurry"), MAD_MAX("Mad Max");
+    SLOTH("나무늘보"), STANDARD("스탠다드"), HURRY("신속주행"), MAD_MAX("Mad Max");
 
     companion object {
-        fun of(i: Int) = values().getOrElse(i) { HURRY }
+        fun byName(n: String?, default: Profile) = values().firstOrNull { it.name == n } ?: default
         val labels get() = values().map { it.label }
     }
 }
 
-/** 설정 저장소. 기본값은 EngineConfig와 같다. */
+/** 감속 시작 시점 고르기. AUTO/EARLY/LATE는 고급 숫자 세 개를 정해진 값으로 바꾼다. */
+enum class Timing(val label: String, val decel: Double, val reaction: Double, val margin: Double) {
+    AUTO("자동 — 지금 속도와 제한속도로 계산", 0.7, 4.0, 150.0),
+    EARLY("이르게 (자동보다 약 150m 먼저)", 0.5, 5.0, 250.0),
+    LATE("늦게 (자동보다 약 100m 늦게)", 1.0, 3.0, 80.0),
+    FIXED("카메라 N m 앞에서, 속도와 상관없이", 0.7, 4.0, 150.0);
+
+    companion object { fun byName(n: String?) = values().firstOrNull { it.name == n } ?: AUTO }
+}
+
+/** 설정 저장소. 바꾸는 즉시 저장한다. 기본값은 EngineConfig와 같다. */
 object Prefs {
-    private fun sp(ctx: Context) = ctx.getSharedPreferences("camslow", Context.MODE_PRIVATE)
+    private fun sp(ctx: Context): SharedPreferences = ctx.getSharedPreferences("camslow", Context.MODE_PRIVATE)
+    private fun SharedPreferences.f(key: String, d: Double) = getFloat(key, d.toFloat()).toDouble()
+    private fun put(ctx: Context, block: SharedPreferences.Editor.() -> Unit) = sp(ctx).edit().apply(block).apply()
 
-    fun engine(ctx: Context): EngineConfig {
+    // ---- 프로필
+    fun usualProfile(ctx: Context) = profile(ctx, "usualProfile2", "usualProfile", Profile.HURRY)
+    fun slowProfile(ctx: Context) = profile(ctx, "slowProfile2", "slowProfile", Profile.SLOTH)
+    fun setUsualProfile(ctx: Context, p: Profile) = put(ctx) { putString("usualProfile2", p.name) }
+    fun setSlowProfile(ctx: Context, p: Profile) = put(ctx) { putString("slowProfile2", p.name) }
+
+    /** 예전 5단계(Sloth·Chill·Standard·Hurry·Mad Max) 번호로 저장된 값은 4단계로 옮긴다. */
+    private fun profile(ctx: Context, key: String, oldKey: String, default: Profile): Profile {
         val p = sp(ctx)
-        val d = EngineConfig()
-        return d.copy(
-            decelMps2 = p.getFloat("decel", d.decelMps2.toFloat()).toDouble(),
-            reactionS = p.getFloat("reaction", d.reactionS.toFloat()).toDouble(),
-            marginM = p.getFloat("margin", d.marginM.toFloat()).toDouble(),
-            fixedTriggerM = p.getInt("fixedTrigger", d.fixedTriggerM),
-            restoreAfterM = p.getFloat("restoreAfter", d.restoreAfterM.toFloat()).toDouble(),
-            minLimitKmh = p.getInt("minLimit", d.minLimitKmh),
-            skipIfBelowLimit = p.getBoolean("skipBelow", d.skipIfBelowLimit),
-            leftTolM = p.getFloat("leftTol", d.leftTolM.toFloat()).toDouble(),
-            rightTolM = p.getFloat("rightTol", d.rightTolM.toFloat()).toDouble(),
-            includeSignalCams = p.getBoolean("includeSignal", d.includeSignalCams),
-        )
+        p.getString(key, null)?.let { return Profile.byName(it, default) }
+        if (!p.contains(oldKey)) return default
+        return when (p.getInt(oldKey, -1)) {
+            0 -> Profile.SLOTH; 1, 2 -> Profile.STANDARD; 3 -> Profile.HURRY; 4 -> Profile.MAD_MAX; else -> default
+        }
     }
 
-    fun saveEngine(ctx: Context, c: EngineConfig) {
-        sp(ctx).edit()
-            .putFloat("decel", c.decelMps2.toFloat())
-            .putFloat("reaction", c.reactionS.toFloat())
-            .putFloat("margin", c.marginM.toFloat())
-            .putInt("fixedTrigger", c.fixedTriggerM)
-            .putFloat("restoreAfter", c.restoreAfterM.toFloat())
-            .putInt("minLimit", c.minLimitKmh)
-            .putBoolean("skipBelow", c.skipIfBelowLimit)
-            .putFloat("leftTol", c.leftTolM.toFloat())
-            .putFloat("rightTol", c.rightTolM.toFloat())
-            .putBoolean("includeSignal", c.includeSignalCams)
-            .apply()
-    }
-
-    /** 평소 달리는(복귀할) 프로필. */
-    fun usualProfile(ctx: Context) = Profile.of(sp(ctx).getInt("usualProfile", Profile.HURRY.ordinal))
-    /** 카메라 앞에서 내려갈 프로필. */
-    fun slowProfile(ctx: Context) = Profile.of(sp(ctx).getInt("slowProfile", Profile.SLOTH.ordinal))
-    /** 감속 프로필이 Sloth(맨 아래)일 때만 더 보내는 여분 클릭. 바닥에선 추가 클릭이 무시되므로 유실 대비. */
     fun extraDownClicks(ctx: Context) = sp(ctx).getInt("extraDown", 1)
-    /** 카메라 통과 후 자동으로 프로필을 올릴지. 끄면 음성으로만 알리고 운전자가 휠로 직접 올린다. */
+    fun setExtraDownClicks(ctx: Context, v: Int) = put(ctx) { putInt("extraDown", v.coerceIn(0, 4)) }
     fun autoRestore(ctx: Context) = sp(ctx).getBoolean("autoRestore", true)
+    fun setAutoRestore(ctx: Context, v: Boolean) = put(ctx) { putBoolean("autoRestore", v) }
 
-    /** 감속 시 클릭 횟수(휠 아래). */
+    /** 감속 시 클릭 횟수(휠 아래). 내릴 프로필이 맨 아래(나무늘보)면 유실 대비 여분을 더한다(바닥에선 추가 클릭이 무시됨). */
     fun downPresses(ctx: Context): Int {
         val steps = usualProfile(ctx).ordinal - slowProfile(ctx).ordinal
         val extra = if (slowProfile(ctx) == Profile.SLOTH) extraDownClicks(ctx) else 0
         return (steps + extra).coerceAtLeast(0)
     }
-    /** 복귀 시 더블클릭 횟수(휠 위). 정확히 내려간 단수만큼만 올린다(더 보내면 평소보다 빨라진다). */
+    /** 복귀 시 더블클릭 횟수(휠 위). 정확히 내린 단수만큼만(더 보내면 평소보다 빨라진다). */
     fun upPresses(ctx: Context) = (usualProfile(ctx).ordinal - slowProfile(ctx).ordinal).coerceAtLeast(0)
 
-    /** 차 블루투스 연결 시 자동 시작. */
+    // ---- 감속 시작 시점
+    fun timing(ctx: Context) = Timing.byName(sp(ctx).getString("timing", null))
+    fun setTiming(ctx: Context, t: Timing) = put(ctx) {
+        putString("timing", t.name)
+        if (t != Timing.FIXED) { putFloat("decel", t.decel.toFloat()); putFloat("reaction", t.reaction.toFloat()); putFloat("margin", t.margin.toFloat()) }
+    }
+    fun fixedTriggerM(ctx: Context) = sp(ctx).getInt("fixedTriggerM", 400)
+    fun setFixedTriggerM(ctx: Context, v: Int) = put(ctx) { putInt("fixedTriggerM", v.coerceIn(50, 3000)) }
+    fun decel(ctx: Context) = sp(ctx).f("decel", 0.7)
+    fun setDecel(ctx: Context, v: Double) = put(ctx) { putFloat("decel", v.coerceIn(0.2, 3.0).toFloat()) }
+    fun reaction(ctx: Context) = sp(ctx).f("reaction", 4.0)
+    fun setReaction(ctx: Context, v: Double) = put(ctx) { putFloat("reaction", v.coerceIn(0.0, 15.0).toFloat()) }
+    fun margin(ctx: Context) = sp(ctx).f("margin", 150.0)
+    fun setMargin(ctx: Context, v: Double) = put(ctx) { putFloat("margin", v.coerceIn(0.0, 1000.0).toFloat()) }
+    fun restoreAfter(ctx: Context) = sp(ctx).f("restoreAfter", 100.0)
+    fun setRestoreAfter(ctx: Context, v: Double) = put(ctx) { putFloat("restoreAfter", v.coerceIn(0.0, 2000.0).toFloat()) }
+
+    // ---- 카메라 선별
+    fun minLimitKmh(ctx: Context) = sp(ctx).getInt("minLimit", 0)
+    fun setMinLimitKmh(ctx: Context, v: Int) = put(ctx) { putInt("minLimit", v.coerceIn(0, 130)) }
+    fun skipIfBelowLimit(ctx: Context) = sp(ctx).getBoolean("skipBelow", false)
+    fun setSkipIfBelowLimit(ctx: Context, v: Boolean) = put(ctx) { putBoolean("skipBelow", v) }
+    fun includeSignal(ctx: Context) = sp(ctx).getBoolean("includeSignal", true)
+    fun setIncludeSignal(ctx: Context, v: Boolean) = put(ctx) { putBoolean("includeSignal", v) }
+    fun cityLeftTol(ctx: Context) = sp(ctx).f("cityLeft", 8.0)
+    fun setCityLeftTol(ctx: Context, v: Double) = put(ctx) { putFloat("cityLeft", v.coerceIn(3.0, 60.0).toFloat()) }
+    fun cityRightTol(ctx: Context) = sp(ctx).f("cityRight", 40.0)
+    fun setCityRightTol(ctx: Context, v: Double) = put(ctx) { putFloat("cityRight", v.coerceIn(5.0, 150.0).toFloat()) }
+    fun hwyLeftTol(ctx: Context) = sp(ctx).f("hwyLeft", 15.0)
+    fun setHwyLeftTol(ctx: Context, v: Double) = put(ctx) { putFloat("hwyLeft", v.coerceIn(3.0, 60.0).toFloat()) }
+    fun hwyRightTol(ctx: Context) = sp(ctx).f("hwyRight", 60.0)
+    fun setHwyRightTol(ctx: Context, v: Double) = put(ctx) { putFloat("hwyRight", v.coerceIn(5.0, 150.0).toFloat()) }
+    /** 도로공사 구간에 경찰청 제한속도를 못 찾았을 때 쓰는 값. */
+    fun kecLimitKmh(ctx: Context) = sp(ctx).getInt("kecLimit", 100)
+    fun setKecLimitKmh(ctx: Context, v: Int) = put(ctx) { putInt("kecLimit", v.coerceIn(30, 130)) }
+
+    // ---- 어린이보호구역
+    fun schoolZoneOn(ctx: Context) = sp(ctx).getBoolean("zoneOn", false)
+    fun setSchoolZoneOn(ctx: Context, v: Boolean) = put(ctx) { putBoolean("zoneOn", v) }
+    fun schoolZoneRadiusM(ctx: Context) = sp(ctx).getInt("zoneRadius", 300)
+    fun setSchoolZoneRadiusM(ctx: Context, v: Int) = put(ctx) { putInt("zoneRadius", v.coerceIn(50, 1000)) }
+
+    // ---- GPS·추측 항법
+    fun deadReckoning(ctx: Context) = sp(ctx).getBoolean("deadReckon", true)
+    fun setDeadReckoning(ctx: Context, v: Boolean) = put(ctx) { putBoolean("deadReckon", v) }
+    fun deadReckonMaxM(ctx: Context) = sp(ctx).getInt("deadReckonMax", 2000)
+    fun setDeadReckonMaxM(ctx: Context, v: Int) = put(ctx) { putInt("deadReckonMax", v.coerceIn(200, 10_000)) }
+    fun maxAccM(ctx: Context) = sp(ctx).f("maxAcc", 40.0)
+    fun setMaxAccM(ctx: Context, v: Double) = put(ctx) { putFloat("maxAcc", v.coerceIn(10.0, 200.0).toFloat()) }
+
+    // ---- 출력·연결
+    fun alertsOn(ctx: Context) = sp(ctx).getBoolean("alerts", true)
+    fun setAlertsOn(ctx: Context, v: Boolean) = put(ctx) { putBoolean("alerts", v) }
+    fun keepScreenOn(ctx: Context) = sp(ctx).getBoolean("keepScreen", true)
+    fun setKeepScreenOn(ctx: Context, v: Boolean) = put(ctx) { putBoolean("keepScreen", v) }
+    fun bleOn(ctx: Context) = sp(ctx).getBoolean("ble", false)
+    fun setBleOn(ctx: Context, v: Boolean) = put(ctx) { putBoolean("ble", v) }
+    fun pressGapMs(ctx: Context) = sp(ctx).getInt("pressGap", 400).toLong()
+    fun setPressGapMs(ctx: Context, v: Int) = put(ctx) { putInt("pressGap", v.coerceIn(100, 3000)) }
+    fun renameAdapter(ctx: Context) = sp(ctx).getBoolean("renameAdapter", true)
+    fun setRenameAdapter(ctx: Context, v: Boolean) = put(ctx) { putBoolean("renameAdapter", v) }
+
+    // ---- 자동 시작
     fun autoStart(ctx: Context) = sp(ctx).getBoolean("autoStart", false)
-    /** 연결이 끊기면 잠시 뒤 자동 정지. */
+    fun setAutoStart(ctx: Context, v: Boolean) = put(ctx) { putBoolean("autoStart", v) }
     fun autoStop(ctx: Context) = sp(ctx).getBoolean("autoStop", true)
+    fun setAutoStop(ctx: Context, v: Boolean) = put(ctx) { putBoolean("autoStop", v) }
     fun autoDeviceAddress(ctx: Context) = sp(ctx).getString("autoDevice", "") ?: ""
     fun autoDeviceName(ctx: Context) = sp(ctx).getString("autoDeviceName", "") ?: ""
-    fun saveAuto(ctx: Context, on: Boolean, stop: Boolean, address: String, name: String) {
-        sp(ctx).edit().putBoolean("autoStart", on).putBoolean("autoStop", stop)
-            .putString("autoDevice", address).putString("autoDeviceName", name).apply()
+    fun setAutoDevice(ctx: Context, address: String, name: String) = put(ctx) { putString("autoDevice", address); putString("autoDeviceName", name) }
+
+    /** 고급 숫자들을 기본값으로. */
+    fun resetAdvanced(ctx: Context) {
+        val keepFixed = timing(ctx) == Timing.FIXED
+        put(ctx) {
+            for (k in listOf("decel", "reaction", "margin", "restoreAfter", "cityLeft", "cityRight", "hwyLeft", "hwyRight", "maxAcc")) remove(k)
+            for (k in listOf("kecLimit", "extraDown", "pressGap", "deadReckonMax", "zoneRadius")) remove(k)
+            remove("renameAdapter"); remove("deadReckon")
+            if (!keepFixed) putString("timing", Timing.AUTO.name)
+        }
     }
 
-    /** 도로공사 구간단속 데이터엔 제한속도가 없어 이 값을 쓴다. */
-    fun kecLimitKmh(ctx: Context) = sp(ctx).getInt("kecLimit", 100)
-    fun saveKecLimit(ctx: Context, v: Int) = sp(ctx).edit().putInt("kecLimit", v).apply()
-
-    fun alertsOn(ctx: Context) = sp(ctx).getBoolean("alerts", true)
-    fun bleOn(ctx: Context) = sp(ctx).getBoolean("ble", false)
-    /** 버튼 누름 사이 간격(ms). 커맨더가 한 번씩 처리할 시간. */
-    fun pressGapMs(ctx: Context) = sp(ctx).getInt("pressGap", 400).toLong()
-    /** 광고할 때 폰 블루투스 이름을 ENH_BTN으로 바꿀지(실제 버튼 이름. 끄면 되돌린다). */
-    fun renameAdapter(ctx: Context) = sp(ctx).getBoolean("renameAdapter", true)
-
-    fun saveOutputs(
-        ctx: Context, usual: Profile, slow: Profile, extraDown: Int, autoRestore: Boolean,
-        alerts: Boolean, ble: Boolean, pressGapMs: Int, renameAdapter: Boolean,
-    ) {
-        sp(ctx).edit()
-            .putInt("usualProfile", usual.ordinal).putInt("slowProfile", slow.ordinal)
-            .putInt("extraDown", extraDown).putBoolean("autoRestore", autoRestore)
-            .putBoolean("alerts", alerts).putBoolean("ble", ble)
-            .putInt("pressGap", pressGapMs).putBoolean("renameAdapter", renameAdapter)
-            .apply()
+    fun engine(ctx: Context): EngineConfig {
+        val d = EngineConfig()
+        val timing = timing(ctx)
+        return d.copy(
+            decelMps2 = decel(ctx), reactionS = reaction(ctx), marginM = margin(ctx),
+            fixedTriggerM = if (timing == Timing.FIXED) fixedTriggerM(ctx) else 0,
+            restoreAfterM = restoreAfter(ctx),
+            minLimitKmh = minLimitKmh(ctx), skipIfBelowLimit = skipIfBelowLimit(ctx), includeSignalCams = includeSignal(ctx),
+            cityLeftTolM = cityLeftTol(ctx), cityRightTolM = cityRightTol(ctx),
+            hwyLeftTolM = hwyLeftTol(ctx), hwyRightTolM = hwyRightTol(ctx),
+            maxAccM = maxAccM(ctx),
+            schoolZoneOn = schoolZoneOn(ctx), schoolZoneRadiusM = schoolZoneRadiusM(ctx).toDouble(),
+        )
     }
 }
 
-/** 불러온 CSV들을 앱 내부에 UTF-8로 보관한다. 경찰청 전국 데이터 + (선택) 도로공사 구간단속·이정좌표. */
+/** 불러온 CSV들을 앱 내부에 UTF-8로 보관한다. 경찰청 전국 + (선택) 도로공사 구간단속·이정좌표 + (선택) 어린이보호구역. */
 object CameraRepo {
     private fun file(ctx: Context) = File(ctx.filesDir, "cameras.csv")
     private fun kecSectionsFile(ctx: Context) = File(ctx.filesDir, "kec_sections.csv")
     private fun kecPointsFile(ctx: Context) = File(ctx.filesDir, "kec_points.csv")
+    private fun zonesFile(ctx: Context) = File(ctx.filesDir, "zones.csv")
 
     @Volatile private var cached: CameraIndex? = null
+    @Volatile private var cachedZones: CameraIndex? = null
     /** 마지막 로드 때 도로공사 데이터 처리 결과(경고 포함). */
     @Volatile var kecNote: String = ""
+        private set
+    /** 화면 점검표용 요약. 로드 뒤 채워진다. */
+    @Volatile var summaryLine: String = ""
         private set
 
     fun import(ctx: Context, bytes: ByteArray): Int {
@@ -118,7 +179,7 @@ object CameraRepo {
         val list = CameraCsv.parse(text)
         require(list.isNotEmpty()) { "카메라를 하나도 읽지 못했습니다" }
         file(ctx).writeText(text)
-        synchronized(this) { cached = null }
+        invalidate()
         return list.size
     }
 
@@ -128,7 +189,7 @@ object CameraRepo {
         val n = KecCsv.parseSections(text).size
         require(n > 0) { "구간을 하나도 읽지 못했습니다" }
         kecSectionsFile(ctx).writeText(text)
-        synchronized(this) { cached = null }
+        invalidate()
         return "구간단속 ${n}건 저장" + if (kecPointsFile(ctx).exists()) "" else " — 이정 좌표 CSV도 불러와야 적용됩니다"
     }
 
@@ -139,15 +200,26 @@ object CameraRepo {
         val n = routes.values.sumOf { it.size }
         require(n > 0) { "이정 좌표를 하나도 읽지 못했습니다" }
         kecPointsFile(ctx).writeText(text)
-        synchronized(this) { cached = null }
+        invalidate()
         return "이정 좌표 ${n}개(노선 ${routes.keys.count { !it.startsWith("#") }}개) 저장" +
             if (kecSectionsFile(ctx).exists()) "" else " — 구간단속현황 CSV도 불러와야 적용됩니다"
     }
 
-    fun hasKec(ctx: Context) = kecSectionsFile(ctx).exists() && kecPointsFile(ctx).exists()
+    /** 「전국어린이보호구역표준데이터」 CSV. */
+    fun importZones(ctx: Context, bytes: ByteArray): String {
+        val text = CameraCsv.decode(bytes)
+        val list = ZoneCsv.parse(text)
+        require(list.isNotEmpty()) { "보호구역을 하나도 읽지 못했습니다" }
+        zonesFile(ctx).writeText(text)
+        invalidate()
+        return "어린이보호구역 ${list.size}곳 저장" + if (Prefs.schoolZoneOn(ctx)) "" else " — 설정에서 '어린이보호구역 감속'을 켜야 동작합니다"
+    }
 
-    /** 설정(도로공사 제한속도 등)이 바뀌어 다시 만들어야 할 때. */
-    fun invalidate() { synchronized(this) { cached = null } }
+    fun hasKec(ctx: Context) = kecSectionsFile(ctx).exists() && kecPointsFile(ctx).exists()
+    fun hasZones(ctx: Context) = zonesFile(ctx).exists()
+
+    /** 설정이 바뀌어 다시 만들어야 할 때. */
+    fun invalidate() { synchronized(this) { cached = null; cachedZones = null } }
 
     /** 파일 파싱은 수 초 걸릴 수 있다. 메인 스레드에서 부르지 말 것. 동시에 두 번 파싱하지 않도록 잠근다. */
     fun load(ctx: Context): CameraIndex {
@@ -155,22 +227,38 @@ object CameraRepo {
         synchronized(this) {
             cached?.let { return it }
             val f = file(ctx)
-            val police = if (f.exists()) CameraCsv.parse(f.readText()) else emptyList()
-            val all = if (hasKec(ctx)) {
+            var police = if (f.exists()) CameraCsv.parse(f.readText()) else emptyList()
+            var all = police
+            if (hasKec(ctx)) {
                 try {
                     val sections = KecCsv.parseSections(kecSectionsFile(ctx).readText())
                     val routes = KecCsv.parsePoints(kecPointsFile(ctx).readText())
-                    val (kec, warn) = KecCsv.build(sections, routes, Prefs.kecLimitKmh(ctx))
-                    kecNote = "도로공사 구간 ${kec.size / 2}건 적용" +
+                    val (kecRaw, warn) = KecCsv.build(sections, routes, Prefs.kecLimitKmh(ctx))
+                    val kec = KecCsv.inheritLimits(kecRaw, police, Prefs.kecLimitKmh(ctx))
+                    police = KecCsv.assignBearings(police, routes)
+                    val directed = police.count { it.bearingDeg != null }
+                    kecNote = "도로공사 구간 ${kec.size / 2}건 적용, 고속도로 카메라 ${directed}개에 방향 부여" +
                         (if (warn.isNotEmpty()) ", 건너뜀 ${warn.size}건: ${warn.take(3).joinToString("; ")}" else "")
-                    KecCsv.merge(police, kec)
+                    all = KecCsv.merge(police, kec)
                 } catch (e: Exception) {
                     kecNote = "도로공사 데이터 오류: ${e.message}"
-                    police
+                    all = police
                 }
-            } else { kecNote = ""; police }
+            } else kecNote = ""
             val idx = CameraIndex(all)
             cached = idx
+            summaryLine = summaryOf(idx.cameras)
+            return idx
+        }
+    }
+
+    fun loadZones(ctx: Context): CameraIndex {
+        cachedZones?.let { return it }
+        synchronized(this) {
+            cachedZones?.let { return it }
+            val f = zonesFile(ctx)
+            val idx = CameraIndex(if (f.exists()) runCatching { ZoneCsv.parse(f.readText()) }.getOrDefault(emptyList()) else emptyList())
+            cachedZones = idx
             return idx
         }
     }
@@ -179,16 +267,25 @@ object CameraRepo {
 
     /** 이미 읽어 둔 게 있으면 그 개수, 아니면 null(메인 스레드에서 파싱을 막기 위해 기다리지 않는다). */
     fun cachedCount(): Int? = cached?.cameras?.size
+    fun cachedZoneCount(): Int? = cachedZones?.cameras?.size
 
-    /** 요약: 전체 / 구간 시점 / 신호 전용 / 도로공사. */
+    private fun summaryOf(cams: List<Camera>): String {
+        if (cams.isEmpty()) return "카메라 데이터 없음"
+        val kec = cams.count { it.fromKec && it.kind == CamKind.SECTION_START }
+        return "카메라 ${"%,d".format(cams.size)}개" + (if (kec > 0) " · 도로공사 구간 $kec" else "")
+    }
+
+    /** 요약: 전체 / 구간 시점 / 신호 전용 / 도로공사 / 보호구역. */
     fun summary(ctx: Context): String {
         val cams = load(ctx).cameras
-        if (cams.isEmpty()) return "카메라 데이터 없음 — CSV를 불러오세요"
+        val zones = loadZones(ctx).cameras.size
+        if (cams.isEmpty()) return "카메라 데이터 없음 — 메뉴에서 경찰청 전국 CSV를 불러오세요"
         val sec = cams.count { it.kind == CamKind.SECTION_START }
         val sig = cams.count { it.signalOnly }
         val kec = cams.count { it.fromKec && it.kind == CamKind.SECTION_START }
         return "카메라 ${cams.size}개 로드됨 (구간단속 시점 ${sec}, 신호 표시 ${sig}" +
             (if (kec > 0) ", 도로공사 방향 있는 구간 $kec" else "") + ")" +
+            (if (zones > 0) "\n어린이보호구역 ${zones}곳" else "") +
             (if (kecNote.isNotEmpty()) "\n$kecNote" else "")
     }
 }

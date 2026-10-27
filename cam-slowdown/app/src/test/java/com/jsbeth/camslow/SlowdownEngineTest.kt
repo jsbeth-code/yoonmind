@@ -81,13 +81,76 @@ class SlowdownEngineTest {
     }
 
     @Test fun wideRoadCameraOnLeft_noReleaseBeforeCamera() {
-        // 넓은 도로: 카메라 좌표가 왼쪽 15~18m(중앙분리대 쪽 + GPS 오차). 통과 전에 "경로 이탈" 복귀가 나가면 안 된다.
-        for ((kmh, cross) in listOf(50.0 to -15.0, 60.0 to -18.0, 110.0 to -18.0)) {
-            val ev = driveNorth(listOf(cam(cross, 3000.0, limit = 60)), kmh, 0.0, 5000.0)
+        // 넓은 도로: 카메라 좌표가 왼쪽(중앙분리대 쪽 + GPS 오차). 통과 전에 "경로 이탈" 복귀가 나가면 안 된다.
+        // 도심(제한 60)은 왼쪽 8m 기준, 고속도로(제한 100)는 15m 기준이라 허용 범위 안의 값으로 시험한다.
+        for ((kmh, cross, limit) in listOf(Triple(50.0, -10.0, 60), Triple(60.0, -12.0, 60), Triple(110.0, -18.0, 100))) {
+            val ev = driveNorth(listOf(cam(cross, 3000.0, limit = limit)), kmh, 0.0, 5000.0)
             assertEquals("$kmh/$cross 이벤트 수", 2, ev.size)
             val un = upAt(ev)
             assertTrue("$kmh/$cross 복귀 위치 $un", un - 3000.0 in 90.0..170.0)
         }
+    }
+
+    @Test fun cityTolerance_isNarrowerThanHighway() {
+        // 왼쪽 18m 카메라: 도심(제한 60, 왼쪽 8m+거리의 3%)에선 반대 차로로 보고 무시, 고속도로(제한 100, 15m+3%)에선 잡는다
+        assertEquals(0, driveNorth(listOf(cam(-18.0, 3000.0, limit = 60)), 60.0, 0.0, 5000.0).size)
+        assertEquals(2, driveNorth(listOf(cam(-18.0, 3000.0, limit = 100)), 100.0, 0.0, 5000.0).size)
+    }
+
+    @Test fun directedCamera_wideSymmetricTolerance() {
+        // 방향을 아는 카메라는 왼쪽 30m에 있어도(반대 차로가 아니라고 확인된 셈) 잡고, 반대 방향이면 무시
+        val mine = cam(-30.0, 3000.0, limit = 100).copy(bearingDeg = 0.0)
+        assertEquals(2, driveNorth(listOf(mine), 100.0, 0.0, 5000.0).size)
+        val opposite = cam(8.0, 3000.0, limit = 100).copy(bearingDeg = 180.0)
+        assertEquals(0, driveNorth(listOf(opposite), 100.0, 0.0, 5000.0).size)
+    }
+
+    @Test fun deadReckoning_slowsButNeverRestores() {
+        // GPS가 2000m에서 끊기고 추측 위치로 계속 감 → 3000m 카메라에 감속은 하고, 통과해도 복귀는 안 함. GPS가 돌아오면 복귀.
+        val e = SlowdownEngine(CameraIndex(listOf(cam(8.0, 3000.0, limit = 100))))
+        val v = 100 / 3.6
+        val ev = ArrayList<Pair<EngineEvent, Double>>()
+        var n = 0.0
+        while (n < 2000) { val (la, lo) = at(0.0, n); e.update(Fix(la, lo, v, 0.0)).forEach { ev += it to n }; n += v }
+        while (n < 4000) { val (la, lo) = at(0.0, n); e.update(Fix(la, lo, v, 0.0, 5.0, estimated = true)).forEach { ev += it to n }; n += v }
+        assertEquals(1, ev.size)
+        assertTrue(ev[0].first is EngineEvent.Down); assertTrue(3000.0 - ev[0].second in 200.0..600.0)
+        assertTrue(e.isSlowed)
+        // 실제 GPS 복귀: 카메라를 300m 넘게 지난 위치 → 경로 이탈 규칙으로 5 fix 뒤 복귀
+        repeat(6) { val (la, lo) = at(0.0, n); e.update(Fix(la, lo, v, 0.0)).forEach { ev += it to n }; n += v }
+        assertEquals(2, ev.size); assertTrue(ev[1].first is EngineEvent.Up)
+    }
+
+    @Test fun schoolZone_enterAndLeave() {
+        val zone = Camera(at(0.0, 3000.0).first, at(0.0, 3000.0).second, 30, CamKind.SPOT, 0, "OO초등학교", ZoneCsv.CODE)
+        val e = SlowdownEngine(CameraIndex(emptyList()), EngineConfig(schoolZoneOn = true, schoolZoneRadiusM = 300.0), CameraIndex(listOf(zone)))
+        val v = 40 / 3.6
+        val ev = ArrayList<Pair<EngineEvent, Double>>()
+        var n = 0.0
+        while (n <= 5000) { val (la, lo) = at(0.0, n); e.update(Fix(la, lo, v, 0.0)).forEach { ev += it to n }; n += v }
+        assertEquals(2, ev.size)
+        val (down, dn) = ev[0]; assertTrue(down is EngineEvent.Down); assertEquals(ZoneCsv.CODE, (down as EngineEvent.Down).camera.code)
+        assertTrue("진입 $dn", 3000.0 - dn in 280.0..310.0)
+        val (up, un) = ev[1]; assertTrue(up is EngineEvent.Up); assertEquals("보호구역 벗어남", (up as EngineEvent.Up).reason)
+        assertTrue("이탈 $un", un - 3000.0 in 390.0..420.0)
+        // 꺼져 있으면 아무 일 없음
+        assertEquals(0, SlowdownEngine(CameraIndex(emptyList()), EngineConfig(schoolZoneOn = false), CameraIndex(listOf(zone))).let { e2 ->
+            var m = 0.0; var c = 0
+            while (m <= 5000) { val (la, lo) = at(0.0, m); c += e2.update(Fix(la, lo, v, 0.0)).size; m += v }; c
+        })
+    }
+
+    @Test fun schoolZoneAndCamera_singleDownUp() {
+        // 보호구역 안에 카메라가 있을 때: 진입 때 한 번 내리고, 카메라 통과와 구역 이탈 중 늦은 쪽에서 한 번 올린다
+        val zone = Camera(at(0.0, 3000.0).first, at(0.0, 3000.0).second, 30, CamKind.SPOT, 0, "OO초등학교", ZoneCsv.CODE)
+        val e = SlowdownEngine(CameraIndex(listOf(cam(5.0, 3100.0, limit = 30))), EngineConfig(schoolZoneOn = true, schoolZoneRadiusM = 300.0), CameraIndex(listOf(zone)))
+        val v = 40 / 3.6
+        val ev = ArrayList<Pair<EngineEvent, Double>>()
+        var n = 0.0
+        while (n <= 5000) { val (la, lo) = at(0.0, n); e.update(Fix(la, lo, v, 0.0)).forEach { ev += it to n }; n += v }
+        assertEquals("이벤트 ${ev.map { it.first::class.simpleName + "@" + it.second.toInt() }}", 2, ev.size)
+        assertTrue(ev[0].first is EngineEvent.Down); assertTrue(ev[1].first is EngineEvent.Up)
+        assertTrue(ev[1].second - 3000.0 in 390.0..420.0)
     }
 
     @Test fun cameraBehind_ignored() {
@@ -235,6 +298,26 @@ class SlowdownEngineTest {
         assertEquals(0, byName.getValue("안성로 안성초등학교 앞").sectionLenM)
     }
 
+    @Test fun decode_detectsDamagedUtf8Copy() {
+        val cp949 = (header + "A1,경기,경부고속도로,서울방향,1,100,,,37.1,127.1\n").toByteArray(charset("MS949"))
+        assertEquals(1, CameraCsv.parse(CameraCsv.decode(cp949)).size)                 // CP949 원본: 정상
+        val damaged = String(cp949, Charsets.UTF_8).toByteArray(Charsets.UTF_8)         // UTF-8로 잘못 읽어 다시 저장한 사본
+        val err = runCatching { CameraCsv.decode(damaged) }.exceptionOrNull()
+        assertTrue(err is IllegalArgumentException); assertTrue(err!!.message!!.contains("깨졌습니다"))
+        val utf8 = (header + "A1,경기,경부고속도로,서울방향,1,100,,,37.1,127.1\n").toByteArray(Charsets.UTF_8)
+        assertEquals(1, CameraCsv.parse(CameraCsv.decode(utf8)).size)                  // 정상 UTF-8
+    }
+
+    @Test fun zoneCsv_parse() {
+        val csv = "시설종류,대상시설명,소재지도로명주소,위도,경도,관리기관명\n" +
+            "초등학교,서울OO초등학교,서울 어딘가,37.55,126.98,서울시\n" +
+            "어린이집,OO어린이집,경기 어딘가,37.3,127.1,성남시\n" +
+            "유치원,좌표없음,,,,\n"
+        val z = ZoneCsv.parse(csv)
+        assertEquals(2, z.size)
+        assertEquals("서울OO초등학교 초등학교", z[0].name); assertEquals(ZoneCsv.CODE, z[0].code); assertEquals(30, z[0].limitKmh)
+    }
+
     @Test fun csvParse_lengthUnitsAndClamp() {
         assertEquals(7500, CameraCsv.lenToMeters(7.5))
         assertEquals(300, CameraCsv.lenToMeters(0.3))
@@ -340,6 +423,32 @@ class KecCsvTest {
         assertEquals(1 + kec.size, merged.size)
         assertTrue(merged.any { it.name == "경찰청 일반 카메라" })
         assertFalse(merged.any { it.name.startsWith("경찰청 시점") })
+    }
+
+    @Test fun assignBearings_bySideOfCenterline() {
+        val routes = KecCsv.parsePoints(pointsCsv())   // 북쪽으로 뻗은 중심선, 이정 증가 = 북진
+        val right = Camera(at(10.0, 7000.0).first, at(10.0, 7000.0).second, 100, CamKind.SPOT, 0, "오른쪽 10m")
+        val left = Camera(at(-12.0, 7000.0).first, at(-12.0, 7000.0).second, 100, CamKind.SPOT, 0, "왼쪽 12m")
+        val onLine = Camera(at(1.0, 7000.0).first, at(1.0, 7000.0).second, 100, CamKind.SPOT, 0, "중심선 위")
+        val far = Camera(at(200.0, 7000.0).first, at(200.0, 7000.0).second, 100, CamKind.SPOT, 0, "200m 밖")
+        val city = Camera(at(10.0, 7000.0).first, at(10.0, 7000.0).second, 50, CamKind.SPOT, 0, "제한 50")
+        val out = KecCsv.assignBearings(listOf(right, left, onLine, far, city), routes)
+        assertEquals(0.0, out[0].bearingDeg!!, 1.0)     // 오른쪽 = 북진용
+        assertEquals(180.0, out[1].bearingDeg!!, 1.0)   // 왼쪽 = 남진용
+        assertEquals(null, out[2].bearingDeg)
+        assertEquals(null, out[3].bearingDeg)
+        assertEquals(null, out[4].bearingDeg)
+    }
+
+    @Test fun inheritLimits_fromNearbyPoliceSection() {
+        val (kec, _) = KecCsv.build(KecCsv.parseSections(sectionsCsv), KecCsv.parsePoints(pointsCsv()), 100)
+        val police = listOf(
+            Camera(at(10.0, 5200.0).first, at(10.0, 5200.0).second, 110, CamKind.SECTION_START, 7000, "경찰청 시점 200m 옆"),
+            Camera(at(10.0, 5000.0).first, at(10.0, 5000.0).second, 80, CamKind.SPOT, 0, "일반 카메라(무시)"),
+        )
+        val out = KecCsv.inheritLimits(kec, police, 100)
+        assertEquals(110, out[0].limitKmh)     // 북진 시점(5km)은 경찰청 시점에서 110
+        assertEquals(100, out[1].limitKmh)     // 북진 종점(12km)은 근처에 없어 기본값
     }
 
     @Test fun angleDiff() {

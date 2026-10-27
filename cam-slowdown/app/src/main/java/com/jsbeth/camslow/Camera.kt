@@ -46,11 +46,18 @@ object CameraCsv {
     const val PARTNER_RADIUS_M = 25_000.0
 
     fun decode(bytes: ByteArray): String {
-        val utf8 = String(bytes, Charsets.UTF_8)
-        // UTF-8로 깨지면(대체문자 다수) CP949로 다시 읽는다
-        val broken = utf8.count { it == '�' }
-        val text = if (broken > 5) String(bytes, cp949()) else utf8
-        return text.removePrefix("﻿")
+        val strict = Charsets.UTF_8.newDecoder()
+            .onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
+            .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT)
+        val validUtf8 = runCatching { strict.decode(java.nio.ByteBuffer.wrap(bytes)).toString() }.getOrNull()
+        val text = if (validUtf8 != null) {
+            // 정상 UTF-8인데 대체문자(U+FFFD)가 많으면, CP949 원본을 UTF-8로 잘못 읽어 다시 저장한 사본이다. 복구 불가.
+            require(validUtf8.count { it == '\uFFFD' } <= 5) {
+                "파일이 옮기는 과정에서 깨졌습니다(한글이 깨진 채 UTF-8로 저장됨). 포털에서 받은 원본을 그대로 넣거나, UTF-8로 제대로 변환한 파일을 쓰세요"
+            }
+            validUtf8
+        } else String(bytes, cp949()) // UTF-8이 아니면 CP949(EUC-KR) 파일
+        return text.removePrefix("\uFEFF")
     }
 
     /** JVM은 MS949, 안드로이드(ICU)는 x-windows-949로 부른다. 둘 다 없으면 EUC-KR. */
@@ -324,6 +331,77 @@ object KecCsv {
         return cams to warn
     }
 
+    private class Seg(val lat: Double, val lon: Double, val bearing: Double, val lenM: Double)
+
+    /** 중심선을 100 m 안팎 조각으로 나눠 격자에 넣는다. 노선번호 키가 있으면 그것만 써서 이름 키와 중복을 피한다. */
+    private fun segments(routes: Map<String, List<Point>>): Map<Long, MutableList<Seg>> {
+        val keys = routes.keys.filter { it.startsWith("#") }.ifEmpty { routes.keys.toList() }
+        val grid = HashMap<Long, MutableList<Seg>>()
+        for (k in keys) {
+            val pts = routes[k] ?: continue
+            for (i in 0 until pts.size - 1) {
+                val a = pts[i]; val b = pts[i + 1]
+                if (b.km - a.km > 1.5) continue // 이정이 크게 건너뛰면 다른 구간
+                val len = Geo.distance(a.lat, a.lon, b.lat, b.lon)
+                if (len < 1.0) continue
+                val seg = Seg(a.lat, a.lon, Geo.bearing(a.lat, a.lon, b.lat, b.lon), len)
+                grid.getOrPut(cellKey(a.lat, a.lon)) { ArrayList() }.add(seg)
+            }
+        }
+        return grid
+    }
+
+    private fun cellKey(lat: Double, lon: Double): Long {
+        val a = kotlin.math.floor(lat / 0.01).toLong(); val b = kotlin.math.floor(lon / 0.01).toLong()
+        return (a shl 32) or (b and 0xffffffffL)
+    }
+
+    /** 가장 가까운 중심선 조각까지의 (수직 거리, 중심선 진행 방향 기준 옆 위치: 오른쪽 +, 조각 방위각). */
+    private fun nearestSeg(grid: Map<Long, MutableList<Seg>>, lat: Double, lon: Double): Triple<Double, Double, Double>? {
+        var best: Triple<Double, Double, Double>? = null
+        val a0 = kotlin.math.floor(lat / 0.01).toLong(); val b0 = kotlin.math.floor(lon / 0.01).toLong()
+        for (da in -1L..1L) for (db in -1L..1L) {
+            val list = grid[((a0 + da) shl 32) or ((b0 + db) and 0xffffffffL)] ?: continue
+            for (s in list) {
+                val (along, cross) = Geo.alongCross(s.lat, s.lon, s.bearing, lat, lon)
+                val t = along.coerceIn(0.0, s.lenM)
+                val dist = kotlin.math.sqrt((along - t) * (along - t) + cross * cross)
+                val b = best
+                if (b == null || dist < b.first) best = Triple(dist, cross, s.bearing)
+            }
+        }
+        return best
+    }
+
+    /**
+     * 경찰청 카메라 중 고속도로 중심선 60 m 안에 있는 것에 주행 방향을 붙인다.
+     * 우측통행이므로 중심선(이정 증가 방향) 기준 오른쪽(4 m 이상)에 있으면 그 방향, 왼쪽이면 반대 방향.
+     * 중심선 바로 위(±4 m)는 어느 쪽인지 몰라 그대로 둔다.
+     */
+    fun assignBearings(police: List<Camera>, routes: Map<String, List<Point>>, minLimitKmh: Int = 80): List<Camera> {
+        if (routes.isEmpty()) return police
+        val grid = segments(routes)
+        return police.map { c ->
+            if (c.bearingDeg != null || c.limitKmh < minLimitKmh) return@map c
+            val near = nearestSeg(grid, c.lat, c.lon) ?: return@map c
+            val (dist, cross, bearing) = near
+            when {
+                dist > 60.0 || abs(cross) < 4.0 -> c
+                cross > 0 -> c.copy(bearingDeg = bearing)
+                else -> c.copy(bearingDeg = (bearing + 180.0) % 360.0)
+            }
+        }
+    }
+
+    /** 도로공사 구간엔 제한속도가 없다. 1.5 km 안의 경찰청 구간 시점·종점 카메라에서 가져오고, 없으면 fallback. */
+    fun inheritLimits(kec: List<Camera>, police: List<Camera>, fallback: Int): List<Camera> {
+        val sections = CameraIndex(police.filter { it.kind != CamKind.SPOT })
+        return kec.map { c ->
+            val near = sections.near(c.lat, c.lon, 1500.0).minByOrNull { Geo.distance(c.lat, c.lon, it.lat, it.lon) }
+            c.copy(limitKmh = near?.limitKmh ?: fallback)
+        }
+    }
+
     /**
      * 경찰청 데이터와 합친다. 도로공사 시점·종점 1.5 km 안에 있는 경찰청 구간 시점·종점은 뺀다
      * (같은 구간을 방향 없이 중복 등록하는 걸 막는다). 일반 카메라는 그대로 둔다.
@@ -332,5 +410,38 @@ object KecCsv {
         if (kec.isEmpty()) return police
         val idx = CameraIndex(kec)
         return police.filter { c -> c.kind == CamKind.SPOT || idx.near(c.lat, c.lon, 1500.0).isEmpty() } + kec
+    }
+}
+
+
+/**
+ * 「전국어린이보호구역표준데이터」 CSV. 시설(학교·어린이집 등)의 위도·경도만 쓴다. 구역 경계는 없어 반경으로 본다.
+ * 각 행을 code "ZONE"인 Camera로 만든다(제한 30, 이름 = 시설명).
+ */
+object ZoneCsv {
+    const val CODE = "ZONE"
+
+    fun parse(text: String): List<Camera> {
+        val rows = CameraCsv.splitCsv(text)
+        if (rows.isEmpty()) return emptyList()
+        val header = rows[0].map { it.trim() }
+        fun col(vararg names: String): Int =
+            names.firstNotNullOfOrNull { n -> header.indexOfFirst { it == n }.takeIf { it >= 0 } }
+                ?: names.firstNotNullOfOrNull { n -> header.indexOfFirst { it.contains(n) }.takeIf { it >= 0 } }
+                ?: -1
+        val iLat = col("위도"); val iLon = col("경도")
+        require(iLat >= 0 && iLon >= 0) { "보호구역 파일의 열(위도/경도)을 찾지 못했습니다. 헤더: ${header.take(10)}" }
+        val iName = col("대상시설명", "시설명", "보호구역명")
+        val iType = col("시설종류", "시설유형")
+        val out = ArrayList<Camera>()
+        for (r in rows.drop(1)) {
+            fun get(i: Int) = if (i in r.indices) r[i].trim() else ""
+            val lat = get(iLat).toDoubleOrNull() ?: continue
+            val lon = get(iLon).toDoubleOrNull() ?: continue
+            if (lat !in 33.0..39.0 || lon !in 124.0..132.0) continue
+            val name = listOf(get(iName), get(iType)).filter { it.isNotEmpty() }.joinToString(" ")
+            out += Camera(lat, lon, 30, CamKind.SPOT, 0, name.ifEmpty { "어린이보호구역" }, CODE)
+        }
+        return out
     }
 }
