@@ -244,3 +244,107 @@ class SlowdownEngineTest {
         assertEquals(0, CameraCsv.lenToMeters(99999.0))
     }
 }
+
+class KecCsvTest {
+    private val lat0 = 37.0
+    private val lon0 = 127.0
+    private val mPerDegLat = 111_195.0
+    private val mPerDegLon = 111_195.0 * Math.cos(Math.toRadians(lat0))
+    private fun at(east: Double, north: Double) = Pair(lat0 + north / mPerDegLat, lon0 + east / mPerDegLon)
+
+    /** 북쪽으로 곧게 뻗은 가상 노선: 이정 0~20 km, 1 km 간격. X=위도, Y=경도(도로공사 샘플 그대로). */
+    private fun pointsCsv(): String = buildString {
+        append("노선번호,도로명,이정,X좌표값,Y좌표값,GRS80X좌표값,GRS80Y좌표값\n")
+        for (km in 0..20) { val (la, lo) = at(0.0, km * 1000.0); append("0010,경부고속도로,$km.0,$la,$lo,0,0\n") }
+    }
+
+    private val sectionsCsv = "노선,방향,시점,시점인근시설물,종점,종점인근시설물,연장\n" +
+        "경부선,서울방향,5.0,A휴게소,12.0,B IC,7.0\n" +     // 북진(이정 증가)
+        "경부선,부산방향,12.0,B IC,5.0,A휴게소,7km\n" +     // 남진(이정 감소), 연장에 단위
+        "없는선,서울방향,1.0,,3.0,,2\n"                     // 노선 못 찾음
+
+    @Test fun routeKeyNormalizes() {
+        assertEquals("경부", KecCsv.routeKey("경부선"))
+        assertEquals("경부", KecCsv.routeKey("경부고속도로"))
+        assertEquals("경부", KecCsv.routeKey("경부 고속도로"))
+        assertEquals("남해제2지", KecCsv.routeKey("남해고속도로제2지선"))
+        assertEquals("남해제2지", KecCsv.routeKey("남해제2지선"))
+    }
+
+    @Test fun parsePoints_latLonEitherOrder() {
+        val routes = KecCsv.parsePoints(pointsCsv())
+        assertEquals(21, routes.getValue("경부").size)
+        assertEquals(21, routes.getValue("#10").size)
+        // X/Y가 바뀐 파일도 읽는다
+        val swapped = pointsCsv().lines().mapIndexed { i, l ->
+            if (i == 0 || l.isBlank()) l else l.split(",").let { f -> listOf(f[0], f[1], f[2], f[4], f[3], f[5], f[6]).joinToString(",") }
+        }.joinToString("\n")
+        val r2 = KecCsv.parsePoints(swapped)
+        assertEquals(routes.getValue("경부")[3].lat, r2.getValue("경부")[3].lat, 1e-9)
+    }
+
+    @Test fun parseSections_columnsAndUnits() {
+        val secs = KecCsv.parseSections(sectionsCsv)
+        assertEquals(3, secs.size)
+        assertEquals(5.0, secs[0].startKm, 1e-9); assertEquals(12.0, secs[0].endKm, 1e-9)
+        assertEquals(7000, secs[0].lengthM); assertEquals(7000, secs[1].lengthM)
+        assertEquals("A휴게소", secs[0].startName); assertEquals("B IC", secs[0].endName)
+    }
+
+    @Test fun build_directionalCamerasOnOwnCarriageway() {
+        val (cams, warn) = KecCsv.build(KecCsv.parseSections(sectionsCsv), KecCsv.parsePoints(pointsCsv()), 100)
+        assertEquals(1, warn.size); assertTrue(warn[0].contains("없는선"))
+        assertEquals(4, cams.size)
+        val nStart = cams[0]; val nEnd = cams[1]; val sStart = cams[2]; val sEnd = cams[3]
+        assertEquals(CamKind.SECTION_START, nStart.kind); assertEquals(CamKind.SECTION_END, nEnd.kind)
+        assertEquals(0.0, nStart.bearingDeg!!, 1.0); assertEquals(180.0, sStart.bearingDeg!!, 1.0)
+        // 북진 시점: 5 km 지점, 진행 방향 오른쪽(동쪽) 8 m
+        val (e, n) = Geo.toLocal(lat0, lon0, nStart.lat, nStart.lon)
+        assertEquals(5000.0, n, 2.0); assertEquals(8.0, e, 0.5)
+        val (e2, n2) = Geo.toLocal(lat0, lon0, sEnd.lat, sEnd.lon)
+        assertEquals(5000.0, n2, 2.0); assertEquals(-8.0, e2, 0.5)   // 남진 종점은 서쪽
+        assertEquals(7000, nStart.sectionLenM); assertEquals(100, nStart.limitKmh)
+        assertTrue(nStart.fromKec); assertTrue(nEnd.name.contains("종점"))
+    }
+
+    @Test fun engine_usesOnlyMatchingDirection() {
+        val (cams, _) = KecCsv.build(KecCsv.parseSections(sectionsCsv), KecCsv.parsePoints(pointsCsv()), 100)
+        val e = SlowdownEngine(CameraIndex(cams))
+        val v = 100 / 3.6
+        val ev = ArrayList<Pair<EngineEvent, Double>>()
+        var n = 0.0
+        while (n <= 15_000) { val (la, lo) = at(0.0, n); e.update(Fix(la, lo, v, 0.0)).forEach { ev += it to n }; n += v }
+        // 북진: 남진 구간의 시점(12 km, 방위 180)과 종점(5 km)은 무시. 내 구간 5 km에서 내리고 12 km 종점 지나 복귀.
+        assertEquals(2, ev.size)
+        assertTrue(ev[0].first is EngineEvent.Down); assertTrue(5000.0 - ev[0].second in 200.0..700.0)
+        assertTrue(ev[1].first is EngineEvent.Up); assertTrue("복귀 ${ev[1].second}", ev[1].second - 12_000.0 in 90.0..170.0)
+        // 남진: 반대로
+        val e2 = SlowdownEngine(CameraIndex(cams))
+        val ev2 = ArrayList<Pair<EngineEvent, Double>>()
+        n = 15_000.0
+        while (n >= 0) { val (la, lo) = at(0.0, n); e2.update(Fix(la, lo, v, 180.0)).forEach { ev2 += it to n }; n -= v }
+        assertEquals(2, ev2.size)
+        assertTrue(ev2[0].second - 12_000.0 in 200.0..700.0)
+        assertTrue("남진 복귀 ${ev2[1].second}", 5000.0 - ev2[1].second in 90.0..170.0)
+    }
+
+    @Test fun merge_dropsPoliceSectionsNearKec() {
+        val (kec, _) = KecCsv.build(KecCsv.parseSections(sectionsCsv), KecCsv.parsePoints(pointsCsv()), 100)
+        val (la, lo) = at(10.0, 5050.0)
+        val (la2, lo2) = at(10.0, 8000.0)
+        val police = listOf(
+            Camera(la, lo, 100, CamKind.SECTION_START, 7000, "경찰청 시점(도로공사 시점 50m 옆)"),
+            Camera(la2, lo2, 100, CamKind.SPOT, 0, "경찰청 일반 카메라"),
+        )
+        val merged = KecCsv.merge(police, kec)
+        assertEquals(1 + kec.size, merged.size)
+        assertTrue(merged.any { it.name == "경찰청 일반 카메라" })
+        assertFalse(merged.any { it.name.startsWith("경찰청 시점") })
+    }
+
+    @Test fun angleDiff() {
+        assertEquals(20.0, Geo.angleDiff(350.0, 10.0), 1e-9)
+        assertEquals(180.0, Geo.angleDiff(0.0, 180.0), 1e-9)
+        assertEquals(90.0, Geo.angleDiff(45.0, 315.0), 1e-9)
+    }
+}

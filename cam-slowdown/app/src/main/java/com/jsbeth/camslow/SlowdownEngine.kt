@@ -52,6 +52,8 @@ data class EngineConfig(
     val includeSignalCams: Boolean = true,
     /** 구간 시점 통과 후 이 거리(m) 안에서 보이는 종점은 반대 방향 구간의 종점(시점과 같은 자리)으로 보고 무시. */
     val minSectionM: Double = 500.0,
+    /** 방향을 아는 카메라(도로공사)는 내 진행 방향과 이 각도(도) 넘게 다르면 무시. */
+    val maxHeadingDiffDeg: Double = 60.0,
     val lookaheadM: Double = 2_000.0,
 )
 
@@ -130,6 +132,7 @@ class SlowdownEngine(private val index: CameraIndex, var config: EngineConfig = 
 
         val rel = index.near(fix.lat, fix.lon, config.lookaheadM)
             .filter { it.limitKmh >= config.minLimitKmh && (config.includeSignalCams || !it.signalOnly) }
+            .filter { c -> c.bearingDeg?.let { Geo.angleDiff(course, it) <= config.maxHeadingDiffDeg } ?: true }
             .map { c -> Geo.alongCross(fix.lat, fix.lon, course, c.lat, c.lon).let { (a, x) -> Rel(c, a, x) } }
         val ahead = rel.filter { it.along > 0 && isAhead(it.along, it.cross) }.sortedBy { it.along }
         val next = ahead.firstOrNull { it.cam.kind != CamKind.SECTION_END }

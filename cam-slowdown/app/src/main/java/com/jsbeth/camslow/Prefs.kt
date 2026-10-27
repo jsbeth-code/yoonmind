@@ -67,6 +67,21 @@ object Prefs {
     /** 복귀 시 더블클릭 횟수(휠 위). 정확히 내려간 단수만큼만 올린다(더 보내면 평소보다 빨라진다). */
     fun upPresses(ctx: Context) = (usualProfile(ctx).ordinal - slowProfile(ctx).ordinal).coerceAtLeast(0)
 
+    /** 차 블루투스 연결 시 자동 시작. */
+    fun autoStart(ctx: Context) = sp(ctx).getBoolean("autoStart", false)
+    /** 연결이 끊기면 잠시 뒤 자동 정지. */
+    fun autoStop(ctx: Context) = sp(ctx).getBoolean("autoStop", true)
+    fun autoDeviceAddress(ctx: Context) = sp(ctx).getString("autoDevice", "") ?: ""
+    fun autoDeviceName(ctx: Context) = sp(ctx).getString("autoDeviceName", "") ?: ""
+    fun saveAuto(ctx: Context, on: Boolean, stop: Boolean, address: String, name: String) {
+        sp(ctx).edit().putBoolean("autoStart", on).putBoolean("autoStop", stop)
+            .putString("autoDevice", address).putString("autoDeviceName", name).apply()
+    }
+
+    /** 도로공사 구간단속 데이터엔 제한속도가 없어 이 값을 쓴다. */
+    fun kecLimitKmh(ctx: Context) = sp(ctx).getInt("kecLimit", 100)
+    fun saveKecLimit(ctx: Context, v: Int) = sp(ctx).edit().putInt("kecLimit", v).apply()
+
     fun alertsOn(ctx: Context) = sp(ctx).getBoolean("alerts", true)
     fun bleOn(ctx: Context) = sp(ctx).getBoolean("ble", false)
     fun bleProfile(ctx: Context) = sp(ctx).getString("bleProfile", "") ?: ""
@@ -84,20 +99,52 @@ object Prefs {
     }
 }
 
-/** 불러온 카메라 CSV를 앱 내부에 UTF-8로 보관한다. */
+/** 불러온 CSV들을 앱 내부에 UTF-8로 보관한다. 경찰청 전국 데이터 + (선택) 도로공사 구간단속·이정좌표. */
 object CameraRepo {
     private fun file(ctx: Context) = File(ctx.filesDir, "cameras.csv")
+    private fun kecSectionsFile(ctx: Context) = File(ctx.filesDir, "kec_sections.csv")
+    private fun kecPointsFile(ctx: Context) = File(ctx.filesDir, "kec_points.csv")
 
     @Volatile private var cached: CameraIndex? = null
+    /** 마지막 로드 때 도로공사 데이터 처리 결과(경고 포함). */
+    @Volatile var kecNote: String = ""
+        private set
 
     fun import(ctx: Context, bytes: ByteArray): Int {
         val text = CameraCsv.decode(bytes)
         val list = CameraCsv.parse(text)
         require(list.isNotEmpty()) { "카메라를 하나도 읽지 못했습니다" }
         file(ctx).writeText(text)
-        synchronized(this) { cached = CameraIndex(list) }
+        synchronized(this) { cached = null }
         return list.size
     }
+
+    /** 도로공사 「구간단속현황」 CSV. 형식만 검사하고 저장한다. 이정 좌표가 있어야 카메라가 만들어진다. */
+    fun importKecSections(ctx: Context, bytes: ByteArray): String {
+        val text = CameraCsv.decode(bytes)
+        val n = KecCsv.parseSections(text).size
+        require(n > 0) { "구간을 하나도 읽지 못했습니다" }
+        kecSectionsFile(ctx).writeText(text)
+        synchronized(this) { cached = null }
+        return "구간단속 ${n}건 저장" + if (kecPointsFile(ctx).exists()) "" else " — 이정 좌표 CSV도 불러와야 적용됩니다"
+    }
+
+    /** 도로공사 「도로중심선_이정_좌표」 CSV. */
+    fun importKecPoints(ctx: Context, bytes: ByteArray): String {
+        val text = CameraCsv.decode(bytes)
+        val routes = KecCsv.parsePoints(text)
+        val n = routes.values.sumOf { it.size }
+        require(n > 0) { "이정 좌표를 하나도 읽지 못했습니다" }
+        kecPointsFile(ctx).writeText(text)
+        synchronized(this) { cached = null }
+        return "이정 좌표 ${n}개(노선 ${routes.keys.count { !it.startsWith("#") }}개) 저장" +
+            if (kecSectionsFile(ctx).exists()) "" else " — 구간단속현황 CSV도 불러와야 적용됩니다"
+    }
+
+    fun hasKec(ctx: Context) = kecSectionsFile(ctx).exists() && kecPointsFile(ctx).exists()
+
+    /** 설정(도로공사 제한속도 등)이 바뀌어 다시 만들어야 할 때. */
+    fun invalidate() { synchronized(this) { cached = null } }
 
     /** 파일 파싱은 수 초 걸릴 수 있다. 메인 스레드에서 부르지 말 것. 동시에 두 번 파싱하지 않도록 잠근다. */
     fun load(ctx: Context): CameraIndex {
@@ -105,7 +152,21 @@ object CameraRepo {
         synchronized(this) {
             cached?.let { return it }
             val f = file(ctx)
-            val idx = CameraIndex(if (f.exists()) CameraCsv.parse(f.readText()) else emptyList())
+            val police = if (f.exists()) CameraCsv.parse(f.readText()) else emptyList()
+            val all = if (hasKec(ctx)) {
+                try {
+                    val sections = KecCsv.parseSections(kecSectionsFile(ctx).readText())
+                    val routes = KecCsv.parsePoints(kecPointsFile(ctx).readText())
+                    val (kec, warn) = KecCsv.build(sections, routes, Prefs.kecLimitKmh(ctx))
+                    kecNote = "도로공사 구간 ${kec.size / 2}건 적용" +
+                        (if (warn.isNotEmpty()) ", 건너뜀 ${warn.size}건: ${warn.take(3).joinToString("; ")}" else "")
+                    KecCsv.merge(police, kec)
+                } catch (e: Exception) {
+                    kecNote = "도로공사 데이터 오류: ${e.message}"
+                    police
+                }
+            } else { kecNote = ""; police }
+            val idx = CameraIndex(all)
             cached = idx
             return idx
         }
@@ -116,12 +177,15 @@ object CameraRepo {
     /** 이미 읽어 둔 게 있으면 그 개수, 아니면 null(메인 스레드에서 파싱을 막기 위해 기다리지 않는다). */
     fun cachedCount(): Int? = cached?.cameras?.size
 
-    /** 요약: 전체 / 구간 시점 / 신호 전용. */
+    /** 요약: 전체 / 구간 시점 / 신호 전용 / 도로공사. */
     fun summary(ctx: Context): String {
         val cams = load(ctx).cameras
         if (cams.isEmpty()) return "카메라 데이터 없음 — CSV를 불러오세요"
         val sec = cams.count { it.kind == CamKind.SECTION_START }
         val sig = cams.count { it.signalOnly }
-        return "카메라 ${cams.size}개 로드됨 (구간단속 시점 ${sec}, 신호 표시 ${sig})"
+        val kec = cams.count { it.fromKec && it.kind == CamKind.SECTION_START }
+        return "카메라 ${cams.size}개 로드됨 (구간단속 시점 ${sec}, 신호 표시 ${sig}" +
+            (if (kec > 0) ", 도로공사 방향 있는 구간 $kec" else "") + ")" +
+            (if (kecNote.isNotEmpty()) "\n$kecNote" else "")
     }
 }

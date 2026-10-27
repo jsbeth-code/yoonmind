@@ -1,5 +1,6 @@
 package com.jsbeth.camslow
 
+import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.sin
@@ -33,5 +34,21 @@ object Geo {
     fun bearing(lat0: Double, lon0: Double, lat: Double, lon: Double): Double {
         val (e, n) = toLocal(lat0, lon0, lat, lon)
         return (Math.toDegrees(atan2(e, n)) + 360.0) % 360.0
+    }
+
+    /** 두 방위각의 차이(0~180도). */
+    fun angleDiff(a: Double, b: Double): Double {
+        val d = abs((a - b) % 360.0)
+        return if (d > 180.0) 360.0 - d else d
+    }
+
+    /** 점을 방위각 bearingDeg 방향으로 meters만큼 옮긴 (lat, lon). */
+    fun offset(lat: Double, lon: Double, bearingDeg: Double, meters: Double): Pair<Double, Double> {
+        val b = Math.toRadians(bearingDeg)
+        val dN = meters * cos(b)
+        val dE = meters * sin(b)
+        val lat2 = lat + Math.toDegrees(dN / R)
+        val lon2 = lon + Math.toDegrees(dE / (R * cos(Math.toRadians(lat))))
+        return lat2 to lon2
     }
 }

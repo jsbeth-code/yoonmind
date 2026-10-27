@@ -31,12 +31,11 @@ class MainActivity : Activity() {
             ui.button("주행 시작") { startDrive() },
             ui.button("정지") { DriveService.send(this, DriveService.ACTION_STOP) },
         )
-        ui.button("카메라 데이터 불러오기 (CSV)") {
-            startActivityForResult(
-                Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*"),
-                REQ_CSV,
-            )
-        }
+        ui.button("카메라 데이터 불러오기 (경찰청 전국 CSV)") { pickCsv(REQ_CSV) }
+        ui.row(
+            ui.button("도로공사 구간단속 CSV") { pickCsv(REQ_KEC_SECTIONS) },
+            ui.button("도로공사 이정좌표 CSV") { pickCsv(REQ_KEC_POINTS) },
+        )
         ui.row(
             ui.button("테스트: 감속 신호") {
                 outputs.refresh()
@@ -55,7 +54,17 @@ class MainActivity : Activity() {
         logView = ui.text("", 12f)
         ui.show()
         askPermissions()
+        if (intent?.getBooleanExtra(AutoStart.EXTRA_AUTOSTART, false) == true) startDrive()
     }
+
+    override fun onNewIntent(intent: Intent?) {
+        super.onNewIntent(intent)
+        if (intent?.getBooleanExtra(AutoStart.EXTRA_AUTOSTART, false) == true) startDrive()
+    }
+
+    private fun pickCsv(req: Int) = startActivityForResult(
+        Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*"), req,
+    )
 
     private fun hasLocationPermission() =
         checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
@@ -140,23 +149,31 @@ class MainActivity : Activity() {
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         val uri = data?.data
-        if (requestCode != REQ_CSV || resultCode != RESULT_OK || uri == null) return
+        if (requestCode !in listOf(REQ_CSV, REQ_KEC_SECTIONS, REQ_KEC_POINTS) || resultCode != RESULT_OK || uri == null) return
         dataView.text = "불러오는 중..."
         Thread {
             val msg = try {
                 val bytes = contentResolver.openInputStream(uri)!!.use { it.readBytes() }
-                CameraRepo.import(this, bytes)
-                CameraRepo.summary(this)
+                val note = when (requestCode) {
+                    REQ_KEC_SECTIONS -> CameraRepo.importKecSections(this, bytes)
+                    REQ_KEC_POINTS -> CameraRepo.importKecPoints(this, bytes)
+                    else -> "카메라 ${CameraRepo.import(this, bytes)}개"
+                }
+                note + "\n" + CameraRepo.summary(this)
             } catch (e: Exception) {
                 "불러오기 실패: ${e.message}"
             }
             runOnUiThread {
                 dataView.text = msg
                 Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
-                if (DriveState.running && !DriveState.simulating) DriveService.send(this, DriveService.ACTION_START)
+                if (DriveState.running && !DriveState.simulating) DriveService.send(this, DriveService.ACTION_RELOAD)
             }
         }.start()
     }
 
-    companion object { private const val REQ_CSV = 10 }
+    companion object {
+        private const val REQ_CSV = 10
+        private const val REQ_KEC_SECTIONS = 11
+        private const val REQ_KEC_POINTS = 12
+    }
 }

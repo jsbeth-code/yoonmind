@@ -136,8 +136,15 @@ class DriveService : Service(), LocationListener {
 
     companion object {
         const val ACTION_START = "start"
+        /** CSV를 새로 불러온 뒤 등, 감시 중이어도 엔진을 다시 만든다. */
+        const val ACTION_RELOAD = "reload"
         const val ACTION_SIMULATE = "simulate"
         const val ACTION_STOP = "stop"
+        /** 차 블루투스가 끊김 → 잠시 뒤 자동 정지 예약. 다시 붙으면 취소. */
+        const val ACTION_CAR_DISCONNECTED = "car_disconnected"
+        const val ACTION_CAR_CONNECTED = "car_connected"
+        /** 블루투스 끊김 뒤 자동 정지까지 기다리는 시간(ms). 잠깐 끊겼다 붙는 경우를 거른다. */
+        private const val AUTO_STOP_DELAY_MS = 60_000L
         private const val CHANNEL = "drive"
         private const val NOTI_ID = 1
         /** GPS fix가 이 시간(ms) 넘게 없으면 경고. */
@@ -160,6 +167,12 @@ class DriveService : Service(), LocationListener {
     private val watchdog = object : Runnable {
         override fun run() { checkGps(); main.postDelayed(this, 5_000) }
     }
+    private var autoStopPending = false
+    private val autoStopRunnable = Runnable {
+        autoStopPending = false
+        DriveState.log("차 연결 끊김 — 자동 정지")
+        stopAll(); stopSelf()
+    }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -171,10 +184,31 @@ class DriveService : Service(), LocationListener {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_STOP -> { stopAll(); stopSelf(); return START_NOT_STICKY }
+            ACTION_CAR_DISCONNECTED -> {
+                if (DriveState.running && !DriveState.simulating) {
+                    main.removeCallbacks(autoStopRunnable)
+                    autoStopPending = true
+                    main.postDelayed(autoStopRunnable, AUTO_STOP_DELAY_MS)
+                    DriveState.log("차 연결 끊김 — ${AUTO_STOP_DELAY_MS / 1000}초 안에 다시 안 붙으면 자동 정지")
+                } else if (!DriveState.running) stopSelf()
+                return START_STICKY
+            }
+            ACTION_CAR_CONNECTED -> {
+                if (autoStopPending) { autoStopPending = false; main.removeCallbacks(autoStopRunnable); DriveState.log("차 다시 연결됨 — 자동 정지 취소") }
+                if (!DriveState.running) stopSelf()
+                return START_STICKY
+            }
             ACTION_SIMULATE -> { if (!goForeground()) return START_NOT_STICKY; startSimulation() }
+            ACTION_RELOAD -> { if (!goForeground()) return START_NOT_STICKY; startGps() }
             else -> {
                 if (intent == null) DriveState.log("시스템이 서비스를 다시 시작함 — 감속 상태는 잊었습니다. 휠을 확인하세요")
                 if (!goForeground()) return START_NOT_STICKY
+                main.removeCallbacks(autoStopRunnable); autoStopPending = false
+                if (DriveState.running && !DriveState.simulating && engine != null) {
+                    DriveState.log("이미 감시 중"); return START_STICKY
+                }
+                if (intent?.getStringExtra("source") == "bluetooth") DriveState.log("차 블루투스 연결 — 자동 시작")
+                AutoStart.cancelNotification(this)
                 startGps()
             }
         }
@@ -366,6 +400,7 @@ class DriveService : Service(), LocationListener {
 
     private fun stopAll() {
         main.removeCallbacks(watchdog)
+        main.removeCallbacks(autoStopRunnable); autoStopPending = false
         stopSimulation()
         getSystemService(LocationManager::class.java).removeUpdates(this)
         loadSeq++ // 읽는 중이던 엔진은 버린다
