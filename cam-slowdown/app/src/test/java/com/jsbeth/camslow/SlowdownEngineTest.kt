@@ -451,6 +451,37 @@ class KecCsvTest {
         assertEquals(100, out[1].limitKmh)     // 북진 종점(12km)은 근처에 없어 기본값
     }
 
+    @Test fun build_matchesRouteVariants() {
+        // 이정좌표 쪽 표기: 서산영덕선(청주상주선) 0~20km, 부산포항선 0~20km, 호남선의 지선, 수도권제2순환선(전체)·파주양주선(지선)
+        val pts = buildString {
+            append("노선번호,도로명,이정,X좌표값,Y좌표값\n")
+            fun route(no: String, name: String, eastOffsetM: Double) {
+                for (km in 0..20) { val (la, lo) = at(eastOffsetM, km * 1000.0); append("$no,$name,$km.0,$la,$lo\n") }
+            }
+            route("0303", "서산영덕선(청주상주선)", 0.0)
+            route("0655", "부산포항선", 5000.0)
+            route("2510", "호남선의 지선", 10000.0)
+            route("4000", "수도권제2순환선", 15000.0)
+            route("4003", "파주양주선", 20000.0)
+        }
+        val secs = "노선,방향,시점,시점인근시설물,종점,종점인근시설물,연장\n" +
+            "당진영덕선(청주영덕),영덕,3,A,9,B,6\n" +          // 옛 이름 + 괄호 → 서산영덕선(청주상주선)
+            "동해선(부산포항),포항,2,A,8,B,6\n" +              // 괄호 안 이름 → 부산포항선
+            "호남지선,논산,1,A,7,B,6\n" +                      // 호남선의 지선
+            "수도권제2순환선(파주-양주),파주,4,A,10,B,6\n" +   // 괄호 안 → 파주양주선
+            "수도권제2순환선(화도-양평),화도,12,A,18,B,6\n" +  // 괄호 안 노선 없음 → 괄호 뺀 이름으로
+            "없는선,서울,1,A,5,B,4\n"
+        val (cams, warn) = KecCsv.build(KecCsv.parseSections(secs), KecCsv.parsePoints(pts), 100)
+        assertEquals("경고 $warn", 1, warn.size); assertTrue(warn[0].contains("없는선"))
+        assertEquals(10, cams.size)
+        fun east(c: Camera) = Geo.toLocal(lat0, lon0, c.lat, c.lon).first
+        assertEquals(0.0, east(cams[0]), 20.0)        // 서산영덕
+        assertEquals(5000.0, east(cams[2]), 20.0)     // 부산포항선
+        assertEquals(10000.0, east(cams[4]), 20.0)    // 호남지선
+        assertEquals(20000.0, east(cams[6]), 20.0)    // 파주양주선
+        assertEquals(15000.0, east(cams[8]), 20.0)    // 수도권제2순환선
+    }
+
     @Test fun angleDiff() {
         assertEquals(20.0, Geo.angleDiff(350.0, 10.0), 1e-9)
         assertEquals(180.0, Geo.angleDiff(0.0, 180.0), 1e-9)

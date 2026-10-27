@@ -212,9 +212,40 @@ object KecCsv {
         val lengthM: Int, val limitKmh: Int?,
     )
 
-    /** "경부선"·"경부고속도로"·"경부 고속도로" → "경부". 두 파일의 노선 이름을 맞추기 위한 정규화. */
-    fun routeKey(name: String): String = name.replace(" ", "").replace("고속도로", "").replace("고속국도", "")
-        .replace("(", "").replace(")", "").removeSuffix("선").trim()
+    /**
+     * "경부선"·"경부고속도로"·"경부 고속도로" → "경부". 두 파일의 노선 이름을 맞추기 위한 정규화.
+     * "호남선의 지선" → "호남지선", "새만금포항선(대구~포항)" → "새만금포항선대구포항", 옛 이름 당진영덕 → 서산영덕.
+     */
+    fun routeKey(name: String): String {
+        var n = name.replace(" ", "").replace("고속도로", "").replace("고속국도", "")
+            .replace("~", "").replace("-", "").replace("–", "").replace("·", "").replace("선의지선", "지선")
+            .replace("(", "").replace(")", "").trim()
+        for ((a, b) in ALIASES) n = n.replace(a, b)
+        return n.removeSuffix("선")
+    }
+
+    /** 같은 노선의 다른 표기. 왼쪽을 오른쪽으로 바꿔 비교한다. */
+    private val ALIASES = listOf("당진영덕" to "서산영덕")
+
+    /** 괄호 안 글자(예: "동해선(부산포항)" → "부산포항"). 없으면 null. */
+    private fun parenContent(name: String): String? = Regex("\\(([^)]*)\\)").find(name)?.groupValues?.get(1)?.trim()?.takeIf { it.isNotEmpty() }
+    private fun stripParen(name: String): String = name.replace(Regex("\\([^)]*\\)"), "")
+
+    /**
+     * 구간의 노선 이름으로 이정 좌표 후보 노선들을 찾는다. 순서: 노선번호 → 이름 그대로 → 괄호 안 이름("부산포항"선) →
+     * 괄호를 뺀 이름("수도권제2순환"선) → 그 이름으로 시작하는 모든 노선(서산영덕선(청주상주선), (상주영덕선) …).
+     * 여러 후보 중 시점·종점 이정을 모두 품는 노선을 고른다.
+     */
+    private fun candidateRoutes(s: Section, routes: Map<String, List<Point>>): List<List<Point>> {
+        val keys = LinkedHashSet<String>()
+        numKey(s.routeNo)?.let { keys += it }
+        keys += routeKey(s.route)
+        parenContent(s.route)?.let { keys += routeKey(it + "선") }
+        val base = routeKey(stripParen(s.route))
+        keys += base
+        routes.keys.filter { !it.startsWith("#") && it.startsWith(base) }.sorted().forEach { keys += it }
+        return keys.mapNotNull { routes[it] }.distinct()
+    }
 
     private fun numKey(no: String): String? = no.trim().trimStart('0').takeIf { it.isNotEmpty() }?.let { "#$it" }
 
@@ -308,15 +339,20 @@ object KecCsv {
         val cams = ArrayList<Camera>()
         val warn = ArrayList<String>()
         for (s in sections) {
-            val pts = numKey(s.routeNo)?.let { routes[it] } ?: routes[routeKey(s.route)]
-            if (pts == null) { warn += "노선 못 찾음: ${s.route} ${s.routeNo}".trim(); continue }
+            val cands = candidateRoutes(s, routes)
+            if (cands.isEmpty()) { warn += "노선 못 찾음: ${s.route} ${s.routeNo}".trim(); continue }
             val forward = s.endKm > s.startKm
             val step = if (forward) BEARING_STEP_KM else -BEARING_STEP_KM
-            val start = posAt(pts, s.startKm); val startAhead = posAt(pts, s.startKm + step)
-            val end = posAt(pts, s.endKm); val endBefore = posAt(pts, s.endKm - step)
-            if (start == null || end == null || startAhead == null || endBefore == null) {
-                warn += "이정 범위 밖: ${s.route} ${s.startKm}~${s.endKm}km (좌표 ${pts.first().km}~${pts.last().km}km)"; continue
+            // 시점·종점(과 방위각용 앞뒤 점)을 모두 품는 후보를 고른다
+            val pick = cands.firstNotNullOfOrNull { pts ->
+                val start = posAt(pts, s.startKm); val startAhead = posAt(pts, s.startKm + step)
+                val end = posAt(pts, s.endKm); val endBefore = posAt(pts, s.endKm - step)
+                if (start != null && end != null && startAhead != null && endBefore != null) listOf(start, startAhead, end, endBefore) else null
             }
+            if (pick == null) {
+                warn += "이정 범위 밖: ${s.route} ${s.startKm}~${s.endKm}km (후보 ${cands.joinToString("/") { "${it.first().km}~${it.last().km}" }})"; continue
+            }
+            val (start, startAhead, end, endBefore) = pick
             val bStart = Geo.bearing(start.first, start.second, startAhead.first, startAhead.second)
             val bEnd = Geo.bearing(endBefore.first, endBefore.second, end.first, end.second)
             val lenM = if (s.lengthM > 0) s.lengthM else CameraCsv.lenToMeters(abs(s.endKm - s.startKm))
