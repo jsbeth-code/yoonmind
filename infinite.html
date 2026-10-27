@@ -536,6 +536,7 @@ function detailView(c) {
     ${c.realized ? tile('실현(매도)', sgn(c.realized), cls(c.realized)) + tile('평가손익', sgn(c.unrealized), cls(c.unrealized)) + tile('원금', usd(c.principal)) : ''}
   </div>
   <div class="meta" style="margin:0 2px">평가손익 <span class="num ${cls(c.unrealized)}">${sgn(c.unrealized)}</span> · 수수료율 ${(c.fee_rate * 100).toFixed(3)}% · 손익은 수수료 차감 후${p.updated ? ' · ' + esc(p.updated) + ' 기준' : ''}</div>
+  ${parkView(c)}
   <div class="actions a4">
     ${c.paused ? `<button class="btn primary" onclick="confirmDo('resume','${esc(c.id)}','재개할까요? 다음 주문 시간부터 자동 주문합니다.')">▶ 재개</button>`
                : `<button class="btn" onclick="confirmDo('pause','${esc(c.id)}','일시정지할까요? 이미 접수된 오늘 주문은 MTS에서 직접 취소해야 해요.')">⏸ 일시정지</button>`}
@@ -548,6 +549,43 @@ function detailView(c) {
   <div class="sec"><span>매매 기록 <span class="meta">${(c.fills || []).length}건</span></span><button class="mini" onclick="openHist('${esc(c.id)}','')">＋ 기록 추가</button></div>
   ${historyView(c)}`;
 }
+
+/* 대기자금(잔금 파킹, 봇 park_info): 종목·보유·평가·현금, 설정 버튼 */
+const PARK_NAMES = { SGOV: '단기채 SGOV', VOO: 'S&P500 VOO', SCHD: 'SCHD', RSP: '동일가중 RSP' };
+function parkView(c) {
+  const k = c.park_info, id = esc(c.id);
+  const btn = `<button class="mini" onclick="openPark('${id}')">설정</button>`;
+  if (!k || !k.ticker && !k.qty) return `<div class="sec"><span>대기자금 <span class="meta">없음 · 예수금이 모자라면 계좌의 지정 종목(DB SGOV·키움 VOO)을 팔아요</span></span>${btn}</div>`;
+  const up = k.unrealized;
+  return `<div class="sec"><span>대기자금 <span class="meta">${esc(PARK_NAMES[k.ticker] || k.ticker || '-')} · 자동 매수 ${k.auto ? '켜짐' : '꺼짐'}</span></span>${btn}</div>
+  <div class="tiles">
+    ${`<div><span class="k">보유</span><span class="v">${k.qty}주</span></div>`}
+    ${`<div><span class="k">평가금액</span><span class="v">${k.value != null ? usd(k.value) : '-'}</span></div>`}
+    ${`<div><span class="k">평가손익</span><span class="v ${cls(up || 0)}">${up != null ? sgn(up) : '-'}</span></div>`}
+    ${`<div><span class="k">현금(잔금−매입)</span><span class="v">${usd(k.cash)}</span></div>`}
+    ${`<div><span class="k">남길 현금</span><span class="v">${k.keep_amount != null ? usd(k.keep_amount) : '-'}</span></div>`}
+    ${`<div><span class="k">확정 손익</span><span class="v ${cls(k.realized)}">${sgn(k.realized)}</span></div>`}
+  </div>
+  <div class="meta" style="margin:0 2px">남길 현금 = 1회 매수금 × ${k.keep} · 매입 ${usd(k.cost)}${k.price ? ' · 시세 ' + usd(k.price) : ''} · 예수금이 모자라면 대기자금부터 팔아요</div>`;
+}
+window.openPark = id => {
+  const c = data.cycles.find(x => x.id === id), k = c.park_info || {};
+  const cur = k.ticker || '', opt = (v, t) => `<option value="${v}" ${cur === v ? 'selected' : ''}>${t}</option>`;
+  const locked = k.qty > 0;
+  openSheet(`<h3>대기자금 설정</h3>
+   <div class="help" style="margin-bottom:10px">잔금 중 현금으로 남길 몫 밖은 이 종목에 넣어 두고, SOXL 살 예수금이 모자라면 이 종목부터 팔아요.</div>
+   <label class="f"><span>종목${locked ? ` — ${k.qty}주가 남아 있어 바꿀 수 없어요` : ''}</span><select id="pTicker" ${locked ? 'disabled' : ''}>
+     ${opt('', '없음 (현금)')}${opt('SGOV', '단기채 SGOV')}${opt('VOO', 'S&P500 VOO')}${opt('SCHD', 'SCHD')}${opt('RSP', '동일가중 RSP')}</select></label>
+   <label class="help" style="display:flex;gap:8px;align-items:center;margin:4px 0 12px"><input type="checkbox" id="pAuto" ${k.auto ? 'checked' : ''}> SOXL 매도 등으로 현금이 남으면 자동 매수 (주문 시간에, 세션당 한 번)</label>
+   <label class="f"><span>현금으로 남길 몫 = 1회 매수금 × N (5 = 일주일, 오늘 주문 포함)</span><input id="pKeep" inputmode="decimal" value="${k.keep ?? 5}"></label>
+   <button class="btn primary" style="width:100%" onclick="submitPark('${esc(id)}', ${locked})">저장</button>`);
+};
+window.submitPark = (id, locked) => {
+  const p = { id, park_auto: document.getElementById('pAuto').checked, park_keep: +val('pKeep') };
+  if (!locked) p.park = val('pTicker');
+  if (isNaN(p.park_keep) || p.park_keep < 0 || p.park_keep > 40) return toast('N 은 0~40');
+  control('edit', p);
+};
 
 /* ── VR 상세: [현황 | 주문 | 기록 | 설정] (시안 LswVp7ThwpNQQZRHb7N7C6) ── */
 let vrSub = (() => { try { return localStorage.getItem('ib.vrSub') || 'status' } catch { return 'status' } })(), vrLadderAll = false;
