@@ -233,7 +233,7 @@ class MainActivity : Activity() {
                 if (DriveState.drActive) "추측 항법: 감속만 하고 복귀는 GPS가 돌아온 뒤에" else "카메라를 감지하지 못합니다")
             slowed && prog != null && progKind == S3xyButton.Press.SINGLE -> {
                 ui.setBand(band, Ui.BLUE, "▼ ${out.slow.label}로 내리는 중", "휠 아래 클릭 ${prog.first}/${prog.second} 보냄 · 커맨더 응답 대기")
-                bar = Triple(prog.first.toFloat() / prog.second.coerceAtLeast(1), null, 0xFFFFFFFF.toInt())
+                bar = Triple(prog.first.toFloat() / prog.second.coerceAtLeast(1), null, Ui.BLUE)
             }
             slowed && st.holdKind == "구간단속" -> {
                 val remain = st.holdRemainM ?: 0.0
@@ -241,7 +241,7 @@ class MainActivity : Activity() {
                 ui.setBand(band, Ui.BLUE, "${out.slow.label} 유지 · 구간단속 중",
                     (if (len > 0) "종점까지 ${km(remain - cfg.restoreAfterM)} 남음" else "길이 모름 · 종점 카메라까지(최대 ${km(remain)})") +
                         (if (out.autoRestore) " · 종점 지나 ${restore}m 뒤 ${out.usual.label}으로 복귀" else " · 복귀는 직접"))
-                if (len > 0) bar = Triple((1.0 - (remain - cfg.restoreAfterM) / len).toFloat().coerceIn(0f, 1f), null, 0xFFFFFFFF.toInt())
+                if (len > 0) bar = Triple((1.0 - (remain - cfg.restoreAfterM) / len).toFloat().coerceIn(0f, 1f), null, Ui.BLUE)
             }
             slowed && st.target == null && st.zone != null ->
                 ui.setBand(band, Ui.BLUE, "${out.slow.label} 유지 · 어린이보호구역", "${st.zone} · 반경 밖으로 나가면 복귀")
@@ -252,7 +252,7 @@ class MainActivity : Activity() {
                     (if (st.target?.kind == CamKind.SECTION_START) "구간단속 시점 · 종점까지 유지" else if (out.autoRestore) "통과 후 ${restore}m에 복귀" else "복귀는 직접"))
             prog != null && progKind == S3xyButton.Press.DOUBLE -> {
                 ui.setBand(band, Ui.GREEN, "▲ ${out.usual.label}으로 복귀 중", "휠 위 더블클릭 ${prog.first}/${prog.second} 보냄")
-                bar = Triple(prog.first.toFloat() / prog.second.coerceAtLeast(1), null, 0xFFFFFFFF.toInt())
+                bar = Triple(prog.first.toFloat() / prog.second.coerceAtLeast(1), null, Ui.GREEN)
             }
             car != null && car != out.usual -> ui.setBand(band, Ui.ORANGE, "${car.label} 상태 · 복귀는 직접",
                 "자동 복귀가 꺼져 있습니다. 휠을 올리거나 [지금 복귀]를 누르세요")
