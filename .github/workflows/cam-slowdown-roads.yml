@@ -1,0 +1,59 @@
+name: cam-slowdown 도로망 데이터 (OSM)
+
+# OpenStreetMap 한국 추출본을 받아 앱용 도로망 타일 zip(kr-roads.zip)으로 바꿔 릴리스에 올린다.
+# 폰에서 받을 주소: https://github.com/jsbeth-code/yoonmind/releases/download/cam-slowdown-roads/kr-roads.zip
+# 수동 실행(workflow_dispatch) 또는 분기 1회. 변환기가 바뀌면 자동으로 다시 만든다.
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 18 1 1,4,7,10 *"   # 1·4·7·10월 1일 03:00 KST
+  push:
+    paths:
+      - "cam-slowdown/tools/osm2roads.py"
+      - ".github/workflows/cam-slowdown-roads.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install pyosmium
+        run: pip install --quiet osmium
+      - name: Download OSM South Korea extract
+        run: |
+          curl -sSL --retry 3 -o south-korea-latest.osm.pbf https://download.geofabrik.de/asia/south-korea-latest.osm.pbf
+          ls -la south-korea-latest.osm.pbf
+      - name: Convert (all drivable roads)
+        run: python3 cam-slowdown/tools/osm2roads.py south-korea-latest.osm.pbf kr-roads.zip --source "geofabrik south-korea-latest $(date -u +%F)"
+      - name: Convert (major roads only, smaller)
+        run: python3 cam-slowdown/tools/osm2roads.py south-korea-latest.osm.pbf kr-roads-major.zip --major --source "geofabrik south-korea-latest $(date -u +%F)"
+      - name: Sizes
+        run: ls -la kr-roads.zip kr-roads-major.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kr-roads
+          path: |
+            kr-roads.zip
+            kr-roads-major.zip
+      - name: Publish to release (phone download)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: cam-slowdown-roads
+          name: 카메라 감속 앱 — 도로망 데이터 (OSM)
+          prerelease: true
+          files: |
+            kr-roads.zip
+            kr-roads-major.zip
+          body: |
+            OpenStreetMap 한국 추출본(geofabrik)을 앱용 도로망 타일로 변환한 파일. 앱 메뉴 "도로망 데이터 (OSM kr-roads.zip)"로 불러온다.
+            - kr-roads.zip: 차가 다니는 모든 길 (권장)
+            - kr-roads-major.zip: 3차로(tertiary) 이상 큰길만 (파일이 작다)
+            만든 날: ${{ github.run_started_at }} / 변환기 커밋 ${{ github.sha }}
+            © OpenStreetMap contributors, ODbL

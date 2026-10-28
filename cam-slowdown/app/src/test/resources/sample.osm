@@ -1,0 +1,158 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<osm version="0.6" generator="make_sample_osm.py">
+  <node id="1" lat="37.0500000" lon="127.0500000" version="1"/>
+  <node id="2" lat="37.0544966" lon="127.0500000" version="1"/>
+  <node id="3" lat="37.0589932" lon="127.0500000" version="1"/>
+  <node id="4" lat="37.0634898" lon="127.0500000" version="1"/>
+  <node id="5" lat="37.0679864" lon="127.0500000" version="1"/>
+  <node id="6" lat="37.0724830" lon="127.0500000" version="1"/>
+  <node id="7" lat="37.0769796" lon="127.0500000" version="1"/>
+  <node id="8" lat="37.0814762" lon="127.0500000" version="1"/>
+  <node id="9" lat="37.0859728" lon="127.0500000" version="1"/>
+  <node id="10" lat="37.0904694" lon="127.0500000" version="1"/>
+  <node id="11" lat="37.0949661" lon="127.0500000" version="1"/>
+  <node id="12" lat="37.0994627" lon="127.0500000" version="1"/>
+  <node id="13" lat="37.1039593" lon="127.0500000" version="1"/>
+  <node id="14" lat="37.0500000" lon="127.0505634" version="1"/>
+  <node id="15" lat="37.0544966" lon="127.0505634" version="1"/>
+  <node id="16" lat="37.0589932" lon="127.0505634" version="1"/>
+  <node id="17" lat="37.0634898" lon="127.0505634" version="1"/>
+  <node id="18" lat="37.0679864" lon="127.0505634" version="1"/>
+  <node id="19" lat="37.0724830" lon="127.0505634" version="1"/>
+  <node id="20" lat="37.0769796" lon="127.0505634" version="1"/>
+  <node id="21" lat="37.0814762" lon="127.0505634" version="1"/>
+  <node id="22" lat="37.0859728" lon="127.0505634" version="1"/>
+  <node id="23" lat="37.0859728" lon="127.0522536" version="1"/>
+  <node id="24" lat="37.0859728" lon="127.0545073" version="1"/>
+  <node id="25" lat="37.0859728" lon="127.0567609" version="1"/>
+  <node id="26" lat="37.0901983" lon="127.0519270" version="1"/>
+  <node id="27" lat="37.0944237" lon="127.0538539" version="1"/>
+  <node id="28" lat="37.0859728" lon="127.0498648" version="1"/>
+  <node id="29" lat="37.0814762" lon="127.0498648" version="1"/>
+  <node id="30" lat="37.0769796" lon="127.0498648" version="1"/>
+  <node id="31" lat="37.0724830" lon="127.0498648" version="1"/>
+  <node id="32" lat="37.0679864" lon="127.0498648" version="1"/>
+  <node id="33" lat="37.0634898" lon="127.0498648" version="1"/>
+  <node id="34" lat="37.0589932" lon="127.0498648" version="1"/>
+  <node id="35" lat="37.0544966" lon="127.0498648" version="1"/>
+  <node id="36" lat="37.0500000" lon="127.0498648" version="1"/>
+  <node id="37" lat="37.0500000" lon="127.0725363" version="1"/>
+  <node id="38" lat="37.0507808" lon="127.0726219" version="1"/>
+  <node id="39" lat="37.0515379" lon="127.0728760" version="1"/>
+  <node id="40" lat="37.0522483" lon="127.0732911" version="1"/>
+  <node id="41" lat="37.0528904" lon="127.0738544" version="1"/>
+  <node id="42" lat="37.0534446" lon="127.0745488" version="1"/>
+  <node id="43" lat="37.0538942" lon="127.0753533" version="1"/>
+  <node id="44" lat="37.0542254" lon="127.0762434" version="1"/>
+  <node id="45" lat="37.0544283" lon="127.0771920" version="1"/>
+  <node id="46" lat="37.0544966" lon="127.0781703" version="1"/>
+  <node id="47" lat="37.0410068" lon="127.0725363" version="1"/>
+  <node id="48" lat="37.0455034" lon="127.0725363" version="1"/>
+  <node id="49" lat="37.0500000" lon="127.0612681" version="1"/>
+  <node id="50" lat="37.0544966" lon="127.0612681" version="1"/>
+  <node id="51" lat="37.0589932" lon="127.0612681" version="1"/>
+  <node id="52" lat="37.0634898" lon="127.0612681" version="1"/>
+  <node id="53" lat="37.0679864" lon="127.0612681" version="1"/>
+  <node id="54" lat="37.0724830" lon="127.0612681" version="1"/>
+  <node id="55" lat="37.0769796" lon="127.0612681" version="1"/>
+  <way id="1" version="1">
+    <nd ref="1"/>
+    <nd ref="2"/>
+    <nd ref="3"/>
+    <nd ref="4"/>
+    <nd ref="5"/>
+    <nd ref="6"/>
+    <nd ref="7"/>
+    <nd ref="8"/>
+    <nd ref="9"/>
+    <tag k="highway" v="trunk"/>
+    <tag k="oneway" v="yes"/>
+    <tag k="maxspeed" v="80"/>
+    <tag k="name" v="간선도로"/>
+  </way>
+  <way id="2" version="1">
+    <nd ref="9"/>
+    <nd ref="10"/>
+    <nd ref="11"/>
+    <nd ref="12"/>
+    <nd ref="13"/>
+    <tag k="highway" v="trunk"/>
+    <tag k="oneway" v="yes"/>
+    <tag k="maxspeed" v="80"/>
+    <tag k="name" v="간선도로"/>
+  </way>
+  <way id="3" version="1">
+    <nd ref="14"/>
+    <nd ref="15"/>
+    <nd ref="16"/>
+    <nd ref="17"/>
+    <nd ref="18"/>
+    <nd ref="19"/>
+    <nd ref="20"/>
+    <nd ref="21"/>
+    <nd ref="22"/>
+    <tag k="highway" v="secondary"/>
+    <tag k="maxspeed" v="50"/>
+    <tag k="name" v="옆길"/>
+  </way>
+  <way id="4" version="1">
+    <nd ref="9"/>
+    <nd ref="23"/>
+    <nd ref="24"/>
+    <nd ref="25"/>
+    <tag k="highway" v="secondary"/>
+  </way>
+  <way id="5" version="1">
+    <nd ref="9"/>
+    <nd ref="26"/>
+    <nd ref="27"/>
+    <tag k="highway" v="trunk_link"/>
+    <tag k="oneway" v="yes"/>
+  </way>
+  <way id="6" version="1">
+    <nd ref="28"/>
+    <nd ref="29"/>
+    <nd ref="30"/>
+    <nd ref="31"/>
+    <nd ref="32"/>
+    <nd ref="33"/>
+    <nd ref="34"/>
+    <nd ref="35"/>
+    <nd ref="36"/>
+    <tag k="highway" v="trunk"/>
+    <tag k="oneway" v="yes"/>
+    <tag k="maxspeed" v="80"/>
+    <tag k="name" v="간선도로"/>
+  </way>
+  <way id="7" version="1">
+    <nd ref="37"/>
+    <nd ref="38"/>
+    <nd ref="39"/>
+    <nd ref="40"/>
+    <nd ref="41"/>
+    <nd ref="42"/>
+    <nd ref="43"/>
+    <nd ref="44"/>
+    <nd ref="45"/>
+    <nd ref="46"/>
+    <tag k="highway" v="primary"/>
+  </way>
+  <way id="8" version="1">
+    <nd ref="47"/>
+    <nd ref="48"/>
+    <nd ref="37"/>
+    <tag k="highway" v="primary"/>
+  </way>
+  <way id="9" version="1">
+    <nd ref="49"/>
+    <nd ref="50"/>
+    <nd ref="51"/>
+    <nd ref="52"/>
+    <nd ref="53"/>
+    <nd ref="54"/>
+    <nd ref="55"/>
+    <tag k="highway" v="tertiary"/>
+    <tag k="maxspeed" v="60"/>
+    <tag k="ref" v="지방도 7"/>
+  </way>
+</osm>

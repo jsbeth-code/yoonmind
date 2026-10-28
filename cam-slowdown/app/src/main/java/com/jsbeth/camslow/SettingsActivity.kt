@@ -70,6 +70,7 @@ class SettingsActivity : Activity() {
         limitEdit = ui.numberRow("제한속도 기준(km/h)", "", (if (sel == 2) minLimit else 60).toString(), false) { Prefs.setMinLimitKmh(this, it.toInt()) }
         limitEdit?.visibility = if (sel == 2) View.VISIBLE else View.GONE
         ui.switchRow("교차로 신호 카메라도 포함", "대부분 과속도 같이 단속합니다", Prefs.includeSignal(this)) { Prefs.setIncludeSignal(this, it) }
+        ui.switchRow("도로망(OSM)으로 옆 도로·반대편 카메라 거르기", "메뉴에서 kr-roads.zip을 넣어야 동작. 내 도로를 따라 앞에 있는 카메라만 봅니다", Prefs.useRoads(this)) { Prefs.setUseRoads(this, it) }
         ui.switchRow("이미 제한속도 이하로 달리면 신호 생략", "", Prefs.skipIfBelowLimit(this)) { Prefs.setSkipIfBelowLimit(this, it) }
 
         // 6 차와 연결
@@ -100,9 +101,12 @@ class SettingsActivity : Activity() {
         }
 
         // 7 안내
-        ui.question(7, "안내")
+        ui.question(7, "안내·화면")
         ui.switchRow("음성·효과음", "", Prefs.alertsOn(this)) { Prefs.setAlertsOn(this, it) }
         ui.switchRow("감시 중 화면 켜 두기", "거치대에 올려 두고 볼 때", Prefs.keepScreenOn(this)) { Prefs.setKeepScreenOn(this, it) }
+        val themes = listOf("AUTO", "DAY", "NIGHT")
+        ui.radioGroup(listOf("낮·밤 자동 (폰 다크 모드를 따라감 — 폰 설정에서 일몰 예약 가능)", "항상 낮 (파스텔)", "항상 밤 (네온)"), themes.indexOf(Prefs.theme(this)).coerceAtLeast(0)) { i -> Prefs.setTheme(this, themes[i]) }
+        ui.switchRow("메인 화면에 간이 지도", "내 도로·앞길·카메라를 그린다. 끄면 숫자만", Prefs.mapOn(this)) { Prefs.setMapOn(this, it) }
 
         // 8 어린이보호구역
         ui.question(8, "어린이보호구역에서 감속")
@@ -117,10 +121,12 @@ class SettingsActivity : Activity() {
             numberRow("반응 여유 시간(초)", "신호 뒤 차가 줄이기 시작할 때까지 (4)", Prefs.reaction(this@SettingsActivity).toString(), true) { Prefs.setReaction(this@SettingsActivity, it) }
             numberRow("추가 여유 거리(m)", "계산한 거리에 더함 (150)", Prefs.margin(this@SettingsActivity).toInt().toString(), false) { Prefs.setMargin(this@SettingsActivity, it) }
             numberRow("통과 후 복귀 거리(m)", "카메라 지나고 이만큼 가서 올림 (100)", Prefs.restoreAfter(this@SettingsActivity).toInt().toString(), false) { Prefs.setRestoreAfter(this@SettingsActivity, it) }
+            hint("허용폭은 도로망에 안 붙은 카메라를 GPS 방향으로 판단할 때만 쓴다. 거리 비례분(왼쪽 1.5%, 오른쪽 3~5%)이 더해진다.")
             numberRow("도심 왼쪽 허용폭(m)", "제한 80 미만 카메라. 작을수록 반대 차로를 잘 거름 (8)", Prefs.cityLeftTol(this@SettingsActivity).toInt().toString(), false) { Prefs.setCityLeftTol(this@SettingsActivity, it) }
-            numberRow("도심 오른쪽 허용폭(m)", "(40)", Prefs.cityRightTol(this@SettingsActivity).toInt().toString(), false) { Prefs.setCityRightTol(this@SettingsActivity, it) }
+            numberRow("도심 오른쪽 허용폭(m)", "(25)", Prefs.cityRightTol(this@SettingsActivity).toInt().toString(), false) { Prefs.setCityRightTol(this@SettingsActivity, it) }
             numberRow("고속도로 왼쪽 허용폭(m)", "제한 80 이상이면서 방향을 모르는 카메라 (15)", Prefs.hwyLeftTol(this@SettingsActivity).toInt().toString(), false) { Prefs.setHwyLeftTol(this@SettingsActivity, it) }
             numberRow("고속도로 오른쪽 허용폭(m)", "(60)", Prefs.hwyRightTol(this@SettingsActivity).toInt().toString(), false) { Prefs.setHwyRightTol(this@SettingsActivity, it) }
+            numberRow("속도 타당성 배수", "제한속도의 이 배수 이상으로 달리면 다른 도로의 카메라로 봄. 0이면 끔 (1.5)", Prefs.fastRatio(this@SettingsActivity).toString(), true) { Prefs.setFastRatio(this@SettingsActivity, it) }
             numberRow("도로공사 구간 제한속도", "경찰청 데이터에서 못 찾았을 때 (100)", Prefs.kecLimitKmh(this@SettingsActivity).toString(), false) { Prefs.setKecLimitKmh(this@SettingsActivity, it.toInt()); CameraRepo.invalidate() }
             numberRow("여분 클릭", "나무늘보까지 내릴 때만, 유실 대비 (1)", Prefs.extraDownClicks(this@SettingsActivity).toString(), false) { Prefs.setExtraDownClicks(this@SettingsActivity, it.toInt()); showResult() }
             numberRow("누름 사이 간격(ms)", "커맨더가 한 번씩 처리할 시간 (400)", Prefs.pressGapMs(this@SettingsActivity).toString(), false) { Prefs.setPressGapMs(this@SettingsActivity, it.toInt()) }

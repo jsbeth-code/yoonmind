@@ -82,8 +82,8 @@ class SlowdownEngineTest {
 
     @Test fun wideRoadCameraOnLeft_noReleaseBeforeCamera() {
         // 넓은 도로: 카메라 좌표가 왼쪽(중앙분리대 쪽 + GPS 오차). 통과 전에 "경로 이탈" 복귀가 나가면 안 된다.
-        // 도심(제한 60)은 왼쪽 8m 기준, 고속도로(제한 100)는 15m 기준이라 허용 범위 안의 값으로 시험한다.
-        for ((kmh, cross, limit) in listOf(Triple(50.0, -10.0, 60), Triple(60.0, -12.0, 60), Triple(110.0, -18.0, 100))) {
+        // 도심(제한 60)은 왼쪽 8m+1.5%, 고속도로(제한 100)는 15m+1.5% 기준이라 허용 범위 안의 값으로 시험한다.
+        for ((kmh, cross, limit) in listOf(Triple(50.0, -10.0, 60), Triple(60.0, -11.0, 60), Triple(110.0, -18.0, 100))) {
             val ev = driveNorth(listOf(cam(cross, 3000.0, limit = limit)), kmh, 0.0, 5000.0)
             assertEquals("$kmh/$cross 이벤트 수", 2, ev.size)
             val un = upAt(ev)
@@ -227,9 +227,10 @@ class SlowdownEngineTest {
         repeat(10) { val (la, lo) = at(0.0, n); assertEquals(0, e.update(Fix(la, lo, v, 0.0, 80.0)).size); n += v }
         assertFalse(e.isSlowed)
         assertTrue(e.status.note.contains("GPS 부정확"))
-        // 정확한 fix가 오면 바로 판단
-        val (la, lo) = at(0.0, n)
-        assertEquals(1, e.update(Fix(la, lo, v, 0.0, 5.0)).size)
+        // 정확한 fix가 연속 확인 횟수(3)만큼 오면 판단
+        val ev = ArrayList<EngineEvent>()
+        repeat(3) { val (la, lo) = at(0.0, n); ev += e.update(Fix(la, lo, v, 0.0, 5.0)); n += v }
+        assertEquals(1, ev.size)
     }
 
     @Test fun turningAway_restores() {
@@ -248,10 +249,70 @@ class SlowdownEngineTest {
 
     @Test fun stoppedKeepsState() {
         val e = SlowdownEngine(CameraIndex(listOf(cam(8.0, 200.0))))
-        val (la, lo) = at(0.0, 0.0)
-        assertEquals(1, e.update(Fix(la, lo, 20.0, 0.0)).size)
+        // 연속 확인 3회 뒤 감속
+        var n = 0.0
+        val ev = ArrayList<EngineEvent>()
+        repeat(3) { val (la, lo) = at(0.0, n); ev += e.update(Fix(la, lo, 20.0, 0.0)); n += 20.0 }
+        assertEquals(1, ev.size)
+        val (la, lo) = at(0.0, n)
         repeat(30) { assertEquals(0, e.update(Fix(la, lo, 0.0, null)).size) }
         assertTrue(e.isSlowed)
+    }
+
+    @Test fun oppositeCameraOnSevenLaneRoad_ignored() {
+        // 왕복 7차선(폭 ~25m): 반대편 카메라가 내 왼쪽 13~20m. 도심 왼쪽 허용폭 8m + 1.5%(300m에서 12.5m) 밖이라 무시
+        for (cross in listOf(-13.0, -16.0, -20.0))
+            assertEquals("왼쪽 $cross", 0, driveNorth(listOf(cam(cross, 3000.0, limit = 50)), 60.0, 0.0, 5000.0).size)
+        // 내 쪽 카메라(오른쪽 5~15m)는 잡는다
+        for (cross in listOf(0.0, 5.0, 15.0))
+            assertEquals("오른쪽 $cross", 2, driveNorth(listOf(cam(cross, 3000.0, limit = 50)), 60.0, 0.0, 5000.0).size)
+    }
+
+    @Test fun parallelRoadCamera_ignored() {
+        // 동부간선(80) 옆 동일로(50) 카메라: 오른쪽 45m. 도심 오른쪽 25m + 3%(300m에서 34m) 밖. 속도 타당성(80 ≥ 50×1.5)으로도 걸러진다
+        assertEquals(0, driveNorth(listOf(cam(45.0, 3000.0, limit = 50)), 80.0, 0.0, 5000.0).size)
+        assertEquals(0, driveNorth(listOf(cam(-30.0, 3000.0, limit = 50)), 80.0, 0.0, 5000.0).size)
+    }
+
+    @Test fun implausiblySpeedy_forLimit_ignored() {
+        // 허용폭 안(오른쪽 15m)이지만 50 카메라를 향해 90km/h(1.8배)로 달리면 다른 도로의 카메라로 본다. 60km/h면 잡는다
+        assertEquals(0, driveNorth(listOf(cam(15.0, 3000.0, limit = 50)), 90.0, 0.0, 5000.0).size)
+        assertEquals(2, driveNorth(listOf(cam(15.0, 3000.0, limit = 50)), 60.0, 0.0, 5000.0).size)
+        // 방향을 아는 카메라(도로공사)에는 적용 안 함
+        assertEquals(2, driveNorth(listOf(cam(15.0, 3000.0, limit = 50).copy(bearingDeg = 0.0)), 90.0, 0.0, 5000.0).size)
+        // 끄면 적용 안 함
+        assertEquals(2, driveNorth(listOf(cam(15.0, 3000.0, limit = 50)), 90.0, 0.0, 5000.0, EngineConfig(fastRatio = 0.0)).size)
+    }
+
+    @Test fun headingJitter_isSmoothed() {
+        // GPS 방향이 ±4° 흔들려도(300m 앞에서 가로 ±21m) 왼쪽 14m 반대편 카메라를 잡지 않는다
+        val e = SlowdownEngine(CameraIndex(listOf(cam(-14.0, 3000.0, limit = 50))))
+        val v = 60 / 3.6
+        var n = 0.0; var i = 0
+        val ev = ArrayList<EngineEvent>()
+        while (n < 4000) { val (la, lo) = at(0.0, n); ev += e.update(Fix(la, lo, v, if (i % 2 == 0) 4.0 else 356.0)); n += v; i++ }
+        assertEquals(0, ev.size)
+        // 평활화 값 확인: 4, 356, 4 → 약 1.3°
+        val e2 = SlowdownEngine(CameraIndex(emptyList()))
+        val (la, lo) = at(0.0, 0.0)
+        e2.update(Fix(la, lo, v, 4.0)); e2.update(Fix(la, lo, v, 356.0))
+        val sm = e2.smoothedCourse(4.0)
+        assertTrue("평활 $sm", sm < 2.0 || sm > 358.0)
+        // 커브(15° 넘게 차이)에선 그대로
+        e2.update(Fix(la, lo, v, 30.0))
+        assertEquals(60.0, e2.smoothedCourse(60.0), 0.001)
+    }
+
+    @Test fun singleFixGlitch_doesNotTrigger() {
+        // 카메라가 한 fix만 앞에 보이고(튐) 사라지면 감속하지 않는다 — 연속 3회 확인
+        val e = SlowdownEngine(CameraIndex(listOf(cam(8.0, 250.0, limit = 50)))) // 60km/h 감속 거리(~280m) 안
+        val v = 60 / 3.6
+        val (la, lo) = at(0.0, 0.0)
+        assertEquals(0, e.update(Fix(la, lo, v, 0.0)).size)
+        assertEquals(0, e.update(Fix(la, lo, v, 90.0)).size) // 옆을 봄 → 사라짐
+        assertEquals(0, e.update(Fix(la, lo, v, 0.0)).size)
+        assertEquals(0, e.update(Fix(la, lo, v, 0.0)).size)
+        assertEquals(1, e.update(Fix(la, lo, v, 0.0)).size)
     }
 
     private val header = "무인교통단속카메라관리번호,시도명,도로노선명,설치장소,단속구분,제한속도,단속구간위치구분,과속단속구간길이,위도,경도\n"

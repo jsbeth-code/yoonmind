@@ -2,54 +2,67 @@ package com.jsbeth.camslow
 
 import android.Manifest
 import android.app.Activity
+import android.app.AlertDialog
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Color
+import android.graphics.Typeface
+import android.graphics.drawable.ColorDrawable
+import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.text.SpannableString
+import android.text.style.ForegroundColorSpan
+import android.view.Gravity
 import android.view.Menu
 import android.view.MenuItem
+import android.view.View
 import android.view.WindowManager
-import android.widget.Button
+import android.widget.LinearLayout
+import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 
+/**
+ * 메인 화면(파스텔 스티커 / 야간 네온): 색 띠 → 다음 카메라 거리·현재 속도·제한 표지 → 간이 지도 → 프로필 두 개 → 감시 켜기/끄기 → 지금 도로 →
+ * 점검표 → 기록. 테마는 Theme.current()가 정하고, 설정에서 바꾸면 돌아올 때 다시 그린다.
+ */
 class MainActivity : Activity() {
 
+    private lateinit var t: Theme
+    private lateinit var jua: Typeface
     private lateinit var band: TextView
     private lateinit var distView: TextView
     private lateinit var lineView: TextView
-    private lateinit var nameView: TextView
-    private lateinit var trigView: TextView
     private lateinit var speedView: TextView
+    private lateinit var signView: TextView
+    private lateinit var subView: TextView
+    private lateinit var map: MiniMapView
+    private lateinit var usualChip: TextView
+    private lateinit var slowChip: TextView
+    private lateinit var toggleBtn: TextView
+    private lateinit var nowView: TextView
     private lateinit var checkView: TextView
-    private lateinit var toggleBtn: Button
     private lateinit var logHead: TextView
     private lateinit var logView: TextView
-    private lateinit var ui: Ui
     private lateinit var outputs: Outputs
     private var logExpanded = false
+    private var builtNight = false
     private val listener = { render() }
     private val main = Handler(Looper.getMainLooper())
     private val tick = object : Runnable { override fun run() { render(); main.postDelayed(this, 1_000) } }
 
+    private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
+
     override fun onCreate(savedInstanceState: Bundle?) {
+        // 밤에는 시스템 테마도 어둡게(앱바 메뉴·대화상자가 따라오도록). onCreate 전에 정해야 해서 바뀌면 recreate().
+        if (Theme.current(this).night) setTheme(android.R.style.Theme_Material)
         super.onCreate(savedInstanceState)
         outputs = Outputs(this)
-        ui = Ui(this)
-        band = ui.band()
-        distView = ui.text("", 44f, bold = true)
-        lineView = ui.text("", 15f)
-        nameView = ui.text("", 13f, color = Ui.MUTED)
-        trigView = ui.text("", 13f)
-        speedView = ui.text("", 13f, color = Ui.MUTED)
-        checkView = ui.text("", 13f)
-        toggleBtn = ui.bigButton("감시 켜기", Ui.TEAL) { if (DriveState.running) DriveService.send(this, DriveService.ACTION_STOP) else startDrive() }
-        logHead = ui.text("기록   전체 보기 ›", 13f, bold = true).apply { setOnClickListener { logExpanded = !logExpanded; render() } }
-        logView = ui.text("", 12f)
-        ui.show()
+        build()
         askPermissions()
         if (intent?.getBooleanExtra(AutoStart.EXTRA_AUTOSTART, false) == true) startDrive()
     }
@@ -59,6 +72,114 @@ class MainActivity : Activity() {
         if (intent?.getBooleanExtra(AutoStart.EXTRA_AUTOSTART, false) == true) startDrive()
     }
 
+    // ---- 화면 만들기 (코드로)
+    private fun build() {
+        t = Theme.current(this)
+        builtNight = t.night
+        jua = Theme.display(this)
+        window.setBackgroundDrawable(ColorDrawable(t.bg))
+        actionBar?.setBackgroundDrawable(ColorDrawable(t.appbar))
+        actionBar?.title = SpannableString(getString(R.string.app_name)).apply { setSpan(ForegroundColorSpan(t.fg), 0, length, 0) }
+
+        val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val lp = { top: Int, bottom: Int -> LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(top); bottomMargin = dp(bottom) } }
+
+        // 색 띠
+        band = TextView(this).apply {
+            textSize = 13f; setTextColor(Color.WHITE)
+            setPadding(dp(16), dp(10), dp(16), dp(10))
+            background = GradientDrawable().apply { setColor(t.bandOff) }
+        }
+        root.addView(band, lp(0, 0))
+
+        // 거리 · 현재 속도 · 제한 표지
+        val top = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(dp(16), dp(10), dp(16), dp(0)) }
+        val left = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        distView = TextView(this).apply { textSize = 38f; typeface = jua; setTextColor(t.fg); includeFontPadding = false }
+        lineView = TextView(this).apply { textSize = 13f; setTextColor(t.fg) }
+        left.addView(distView); left.addView(lineView)
+        top.addView(left, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        val mid = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL; setPadding(dp(8), 0, dp(12), 0) }
+        speedView = TextView(this).apply { textSize = 32f; typeface = jua; setTextColor(t.fg); includeFontPadding = false; gravity = Gravity.CENTER }
+        mid.addView(speedView); mid.addView(TextView(this).apply { text = "현재 km/h"; textSize = 10f; setTextColor(t.muted); gravity = Gravity.CENTER })
+        top.addView(mid)
+        val right = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL }
+        signView = TextView(this).apply {
+            textSize = 21f; typeface = jua; setTextColor(t.signFg); gravity = Gravity.CENTER; includeFontPadding = false
+            background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(t.signBg); setStroke(dp(6), t.sign) }
+        }
+        right.addView(signView, LinearLayout.LayoutParams(dp(54), dp(54)))
+        right.addView(TextView(this).apply { text = "제한"; textSize = 10f; setTextColor(t.muted); gravity = Gravity.CENTER })
+        top.addView(right)
+        root.addView(top)
+        subView = TextView(this).apply { textSize = 12f; setTextColor(t.muted); setPadding(dp(16), dp(2), dp(16), dp(8)) }
+        root.addView(subView)
+
+        // 지도
+        map = MiniMapView(this).apply { theme = t; display = jua }
+        if (Prefs.mapOn(this)) root.addView(map, lp(0, 0))
+
+        // 프로필 두 개
+        val prof = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(dp(16), dp(10), dp(16), dp(2)) }
+        usualChip = chip { pickProfile(usual = true) }
+        slowChip = chip { pickProfile(usual = false) }
+        prof.addView(usualChip, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        prof.addView(TextView(this).apply { text = "→"; textSize = 20f; setTextColor(t.muted); setPadding(dp(8), 0, dp(8), 0) })
+        prof.addView(slowChip, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        root.addView(prof)
+
+        // 감시 켜기/끄기
+        toggleBtn = TextView(this).apply {
+            textSize = 19f; typeface = jua; setTextColor(Color.WHITE); gravity = Gravity.CENTER
+            setPadding(dp(16), dp(13), dp(16), dp(13))
+            background = GradientDrawable().apply { cornerRadius = dp(14).toFloat(); setColor(t.toggleOn) }
+            setOnClickListener { if (DriveState.running) DriveService.send(this@MainActivity, DriveService.ACTION_STOP) else startDrive() }
+        }
+        root.addView(toggleBtn, lp(8, 4).apply { leftMargin = dp(16); rightMargin = dp(16) })
+
+        nowView = TextView(this).apply { textSize = 12f; setTextColor(t.muted); setPadding(dp(16), dp(4), dp(16), dp(6)) }
+        root.addView(nowView)
+
+        checkView = TextView(this).apply { textSize = 12.5f; setTextColor(t.fg); setPadding(dp(16), dp(4), dp(16), dp(4)); setLineSpacing(0f, 1.25f) }
+        root.addView(checkView)
+
+        logHead = TextView(this).apply { textSize = 13f; typeface = Typeface.DEFAULT_BOLD; setTextColor(t.fg); setPadding(dp(16), dp(10), dp(16), dp(2)); setOnClickListener { logExpanded = !logExpanded; render() } }
+        root.addView(logHead)
+        logView = TextView(this).apply { textSize = 12f; setTextColor(t.fg); setPadding(dp(16), 0, dp(16), dp(20)) }
+        root.addView(logView)
+
+        setContentView(ScrollView(this).apply { addView(root); setBackgroundColor(t.bg) })
+        render()
+    }
+
+    private fun chip(onClick: () -> Unit) = TextView(this).apply {
+        textSize = 15f; typeface = jua; setTextColor(t.fg); gravity = Gravity.CENTER; setLineSpacing(0f, 1.1f)
+        setPadding(dp(8), dp(6), dp(8), dp(6))
+        background = GradientDrawable().apply { cornerRadius = dp(10).toFloat(); setColor(t.chipBg); setStroke(dp(2), t.chipLine) }
+        setOnClickListener { onClick() }
+    }
+
+    private fun chipText(v: TextView, label: String, value: String) {
+        v.text = android.text.SpannableStringBuilder().apply {
+            append(label); setSpan(android.text.style.RelativeSizeSpan(0.62f), 0, label.length, 0); setSpan(ForegroundColorSpan(t.muted), 0, label.length, 0)
+            append("\n").append("$value ▾")
+        }
+    }
+
+    /** 프로필 고르기. 설정 1·2번과 같은 값. 감시 중이면 다음에 켤 때 적용된다(출력 설정은 주행 시작 때 스냅샷). */
+    private fun pickProfile(usual: Boolean) {
+        val cur = if (usual) Prefs.usualProfile(this) else Prefs.slowProfile(this)
+        AlertDialog.Builder(this)
+            .setTitle(if (usual) "평소 프로필" else "카메라 앞에서 내릴 프로필")
+            .setSingleChoiceItems(Profile.labels.toTypedArray(), cur.ordinal) { d, i ->
+                val p = Profile.values()[i]
+                if (usual) Prefs.setUsualProfile(this, p) else Prefs.setSlowProfile(this, p)
+                d.dismiss(); render()
+                if (DriveState.running) Toast.makeText(this, "다음에 감시를 켤 때부터 적용됩니다", Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton("취소", null).show()
+    }
+
     // ---- 오른쪽 위 메뉴: "설정"은 항상 보이고 나머지 도구는 ⋮ 안에
     override fun onCreateOptionsMenu(menu: Menu): Boolean {
         menu.add(0, M_SETTINGS, 0, "설정").setShowAsAction(MenuItem.SHOW_AS_ACTION_ALWAYS or MenuItem.SHOW_AS_ACTION_WITH_TEXT)
@@ -66,11 +187,12 @@ class MainActivity : Activity() {
         menu.add(0, M_KEC_SECTIONS, 2, "도로공사 구간단속 CSV")
         menu.add(0, M_KEC_POINTS, 3, "도로공사 이정좌표 CSV")
         menu.add(0, M_ZONES, 4, "어린이보호구역 CSV")
-        menu.add(0, M_TEST_DOWN, 5, "테스트: 감속 신호")
-        menu.add(0, M_TEST_UP, 6, "테스트: 복귀 신호")
-        menu.add(0, M_SIM, 7, "가상 주행 테스트 (주차 중)")
-        menu.add(0, M_PAIR, 8, "커맨더 페어링 모드 켜기/끄기")
-        menu.add(0, M_SCAN, 9, "BLE 스캔 (진단용)")
+        menu.add(0, M_ROADS, 5, "도로망 데이터 (OSM kr-roads.zip)")
+        menu.add(0, M_TEST_DOWN, 6, "테스트: 감속 신호")
+        menu.add(0, M_TEST_UP, 7, "테스트: 복귀 신호")
+        menu.add(0, M_SIM, 8, "가상 주행 테스트 (주차 중)")
+        menu.add(0, M_PAIR, 9, "커맨더 페어링 모드 켜기/끄기")
+        menu.add(0, M_SCAN, 10, "BLE 스캔 (진단용)")
         return true
     }
 
@@ -81,6 +203,7 @@ class MainActivity : Activity() {
             M_KEC_SECTIONS -> pickCsv(REQ_KEC_SECTIONS)
             M_KEC_POINTS -> pickCsv(REQ_KEC_POINTS)
             M_ZONES -> pickCsv(REQ_ZONES)
+            M_ROADS -> pickCsv(REQ_ROADS)
             M_TEST_DOWN -> { outputs.refresh(); outputs.down(Camera(0.0, 0.0, 100, CamKind.SPOT, 0, "테스트"), 300.0) }
             M_TEST_UP -> { outputs.refresh(); outputs.up("테스트", force = true) }
             M_SIM -> if (hasLocationPermission()) DriveService.send(this, DriveService.ACTION_SIMULATE) else askPermissions()
@@ -132,6 +255,9 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        // 설정에서 테마·지도 표시를 바꿨으면 다시 만든다
+        if (Theme.current(this).night != builtNight) { recreate(); return }
+        if ((map.parent != null) != Prefs.mapOn(this)) build()
         DriveState.addListener(listener)
         outputs.refresh()
         render()
@@ -155,6 +281,14 @@ class MainActivity : Activity() {
 
     private fun gpsAgeS(): Long? = if (DriveState.lastFixAt == 0L) null else (SystemClock.elapsedRealtime() - DriveState.lastFixAt) / 1000
 
+    private fun setBand(color: Int, big: String, sub: String) {
+        (band.background as GradientDrawable).setColor(color)
+        band.text = android.text.SpannableStringBuilder().apply {
+            append(big); setSpan(android.text.style.RelativeSizeSpan(1.3f), 0, big.length, 0); setSpan(FontSpan(jua), 0, big.length, 0)
+            if (sub.isNotEmpty()) append("\n").append(sub)
+        }
+    }
+
     private fun render() {
         val running = DriveState.running
         val sim = DriveState.simulating
@@ -177,42 +311,58 @@ class MainActivity : Activity() {
 
         // ---- 상태 띠
         when {
-            !running -> ui.setBand(band, Ui.GREY, "○ 꺼짐",
+            !running -> setBand(t.bandOff, "○ 꺼짐",
                 if (autoOn) "감시 켜기를 누르거나, ${Prefs.autoDeviceName(this).ifEmpty { "차" }}에 연결되면 자동 시작" else "감시 켜기를 누르세요")
-            sim -> ui.setBand(band, Ui.BLUE, "가상 주행 중", st?.note ?: "준비")
-            st?.slowed == true -> ui.setBand(band, Ui.BLUE, "▼ 감속 중",
+            sim -> setBand(t.bandSlow, "가상 주행 중", st?.note ?: "준비")
+            st?.slowed == true -> setBand(t.bandSlow, "▼ 감속 중",
                 (st.zone?.let { "어린이보호구역 · " } ?: "") + "${out.slow.label}로 내림 · " +
-                    (if (out.autoRestore) (st.target?.let { t -> if (t.kind == CamKind.SECTION_START) "구간 종점 지나 ${cfg.restoreAfterM.toInt()}m 뒤 복귀" else "통과 후 ${cfg.restoreAfterM.toInt()}m에 복귀" } ?: "벗어나면 복귀") else "복귀는 직접"))
-            problems.isNotEmpty() -> ui.setBand(band, Ui.ORANGE, "● 작동 중 · 문제", problems.joinToString(" · "))
-            else -> ui.setBand(band, Ui.GREEN, "● 작동 중",
+                    (if (out.autoRestore) (st.target?.let { tg -> if (tg.kind == CamKind.SECTION_START) "구간 종점 지나 ${cfg.restoreAfterM.toInt()}m 뒤 복귀" else "통과 후 ${cfg.restoreAfterM.toInt()}m에 복귀" } ?: "벗어나면 복귀") else "복귀는 직접"))
+            problems.isNotEmpty() -> setBand(t.bandProblem, "● 작동 중 · 문제", problems.joinToString(" · "))
+            else -> setBand(t.bandOn, "● 작동 중",
                 "GPS 정상 · " + (if (out.ble) "커맨더 준비" else "음성만") + " · ${out.usual.label} → ${out.slow.label}")
         }
 
-        // ---- 다음 카메라
+        // ---- 거리 · 속도 · 제한
+        val next = st?.nextCamera
         if (!running) {
-            distView.text = ""; lineView.text = ""; nameView.text = ""; trigView.text = ""; speedView.text = ""
+            distView.text = "–"; lineView.text = "감시 꺼짐"; speedView.text = "–"; signView.text = "–"; subView.text = ""
         } else if (st == null) {
-            distView.text = "GPS 대기 중"; distView.textSize = 24f
-            lineView.text = "위치를 잡으면 카메라를 찾기 시작합니다"; nameView.text = ""; trigView.text = ""; speedView.text = ""
-        } else {
-            val c = st.nextCamera
-            if (c != null) {
-                distView.textSize = 44f
-                distView.text = "${"%,d".format(st.nextDistM?.toInt() ?: 0)} m"
-                lineView.text = buildString {
-                    append("다음 카메라 · 제한 ${c.limitKmh}")
-                    if (c.kind == CamKind.SECTION_START) append(" · 구간단속 ${if (c.sectionLenM > 0) "%.1fkm".format(c.sectionLenM / 1000.0) else "길이 모름"}")
-                    if (c.bearingDeg != null) append(" · 방향 확인됨")
-                }
-                nameView.text = c.name
-                val d = SlowdownEngine(CameraIndex(emptyList()), cfg).triggerDistance(st.speedKmh / 3.6, c.limitKmh)
-                trigView.text = if (st.slowed) st.note else "감속 신호 ${d.toInt()}m 앞에서 (지금 속도 기준)"
-            } else {
-                distView.textSize = 24f
-                distView.text = if (st.estimated) "추측 항법 중" else "2km 안에 카메라 없음"
-                lineView.text = st.zone?.let { "어린이보호구역: $it" } ?: ""; nameView.text = ""; trigView.text = st.note
+            distView.text = "GPS 대기"; lineView.text = "위치를 잡으면 카메라를 찾기 시작합니다"; speedView.text = "–"; signView.text = "–"; subView.text = ""
+        } else if (next != null) {
+            distView.text = "${"%,d".format(st.nextDistM?.toInt() ?: 0)} m"
+            lineView.text = buildString {
+                append("다음 카메라")
+                if (next.kind == CamKind.SECTION_START) append(" · 구간단속 ${if (next.sectionLenM > 0) "%.1fkm".format(next.sectionLenM / 1000.0) else "길이 모름"}")
+                if (next.name.isNotEmpty()) append(" · ").append(next.name.take(18))
             }
-            speedView.text = "현재 ${st.speedKmh.toInt()} km/h" + (if (st.estimated) " (추정)" else "")
+            speedView.text = "${st.speedKmh.toInt()}"
+            speedView.setTextColor(if (st.speedKmh > next.limitKmh + 5) t.cam else t.fg)
+            signView.text = "${next.limitKmh}"
+            subView.text = if (st.slowed) st.note else "감속 신호 ${(st.triggerM ?: 0.0).toInt()}m 앞에서 (지금 속도 기준)"
+        } else {
+            distView.text = if (st.estimated) "추측 항법" else "카메라 없음"
+            lineView.text = st.zone?.let { "어린이보호구역: $it" } ?: "2km 안에 카메라 없음"
+            speedView.text = "${st.speedKmh.toInt()}"; speedView.setTextColor(t.fg); signView.text = "–"
+            subView.text = st.note
+        }
+
+        // ---- 지도
+        map.data = if (running) DriveState.map else null
+        map.caption = st?.road?.takeIf { !it.startsWith("도로 미확인") }?.substringBefore(" · 지도") ?: ""
+
+        // ---- 프로필·버튼
+        chipText(usualChip, "평소", Prefs.usualProfile(this).label)
+        chipText(slowChip, "카메라 앞", Prefs.slowProfile(this).label)
+        toggleBtn.text = if (running) "■ 감시 끄기" else "▶ 감시 켜기"
+        (toggleBtn.background as GradientDrawable).setColor(if (running) t.toggleOff else t.toggleOn)
+        if (running && Prefs.keepScreenOn(this)) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        else window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+
+        // ---- 지금 도로
+        nowView.text = when {
+            !running -> ""
+            st?.road != null -> "지금: ${st.road}" + (DriveState.lastAccM?.let { " · GPS 정확도 ${it.toInt()}m" } ?: "")
+            else -> DriveState.lastAccM?.let { "GPS 정확도 ${it.toInt()}m" } ?: ""
         }
 
         // ---- 점검표
@@ -228,6 +378,12 @@ class MainActivity : Activity() {
             0 -> "✖  카메라 데이터 없음 — 메뉴에서 경찰청 전국 CSV"
             else -> "✔  ${CameraRepo.summaryLine}"
         }
+        val roadsLine = when {
+            !Prefs.useRoads(this) -> if (CameraRepo.hasRoads(this)) "–  도로망 꺼짐(설정) — GPS 방향으로 판단" else null
+            !CameraRepo.hasRoads(this) -> "✖  도로망 없음 — 메뉴에서 kr-roads.zip (옆 도로·반대편 오탐 거름)"
+            running && !sim && st?.road != null -> (if (st.road.startsWith("도로 미확인")) "△  " else "✔  ") + st.road
+            else -> "✔  도로망 ${CameraRepo.roadsInfo.ifEmpty { "있음" }}"
+        }
         val cmdLine = when {
             !out.ble -> "–  커맨더 안 씀 (음성만)"
             S3xyButton.ready -> "✔  커맨더 연결됨 · 준비"
@@ -240,12 +396,7 @@ class MainActivity : Activity() {
         val zoneLine = if (!Prefs.schoolZoneOn(this)) null else when (zoneCount) {
             null -> "–  보호구역 읽는 중"; 0 -> "✖  어린이보호구역 파일 없음 — 메뉴에서 불러오기"; else -> "✔  어린이보호구역 ${zoneCount}곳 · 반경 ${Prefs.schoolZoneRadiusM(this)}m"
         }
-        checkView.text = listOfNotNull(gpsLine, dataLine, cmdLine, autoLine, zoneLine).joinToString("\n")
-
-        // ---- 버튼·화면
-        if (running) ui.setButton(toggleBtn, "감시 끄기", Ui.RED) else ui.setButton(toggleBtn, "감시 켜기", Ui.TEAL)
-        if (running && Prefs.keepScreenOn(this)) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        else window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        checkView.text = listOfNotNull(gpsLine, dataLine, roadsLine, cmdLine, autoLine, zoneLine).joinToString("\n")
 
         // ---- 기록
         val lines = DriveState.log
@@ -257,18 +408,22 @@ class MainActivity : Activity() {
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         val uri = data?.data
-        if (requestCode !in listOf(REQ_CSV, REQ_KEC_SECTIONS, REQ_KEC_POINTS, REQ_ZONES) || resultCode != RESULT_OK || uri == null) return
+        if (requestCode !in listOf(REQ_CSV, REQ_KEC_SECTIONS, REQ_KEC_POINTS, REQ_ZONES, REQ_ROADS) || resultCode != RESULT_OK || uri == null) return
         Toast.makeText(this, "불러오는 중…", Toast.LENGTH_SHORT).show()
         Thread {
             val msg = try {
-                val bytes = contentResolver.openInputStream(uri)!!.use { it.readBytes() }
-                val note = when (requestCode) {
-                    REQ_KEC_SECTIONS -> CameraRepo.importKecSections(this, bytes)
-                    REQ_KEC_POINTS -> CameraRepo.importKecPoints(this, bytes)
-                    REQ_ZONES -> CameraRepo.importZones(this, bytes)
-                    else -> "카메라 ${CameraRepo.import(this, bytes)}개"
+                if (requestCode == REQ_ROADS) {
+                    contentResolver.openInputStream(uri)!!.use { CameraRepo.importRoads(this, it) }
+                } else {
+                    val bytes = contentResolver.openInputStream(uri)!!.use { it.readBytes() }
+                    val note = when (requestCode) {
+                        REQ_KEC_SECTIONS -> CameraRepo.importKecSections(this, bytes)
+                        REQ_KEC_POINTS -> CameraRepo.importKecPoints(this, bytes)
+                        REQ_ZONES -> CameraRepo.importZones(this, bytes)
+                        else -> "카메라 ${CameraRepo.import(this, bytes)}개"
+                    }
+                    note + "\n" + CameraRepo.summary(this)
                 }
-                note + "\n" + CameraRepo.summary(this)
             } catch (e: Exception) {
                 "불러오기 실패: ${e.message}"
             }
@@ -286,6 +441,7 @@ class MainActivity : Activity() {
         private const val REQ_KEC_SECTIONS = 11
         private const val REQ_KEC_POINTS = 12
         private const val REQ_ZONES = 13
+        private const val REQ_ROADS = 14
         private const val M_SETTINGS = 100
         private const val M_CSV = 101
         private const val M_KEC_SECTIONS = 102
@@ -296,5 +452,6 @@ class MainActivity : Activity() {
         private const val M_SIM = 107
         private const val M_PAIR = 108
         private const val M_SCAN = 109
+        private const val M_ROADS = 110
     }
 }

@@ -86,7 +86,7 @@ object Prefs {
     fun setIncludeSignal(ctx: Context, v: Boolean) = put(ctx) { putBoolean("includeSignal", v) }
     fun cityLeftTol(ctx: Context) = sp(ctx).f("cityLeft", 8.0)
     fun setCityLeftTol(ctx: Context, v: Double) = put(ctx) { putFloat("cityLeft", v.coerceIn(3.0, 60.0).toFloat()) }
-    fun cityRightTol(ctx: Context) = sp(ctx).f("cityRight", 40.0)
+    fun cityRightTol(ctx: Context) = sp(ctx).f("cityRight", 25.0)
     fun setCityRightTol(ctx: Context, v: Double) = put(ctx) { putFloat("cityRight", v.coerceIn(5.0, 150.0).toFloat()) }
     fun hwyLeftTol(ctx: Context) = sp(ctx).f("hwyLeft", 15.0)
     fun setHwyLeftTol(ctx: Context, v: Double) = put(ctx) { putFloat("hwyLeft", v.coerceIn(3.0, 60.0).toFloat()) }
@@ -95,6 +95,12 @@ object Prefs {
     /** 도로공사 구간에 경찰청 제한속도를 못 찾았을 때 쓰는 값. */
     fun kecLimitKmh(ctx: Context) = sp(ctx).getInt("kecLimit", 100)
     fun setKecLimitKmh(ctx: Context, v: Int) = put(ctx) { putInt("kecLimit", v.coerceIn(30, 130)) }
+    /** 도로망(OSM) 맵매칭으로 옆 도로·반대편 카메라 거르기. 도로망 파일이 없으면 자연히 안 쓴다. */
+    fun useRoads(ctx: Context) = sp(ctx).getBoolean("useRoads", true)
+    fun setUseRoads(ctx: Context, v: Boolean) = put(ctx) { putBoolean("useRoads", v) }
+    /** 속도 타당성: 제한속도의 이 배수 이상으로 달리면 다른 도로의 카메라로 봄. 0이면 끔. */
+    fun fastRatio(ctx: Context) = sp(ctx).f("fastRatio", 1.5)
+    fun setFastRatio(ctx: Context, v: Double) = put(ctx) { putFloat("fastRatio", (if (v <= 0) 0.0 else v.coerceIn(1.1, 3.0)).toFloat()) }
 
     // ---- 어린이보호구역
     fun schoolZoneOn(ctx: Context) = sp(ctx).getBoolean("zoneOn", false)
@@ -109,6 +115,13 @@ object Prefs {
     fun setDeadReckonMaxM(ctx: Context, v: Int) = put(ctx) { putInt("deadReckonMax", v.coerceIn(200, 10_000)) }
     fun maxAccM(ctx: Context) = sp(ctx).f("maxAcc", 40.0)
     fun setMaxAccM(ctx: Context, v: Double) = put(ctx) { putFloat("maxAcc", v.coerceIn(10.0, 200.0).toFloat()) }
+
+    // ---- 화면
+    /** 화면 테마: AUTO = 폰 다크 모드 따라감, DAY = 항상 낮(파스텔), NIGHT = 항상 밤(네온). */
+    fun theme(ctx: Context) = sp(ctx).getString("theme", "AUTO") ?: "AUTO"
+    fun setTheme(ctx: Context, v: String) = put(ctx) { putString("theme", v) }
+    fun mapOn(ctx: Context) = sp(ctx).getBoolean("mapOn", true)
+    fun setMapOn(ctx: Context, v: Boolean) = put(ctx) { putBoolean("mapOn", v) }
 
     // ---- 출력·연결
     fun alertsOn(ctx: Context) = sp(ctx).getBoolean("alerts", true)
@@ -136,8 +149,8 @@ object Prefs {
         val keepFixed = timing(ctx) == Timing.FIXED
         put(ctx) {
             for (k in listOf("decel", "reaction", "margin", "restoreAfter", "cityLeft", "cityRight", "hwyLeft", "hwyRight", "maxAcc")) remove(k)
-            for (k in listOf("kecLimit", "extraDown", "pressGap", "deadReckonMax", "zoneRadius")) remove(k)
-            remove("renameAdapter"); remove("deadReckon")
+            for (k in listOf("kecLimit", "extraDown", "pressGap", "deadReckonMax", "zoneRadius", "fastRatio")) remove(k)
+            remove("renameAdapter"); remove("deadReckon"); remove("useRoads")
             if (!keepFixed) putString("timing", Timing.AUTO.name)
         }
     }
@@ -154,6 +167,7 @@ object Prefs {
             hwyLeftTolM = hwyLeftTol(ctx), hwyRightTolM = hwyRightTol(ctx),
             maxAccM = maxAccM(ctx),
             schoolZoneOn = schoolZoneOn(ctx), schoolZoneRadiusM = schoolZoneRadiusM(ctx).toDouble(),
+            useRoads = useRoads(ctx), fastRatio = fastRatio(ctx),
         )
     }
 }
@@ -164,6 +178,7 @@ object CameraRepo {
     private fun kecSectionsFile(ctx: Context) = File(ctx.filesDir, "kec_sections.csv")
     private fun kecPointsFile(ctx: Context) = File(ctx.filesDir, "kec_points.csv")
     private fun zonesFile(ctx: Context) = File(ctx.filesDir, "zones.csv")
+    private fun roadsFile(ctx: Context) = File(ctx.filesDir, "roads.zip")
 
     @Volatile private var cached: CameraIndex? = null
     @Volatile private var cachedZones: CameraIndex? = null
@@ -217,6 +232,44 @@ object CameraRepo {
 
     fun hasKec(ctx: Context) = kecSectionsFile(ctx).exists() && kecPointsFile(ctx).exists()
     fun hasZones(ctx: Context) = zonesFile(ctx).exists()
+    fun hasRoads(ctx: Context) = roadsFile(ctx).exists()
+
+    /**
+     * 도로망 kr-roads.zip(tools/osm2roads.py 산출물). 수십 MB라 스트림으로 복사한다. 형식만 확인하고 저장.
+     * 돌려주는 글은 index.txt 요약.
+     */
+    fun importRoads(ctx: Context, input: java.io.InputStream): String {
+        val tmp = File(ctx.filesDir, "roads.zip.tmp")
+        tmp.outputStream().use { out -> input.copyTo(out) }
+        if (!RoadNet.looksLikeRoads(tmp)) { tmp.delete(); throw IllegalArgumentException("도로망 파일(kr-roads.zip)이 아닙니다 — 릴리스 페이지에서 받은 zip을 그대로 넣으세요") }
+        val net = RoadNet.open(tmp)
+        val info = net.info; val tiles = net.tileCount
+        net.close()
+        require(tiles > 0) { "타일이 하나도 없습니다" }
+        tmp.renameTo(roadsFile(ctx))
+        roadsInfo = roadsInfoOf(info)
+        return "도로망 저장: 타일 ${tiles}개, $roadsInfo (${"%.1f".format(roadsFile(ctx).length() / 1e6)} MB)"
+    }
+
+    private fun roadsInfoOf(index: String): String {
+        val kv = index.lines().mapNotNull { l -> l.split("=", limit = 2).takeIf { it.size == 2 }?.let { it[0].trim() to it[1].trim() } }.toMap()
+        return listOfNotNull(kv["date"]?.let { "OSM $it" }, kv["ways"]?.let { "길 ${"%,d".format(it.toLongOrNull() ?: 0)}개" }, kv["classes"]?.let { if (it == "major") "주요 도로만" else null }).joinToString(" · ")
+    }
+
+    /** 점검표용 도로망 요약. 파일이 없으면 "". */
+    @Volatile var roadsInfo: String = ""
+        private set
+
+    /** 도로망을 연다(zip은 열어 두고 타일은 필요할 때 읽는다). 없거나 깨졌으면 null. 카메라는 나중에 setCameras로. */
+    fun openRoads(ctx: Context, cams: List<Camera>): RoadNet? {
+        val f = roadsFile(ctx)
+        if (!f.exists()) { roadsInfo = ""; return null }
+        return try {
+            val net = RoadNet.open(f, cams)
+            roadsInfo = roadsInfoOf(net.info)
+            net
+        } catch (e: Exception) { roadsInfo = "도로망 파일 오류: ${e.message}"; null }
+    }
 
     /** 설정이 바뀌어 다시 만들어야 할 때. */
     fun invalidate() { synchronized(this) { cached = null; cachedZones = null } }
@@ -286,6 +339,7 @@ object CameraRepo {
         return "카메라 ${cams.size}개 로드됨 (구간단속 시점 ${sec}, 신호 표시 ${sig}" +
             (if (kec > 0) ", 도로공사 방향 있는 구간 $kec" else "") + ")" +
             (if (zones > 0) "\n어린이보호구역 ${zones}곳" else "") +
-            (if (kecNote.isNotEmpty()) "\n$kecNote" else "")
+            (if (kecNote.isNotEmpty()) "\n$kecNote" else "") +
+            (if (hasRoads(ctx)) "\n도로망: " + roadsInfo.ifEmpty { "있음" } else "")
     }
 }

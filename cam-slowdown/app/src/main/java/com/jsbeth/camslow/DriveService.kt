@@ -36,6 +36,8 @@ object DriveState {
     /** 추측 항법으로 가고 있는 중. */
     @Volatile var drActive = false
     @Volatile var zoneCount = 0
+    /** 화면 지도용 데이터. 매 fix마다 갱신. */
+    var map: MapData? = null
     val log = ArrayDeque<String>()
     private val listeners = mutableSetOf<() -> Unit>()
     private val main = Handler(Looper.getMainLooper())
@@ -155,6 +157,8 @@ class DriveService : Service(), LocationListener {
         private const val NOTI_ID = 1
         /** GPS fix가 이 시간(ms) 넘게 없으면 경고. */
         private const val GPS_STALE_MS = 15_000L
+        /** 화면 지도에 담을 반경(m). 지도는 앞 500 m를 보여 준다. */
+        private const val MAP_RADIUS_M = 700.0
 
         fun send(ctx: Context, action: String) {
             val i = Intent(ctx, DriveService::class.java).setAction(action)
@@ -172,6 +176,7 @@ class DriveService : Service(), LocationListener {
     private var gpsWarned = false
     // 추측 항법: 마지막 실제 fix
     private var lastFix: Fix? = null
+    private var roads: RoadNet? = null
     private var drLat = 0.0
     private var drLon = 0.0
     private var drDistM = 0.0
@@ -279,12 +284,16 @@ class DriveService : Service(), LocationListener {
         drOn = Prefs.deadReckoning(this)
         drMaxM = Prefs.deadReckonMaxM(this).toDouble()
         if (out.ble) S3xyButton.start(this, { DriveState.log(it) }, out.renameAdapter)
+        roads?.close(); roads = null
         Thread {
             val idx = CameraRepo.load(this)
             val zones = CameraRepo.loadZones(this)
+            val net = if (cfg.useRoads) CameraRepo.openRoads(this, idx.cameras) else null
             main.post {
-                if (seq != loadSeq) return@post
-                val e = SlowdownEngine(idx, cfg, zones)
+                if (seq != loadSeq) { net?.close(); return@post }
+                net?.onTileLoaded = { msg -> DriveState.log(msg) }
+                roads = net
+                val e = SlowdownEngine(idx, cfg, zones, net)
                 engine = e
                 DriveState.zoneCount = zones.cameras.size
                 onReady(e)
@@ -315,7 +324,7 @@ class DriveService : Service(), LocationListener {
             main.postDelayed(watchdog, 5_000)
             main.removeCallbacks(drRunnable); main.postDelayed(drRunnable, 1_000)
             val s = outputs.settings
-            DriveState.log("주행 감시 시작 — 카메라 ${e.cameraCount}개, ${s.describe()}")
+            DriveState.log("주행 감시 시작 — 카메라 ${e.cameraCount}개, ${s.describe()}" + (if (e.hasRoads) ", 도로망 맵매칭" else ", 도로망 없음(GPS 방향 판단)"))
             if (e.cameraCount == 0) { DriveState.log("카메라 데이터가 없습니다 — CSV를 불러오세요"); outputs.say("카메라 데이터가 없습니다") }
             if (e.config.schoolZoneOn && e.zoneCount == 0) DriveState.log("어린이보호구역 감속이 켜져 있지만 보호구역 파일이 없습니다")
             if (s.ble && !S3xyButton.ready) DriveState.log("BLE 켜짐, 커맨더 대기 중 (${S3xyButton.status}) — 커맨더가 붙어야 신호가 나갑니다")
@@ -389,12 +398,27 @@ class DriveService : Service(), LocationListener {
         }
         val st = e.status
         DriveState.status = st
+        DriveState.map = buildMap(e, fix, st)
         DriveState.changed()
         val text = buildString {
             append(if (st.slowed) "감속 중" else "대기")
             st.nextDistM?.let { append(" · 다음 카메라 ${it.toInt()}m (${st.nextCamera?.limitKmh})") }
+            st.road?.let { if (it.startsWith("도로 미확인")) append(" · 도로 미확인") }
         }
         notify(text)
+    }
+
+    /** 지도에 그릴 것: 내 주변 도로 조각(도로망이 있을 때), 카메라(앞 시야·목표 표시), 감속 신호 거리. */
+    private fun buildMap(e: SlowdownEngine, fix: Fix, st: EngineStatus): MapData {
+        val course = st.courseDeg ?: fix.courseDeg ?: DriveState.map?.courseDeg ?: 0.0
+        val segs = roads?.snapshot(fix.lat, fix.lon, MAP_RADIUS_M)
+        val aheadSet = st.ahead.associateBy { it.cam }
+        val cams = e.camerasNear(fix.lat, fix.lon, MAP_RADIUS_M).map { c ->
+            val (east, north) = Geo.toLocal(fix.lat, fix.lon, c.lat, c.lon)
+            val state = when { st.target == c -> 2; aheadSet.containsKey(c) -> 1; else -> 0 }
+            MapCam(east.toFloat(), north.toFloat(), c.limitKmh, state)
+        }
+        return MapData(course, segs, cams, st.triggerM?.toFloat(), st.slowed, fix.estimated)
     }
 
     /**
@@ -470,8 +494,10 @@ class DriveService : Service(), LocationListener {
             outputs.say("감속 상태에서 정지했습니다. 휠을 확인하세요")
         }
         engine?.reset()
+        roads?.close(); roads = null
         DriveState.running = false
         DriveState.status = null
+        DriveState.map = null
         if (S3xyButton.running && !S3xyButton.pairingMode) S3xyButton.stop()
         DriveState.log("주행 감시 정지")
         DriveState.changed()
