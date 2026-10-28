@@ -23,6 +23,7 @@ class SettingsActivity : Activity() {
     private lateinit var permStatus: TextView
     private lateinit var zoneStatus: TextView
     private lateinit var ttsStatus: TextView
+    private lateinit var overlayStatus: TextView
     private var fixedEdit: EditText? = null
     private var limitEdit: EditText? = null
     private val listener = { refreshStatus() }
@@ -114,6 +115,9 @@ class SettingsActivity : Activity() {
         val themes = listOf("AUTO", "DAY", "NIGHT")
         ui.radioGroup(listOf("낮·밤 자동 (폰 다크 모드를 따라감 — 폰 설정에서 일몰 예약 가능)", "항상 낮 (파스텔)", "항상 밤 (네온)"), themes.indexOf(Prefs.theme(this)).coerceAtLeast(0)) { i -> Prefs.setTheme(this, themes[i]) }
         ui.switchRow("메인 화면에 간이 지도", "내 도로·앞길·카메라를 그린다. 끄면 숫자만", Prefs.mapOn(this)) { Prefs.setMapOn(this, it) }
+        ui.switchRow("다른 앱 위에 알약 창", "감시 중 다른 앱을 쓰면 거리·속도·제한속도를 작은 창으로. 끌어서 옮기고 탭하면 앱 열기", Prefs.overlayOn(this)) { Prefs.setOverlayOn(this, it); refreshStatus() }
+        overlayStatus = ui.text("", 13f)
+        ui.row(ui.button("'다른 앱 위에 표시' 권한 요청") { OverlayWindow.requestPermission(this) })
 
         // 8 어린이보호구역
         ui.question(8, "어린이보호구역에서 감속")
@@ -175,6 +179,7 @@ class SettingsActivity : Activity() {
         zoneStatus.text = if (!Prefs.schoolZoneOn(this)) "" else when (zones) { null -> "보호구역 파일 확인 중"; 0 -> "✖  보호구역 파일 없음 — 메인 메뉴에서 '어린이보호구역 CSV'"; else -> "✔  보호구역 ${zones}곳" }
         val t = DriveState.ttsStatus.ifEmpty { outputs.ttsStatus }
         ttsStatus.text = (if (t.contains("준비됨")) "✔  " else "✖  ") + t
+        overlayStatus.text = if (!Prefs.overlayOn(this)) "–  알약 창 꺼짐" else if (OverlayWindow.canDraw(this)) "✔  권한 있음 — 감시 중 앱을 벗어나면 뜹니다" else "✖  '다른 앱 위에 표시' 권한이 없습니다. 아래 버튼으로 허용하세요"
     }
 
     private fun togglePairing() {

@@ -142,6 +142,12 @@ object Prefs {
     fun setTheme(ctx: Context, v: String) = put(ctx) { putString("theme", v) }
     fun mapOn(ctx: Context) = sp(ctx).getBoolean("mapOn", true)
     fun setMapOn(ctx: Context, v: Boolean) = put(ctx) { putBoolean("mapOn", v) }
+    /** 다른 앱 위에 알약 창. "다른 앱 위에 표시" 권한이 있어야 뜬다. */
+    fun overlayOn(ctx: Context) = sp(ctx).getBoolean("overlayOn", true)
+    fun setOverlayOn(ctx: Context, v: Boolean) = put(ctx) { putBoolean("overlayOn", v) }
+    fun overlayX(ctx: Context) = sp(ctx).getInt("overlayX", 24)
+    fun overlayY(ctx: Context) = sp(ctx).getInt("overlayY", 160)
+    fun setOverlayPos(ctx: Context, x: Int, y: Int) = put(ctx) { putInt("overlayX", x); putInt("overlayY", y) }
 
     // ---- 출력·연결
     fun alertsOn(ctx: Context) = sp(ctx).getBoolean("alerts", true)

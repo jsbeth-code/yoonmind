@@ -12,6 +12,8 @@
     <uses-permission android:name="android.permission.VIBRATE" />
     <!-- 안내 음성을 통화 채널(차 스피커)로 보낼 때 오디오 모드·SCO 전환에 필요 -->
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <!-- 다른 앱 위에 알약 창(거리·속도·제한속도). 설정에서 사용자가 허용해야 뜬다 -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <!-- 배터리 최적화 제외: Android 12+에서 백그라운드(블루투스 연결 이벤트)에서 포그라운드 서비스를 띄우기 위한 예외 조건 -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.BLUETOOTH_SCAN" />

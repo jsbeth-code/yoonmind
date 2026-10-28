@@ -49,6 +49,8 @@ object DriveState {
     @Volatile var zoneCount = 0
     /** 화면 지도용 데이터. 매 fix마다 갱신. */
     var map: MapData? = null
+    /** 메인 화면이 앞에 보이는 중(그때는 오버레이 창을 내린다). */
+    @Volatile var activityVisible = false
     val log = ArrayDeque<String>()
     private val listeners = mutableSetOf<() -> Unit>()
     private val main = Handler(Looper.getMainLooper())
@@ -600,6 +602,7 @@ class DriveService : Service(), LocationListener {
         DriveState.status = st
         DriveState.map = buildMap(e, fix, st)
         DriveState.changed()
+        OverlayWindow.sync(this)
         val text = buildString {
             append(if (st.slowed) "감속 중" else "대기")
             st.holdRemainM?.let { append(" · ${st.holdKind} ${it.toInt()}m 남음") }
@@ -668,6 +671,7 @@ class DriveService : Service(), LocationListener {
         DriveState.running = false
         DriveState.status = null
         DriveState.carProfile = null
+        OverlayWindow.hide()
         DriveState.log("가상 주행 끝 — 실제 주행은 [감시 켜기]를 누르세요")
         outputs.say("가상 주행 끝. 실제 주행은 감시 켜기를 누르세요")
         DriveState.changed()
@@ -701,6 +705,7 @@ class DriveService : Service(), LocationListener {
         DriveState.status = null
         DriveState.map = null
         DriveState.carProfile = null
+        OverlayWindow.hide()
         if (S3xyButton.running && !S3xyButton.pairingMode) S3xyButton.stop()
         DriveState.log("주행 감시 정지")
         DriveState.changed()

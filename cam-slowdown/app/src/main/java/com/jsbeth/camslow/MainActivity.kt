@@ -282,6 +282,8 @@ class MainActivity : Activity() {
         // 설정에서 테마·지도 표시를 바꿨으면 다시 만든다
         if (Theme.current(this).night != builtNight) { recreate(); return }
         if ((map.parent != null) != Prefs.mapOn(this)) build()
+        DriveState.activityVisible = true
+        OverlayWindow.hide()
         DriveState.addListener(listener)
         outputs.refresh()
         render()
@@ -295,6 +297,9 @@ class MainActivity : Activity() {
     override fun onPause() {
         main.removeCallbacks(tick)
         DriveState.removeListener(listener)
+        DriveState.activityVisible = false
+        // 앱이 뒤로 가면 알약 창을 띄운다(감시 중일 때만)
+        main.postDelayed({ OverlayWindow.sync(this) }, 300)
         super.onPause()
     }
 
@@ -472,6 +477,11 @@ class MainActivity : Activity() {
         val soundLine = if (!out.alerts) "–  소리 끔" else "–  소리: " + when (out.route) {
             VoiceRoute.SPEAKER -> "폰 스피커"; VoiceRoute.CAR_CALL -> "차 (통화 채널)"; VoiceRoute.MEDIA -> "미디어 채널"
         }
+        val overlayLine = when {
+            !Prefs.overlayOn(this) -> "–  다른 앱 위 알약 창 꺼짐"
+            OverlayWindow.canDraw(this) -> "✔  다른 앱 위 알약 창 (감시 중 앱을 벗어나면 뜸)"
+            else -> "✖  알약 창에 '다른 앱 위에 표시' 권한 필요 — 설정 7번"
+        }
         val autoLine = if (!autoOn) "–  자동 시작 꺼짐" else {
             val missing = AutoStart.missing(this)
             if (missing.isEmpty()) "✔  자동 시작: ${Prefs.autoDeviceName(this)} 연결 시" else "✖  자동 시작에 필요: ${missing.joinToString(", ")}"
@@ -479,7 +489,7 @@ class MainActivity : Activity() {
         val zoneLine = if (!Prefs.schoolZoneOn(this)) null else when (zoneCount) {
             null -> "–  보호구역 읽는 중"; 0 -> "✖  어린이보호구역 파일 없음 — 메뉴에서 불러오기"; else -> "✔  어린이보호구역 ${zoneCount}곳 · 반경 ${Prefs.schoolZoneRadiusM(this)}m"
         }
-        checkView.text = listOfNotNull(gpsLine, dataLine, roadsLine, cmdLine, soundLine, autoLine, zoneLine).joinToString("\n")
+        checkView.text = listOfNotNull(gpsLine, dataLine, roadsLine, cmdLine, soundLine, overlayLine, autoLine, zoneLine).joinToString("\n")
 
         // ---- 기록
         val lines = DriveState.log
