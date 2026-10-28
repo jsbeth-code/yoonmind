@@ -107,7 +107,7 @@ object CameraCsv {
             fun get(i: Int) = if (i in r.indices) r[i].trim() else ""
             val lat = get(iLat).toDoubleOrNull() ?: continue
             val lon = get(iLon).toDoubleOrNull() ?: continue
-            val limit = get(iLimit).toDoubleOrNull()?.toInt() ?: continue
+            var limit = get(iLimit).toDoubleOrNull()?.toInt() ?: continue
             if (limit <= 0 || lat !in 33.0..39.0 || lon !in 124.0..132.0) continue
             val kindText = get(iKind)
             if (kindText.contains("신호") && !kindText.contains("과속")) continue
@@ -122,11 +122,20 @@ object CameraCsv {
             }
             val len = if (kind == CamKind.SPOT) 0
                 else get(iLen).replace(",", "").toDoubleOrNull()?.let { lenToMeters(it) } ?: 0
+            // 어린이보호구역 카메라인데 데이터 제한속도가 옛 값(50·60)인 경우가 있다. 설치장소 이름에 학교·보호구역이 들어가면 30으로 본다.
+            if (limit > SCHOOL_ZONE_KMH && isSchoolZoneName(place)) limit = SCHOOL_ZONE_KMH
             val name = listOf(get(iRoad), place).filter { it.isNotEmpty() }.joinToString(" ")
             out += Row(Camera(lat, lon, limit, kind, len, name, kindText), place.contains("구간"), get(iRoad).replace(" ", ""), dirCode(get(iDir)))
         }
         return pairSections(resolveSections(out))
     }
+
+    /** 어린이보호구역 제한속도. */
+    const val SCHOOL_ZONE_KMH = 30
+    private val SCHOOL_WORDS = listOf("초등학교", "초교", "어린이", "보호구역", "유치원", "어린이집")
+
+    /** 설치장소 글로 보호구역 카메라를 가린다("동일로 중목초교 앞", "OO초등학교 정문"). 지명만 있는 카메라는 못 잡는다. */
+    fun isSchoolZoneName(place: String): Boolean = SCHOOL_WORDS.any { place.contains(it) }
 
     /** 도로노선방향 코드. "01"→"1". 1·2만 쓴다(도로마다 뜻은 다르지만 같은 도로 안에선 같은 방향끼리 같은 코드). 3(양방향)·빈칸은 모름. */
     private fun dirCode(s: String): String = s.trim().trimStart('0').let { if (it == "1" || it == "2") it else "" }
