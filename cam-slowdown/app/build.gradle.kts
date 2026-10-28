@@ -11,8 +11,8 @@ android {
         applicationId = "com.jsbeth.camslow"
         minSdk = 26
         targetSdk = 34
-        versionCode = 7
-        versionName = "0.6"
+        versionCode = 10
+        versionName = "0.7.0"
     }
 
     // 고정 디버그 키: 빌드마다 서명이 바뀌면 업데이트 설치가 막히므로 저장소에 둔다

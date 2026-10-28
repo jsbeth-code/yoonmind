@@ -1,8 +1,10 @@
 package com.jsbeth.camslow
 
+import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.max
+import kotlin.math.min
 import kotlin.math.sin
 
 data class Fix(
@@ -34,8 +36,8 @@ data class EngineConfig(
     val minLimitKmh: Int = 0,
     /** 현재 속도가 이미 제한속도 이하면 감속 신호를 생략. */
     val skipIfBelowLimit: Boolean = false,
-    /** 구간단속 길이를 모를 때 최대 유지 거리(m). */
-    val maxSectionHoldM: Double = 30_000.0,
+    /** 구간단속 길이를 모르고 짝 종점도 모를 때 최대 유지 거리(m). 실제 구간은 최장 28 km지만 길이도 짝도 없는 데이터는 믿기 어려워 짧게 잡는다. */
+    val maxSectionHoldM: Double = 10_000.0,
     /**
      * 방향을 모르는 카메라의 허용폭(m) — GPS 기하로 판단할 때. 도심(제한속도 < hwyLimitKmh)은 좁게, 고속도로는 넓게.
      * 왼쪽이 좁은 건 반대 차로를 거르기 위해(우측통행). 여기에 거리 비례분(leftSlope·rightSlope × 앞 거리)이 더해진다.
@@ -50,7 +52,10 @@ data class EngineConfig(
     val hwyRightSlope: Double = 0.05,
     /** 이 제한속도부터 고속도로용 허용폭을 쓴다. */
     val hwyLimitKmh: Int = 80,
-    /** 방향을 아는 카메라(도로공사·중심선 추정)는 반대 방향이 각도로 걸러지므로 좌우 같게 넓게 본다. */
+    /** 제한속도가 이 값 이하인 카메라(어린이보호구역·이면도로)는 좁은 길에 있으니 오른쪽 허용폭을 narrowRightTolM로 줄인다. 옆 큰길에서 잡히는 오탐 방지. */
+    val narrowLimitKmh: Int = 40,
+    val narrowRightTolM: Double = 15.0,
+    /** 방향을 정확히 아는 카메라(도로공사·중심선 추정)는 반대 방향이 각도로 걸러지므로 좌우 같게 넓게 본다. */
     val directedTolM: Double = 40.0,
     /** 이미 목표로 잡은 카메라를 추적할 때의 최소 왼쪽 허용폭(m). 넓은 도로에서 카메라 직전에 "경로 이탈"로 보지 않도록. */
     val trackLeftTolM: Double = 25.0,
@@ -62,12 +67,19 @@ data class EngineConfig(
     val includeSignalCams: Boolean = true,
     /** 구간 시점 통과 후 이 거리(m) 안에서 보이는 종점은 반대 방향 구간의 종점으로 보고 무시. */
     val minSectionM: Double = 500.0,
-    /** 방향을 아는 카메라는 내 진행 방향과 이 각도(도) 넘게 다르면 무시. */
+    /** 방향을 아는 카메라는 내 진행 방향과 이 각도(도) 넘게 다르면 무시(카메라에 headingTolDeg가 있으면 그 값). */
     val maxHeadingDiffDeg: Double = 60.0,
     /** 어린이보호구역 시설 반경 안에 들어가면 감속, 반경+복귀거리 밖으로 나가면 복귀. */
     val schoolZoneOn: Boolean = false,
     val schoolZoneRadiusM: Double = 300.0,
     val lookaheadM: Double = 2_000.0,
+    /** 구간 유지 중: 종점 반대쪽으로 이만큼(m) 멀어지면 반대 방향으로 보고 복귀. */
+    val holdBackM: Double = 300.0,
+    /** 구간 유지 중: 진행 방향이 구간 방향과 이 각도 넘게 다른 fix가 holdReverseFixes번 이어지면(유턴·반대 방향) 복귀. */
+    val holdReverseDeg: Double = 120.0,
+    val holdReverseFixes: Int = 5,
+    /** 구간 유지 중: 짝 종점이 이 거리(m) 안에 오면 종점 통과로 본다. */
+    val partnerReachM: Double = 150.0,
     /** GPS 방향 평활화에 쓰는 최근 fix 수. 서로 이 각도(도) 안일 때만 평균한다(커브에선 그대로). */
     val smoothFixes: Int = 3,
     val smoothMaxDiffDeg: Double = 15.0,
@@ -89,6 +101,8 @@ data class EngineConfig(
 sealed class EngineEvent {
     data class Down(val camera: Camera, val distM: Double) : EngineEvent()
     data class Up(val reason: String) : EngineEvent()
+    /** 구간단속 시점을 지나 유지에 들어감. holdM = 복귀까지 남은 거리(길이를 모르면 상한). */
+    data class Hold(val camera: Camera, val holdM: Double, val lengthKnown: Boolean) : EngineEvent()
 }
 
 data class EngineStatus(
@@ -101,14 +115,18 @@ data class EngineStatus(
     /** 보호구역 감속 중이면 그 이름. */
     val zone: String? = null,
     val estimated: Boolean = false,
+    /** 다음 카메라에 감속 신호를 보낼 거리(m, 지금 속도 기준). */
+    val triggerM: Double? = null,
+    /** 카메라를 지나 복귀를 기다리는 중이면 남은 거리(m). */
+    val holdRemainM: Double? = null,
+    /** 유지 사유: "구간단속" / "통과" / null. */
+    val holdKind: String? = null,
     /** 도로망 상태: "동부간선도로 · 북동 · 지도 제한 80", "도로 미확인 — …", 도로망이 없으면 null. */
     val road: String? = null,
     /** 이번 판단에 쓴 진행 방향(도로 방향 또는 평활화한 GPS 방향). 저속·정지면 null. */
     val courseDeg: Double? = null,
     /** 앞 시야의 카메라(가까운 순). 화면 지도용. */
     val ahead: List<AheadCam> = emptyList(),
-    /** 다음 카메라의 감속 신호 거리(m). */
-    val triggerM: Double? = null,
 )
 
 data class AheadCam(val cam: Camera, val alongM: Double, val viaRoad: Boolean)
@@ -123,6 +141,12 @@ data class AheadCam(val cam: Camera, val alongM: Double, val viaRoad: Boolean)
  *  - 도로망(RoadMap)이 있고 내 위치가 도로에 붙으면: 도로를 따라 앞으로 이어지는 길 위의 카메라(경로 거리). 다른 도로에
  *    붙은 카메라는 아무리 가까워도 뺀다. 어느 도로에도 안 붙은 카메라만 아래 기하 판단으로 보충한다.
  *  - 아니면(도로망 없음, 도로 밖, 모호): GPS 진행 방향(평활화) 기준 앞·좌우 허용폭 안의 카메라.
+ *
+ * 구간단속 유지 중에는 잘못 잡힌 유지가 오래가지 않도록 세 가지를 본다:
+ *  - 짝 종점(partner) 가까이 오면 종점 통과로 보고 복귀 거리만 남긴다(종점 카메라를 못 봐도).
+ *  - 종점 반대쪽으로 holdBackM 넘게 멀어지거나, 진행 방향이 구간 방향(짝이 없으면 시점 통과 때 방향)과 뒤집힌 채
+ *    holdReverseFixes번 이어지면 "반대 방향"으로 복귀한다.
+ *  - 길이도 짝도 모르면 maxSectionHoldM에서 끝낸다.
  */
 class SlowdownEngine(
     private val index: CameraIndex,
@@ -134,10 +158,16 @@ class SlowdownEngine(
     private var target: Camera? = null
     private var passedHoldUntilOdo: Double? = null
     private var passedAtOdo = 0.0
+    /** 시점을 지날 때의 진행 방향. 짝 종점이 없는 구간의 방향 기준. */
+    private var passCourse: Double? = null
+    private var reverseCount = 0
     private var lostCount = 0
     private var odo = 0.0
     private var last: Fix? = null
     private var zone: Camera? = null
+    /** 운전자가 직접 복귀한 카메라·보호구역. 지나칠 때까지 다시 잡지 않는다. */
+    private var suppressed: Camera? = null
+    private var suppressedZone: Camera? = null
     private val courses = ArrayDeque<Double>()
     private val speeds = ArrayDeque<Double>()
     private val seen = HashMap<Camera, Int>()
@@ -153,8 +183,22 @@ class SlowdownEngine(
     fun camerasNear(lat: Double, lon: Double, radiusM: Double): List<Camera> = index.near(lat, lon, radiusM)
 
     fun reset() {
-        target = null; passedHoldUntilOdo = null; lostCount = 0; last = null; zone = null
+        target = null; passedHoldUntilOdo = null; passCourse = null; reverseCount = 0; lostCount = 0; last = null; zone = null
+        suppressed = null; suppressedZone = null
         courses.clear(); speeds.clear(); seen.clear()
+    }
+
+    /**
+     * 운전자가 "지금 복귀"를 눌렀을 때. 감속 상태를 풀고, 같은 카메라·보호구역에는 지나칠 때까지 다시 걸리지 않게 한다.
+     * 감속 중이었으면 true(복귀 신호를 보내야 함).
+     */
+    fun release(): Boolean {
+        val was = isSlowed
+        suppressed = target ?: suppressed
+        suppressedZone = zone ?: suppressedZone
+        target = null; passedHoldUntilOdo = null; passCourse = null; reverseCount = 0; lostCount = 0; zone = null
+        status = status.copy(slowed = false, target = null, zone = null, holdRemainM = null, holdKind = null, note = if (was) "직접 복귀" else status.note)
+        return was
     }
 
     /** 감속 신호를 보내기 시작할 거리(m). 고정 거리 모드면 그 값, 아니면 제동거리 + 반응거리 + 여유. BLE 송출 시간은 둘 다에 더한다. */
@@ -174,9 +218,12 @@ class SlowdownEngine(
         return (Math.toDegrees(atan2(x, y)) + 360.0) % 360.0
     }
 
-    /** 최근 fastHoldFixes개 fix 모두 제한속도 × fastRatio 이상으로 달렸나. */
+    /**
+     * 최근 fastHoldFixes개 fix 모두 제한속도 × fastRatio 이상으로 달렸나. 제한 narrowLimitKmh 이하(어린이보호구역 30 등)에는
+     * 적용하지 않는다 — FSD가 지도 제한(50)대로 달리다 보호구역 카메라를 만나는 경우를 놓치면 안 되고, 좁은 길 오탐은 허용폭이 거른다.
+     */
     private fun implausiblyFast(limitKmh: Int): Boolean {
-        if (config.fastRatio <= 0 || speeds.size < config.fastHoldFixes) return false
+        if (config.fastRatio <= 0 || speeds.size < config.fastHoldFixes || limitKmh <= config.narrowLimitKmh) return false
         val th = limitKmh / 3.6 * config.fastRatio
         return speeds.all { it >= th }
     }
@@ -184,10 +231,17 @@ class SlowdownEngine(
     /** 앞 카메라 하나. viaRoad = 도로망 경로로 확인된 것(along은 경로 거리). */
     private class Rel(val cam: Camera, val along: Double, val cross: Double, val viaRoad: Boolean = false)
 
+    /** 정확한 방향(도로공사·중심선 추정)을 아는 카메라. 시점→종점 추정 방향(headingTolDeg 있음)은 느슨해서 일반 규칙대로 본다. */
+    private fun preciselyDirected(cam: Camera) = cam.bearingDeg != null && cam.headingTolDeg == null
+
+    /** 좁은 길 카메라(제한 narrowLimitKmh 이하, 정확한 방향 없음): 옆 큰길에서 잡히지 않도록 오른쪽도 좁게. */
+    private fun isNarrow(cam: Camera) = cam.limitKmh <= config.narrowLimitKmh && !preciselyDirected(cam)
+
     /** 카메라 종류별 기본 허용폭 (왼쪽, 오른쪽, 오른쪽 비례). */
     private fun baseTol(cam: Camera): Triple<Double, Double, Double> = when {
-        cam.bearingDeg != null -> Triple(config.directedTolM, config.directedTolM, config.rightSlope)
+        preciselyDirected(cam) -> Triple(config.directedTolM, config.directedTolM, config.rightSlope)
         cam.limitKmh >= config.hwyLimitKmh -> Triple(config.hwyLeftTolM, config.hwyRightTolM, config.hwyRightSlope)
+        isNarrow(cam) -> Triple(config.cityLeftTolM, min(config.cityRightTolM, config.narrowRightTolM), config.rightSlope)
         else -> Triple(config.cityLeftTolM, config.cityRightTolM, config.rightSlope)
     }
 
@@ -197,6 +251,9 @@ class SlowdownEngine(
         val right = rb + rs * max(0.0, along)
         return cross >= -left && cross <= right
     }
+
+    private fun headingOk(course: Double, cam: Camera): Boolean =
+        cam.bearingDeg?.let { Geo.angleDiff(course, it) <= (cam.headingTolDeg ?: config.maxHeadingDiffDeg) } ?: true
 
     fun update(fix: Fix): List<EngineEvent> {
         val acc = fix.accM
@@ -226,17 +283,26 @@ class SlowdownEngine(
         val view = if (hasRoads) roads!!.view(fix.lat, fix.lon, smooth, config.lookaheadM) else null
         val course = view?.bearingDeg ?: smooth
 
+        // 직접 복귀한 카메라는 지나치거나 시야 밖이면 다시 잡을 수 있게 푼다
+        suppressed?.let { s ->
+            val (a, _) = Geo.alongCross(fix.lat, fix.lon, course, s.lat, s.lon)
+            if (a < -50.0 || a > config.lookaheadM) suppressed = null
+        }
+        suppressedZone?.let { z ->
+            if (Geo.distance(fix.lat, fix.lon, z.lat, z.lon) > config.schoolZoneRadiusM + config.restoreAfterM) suppressedZone = null
+        }
+
         fun passesFilter(c: Camera) = c.limitKmh >= config.minLimitKmh && (config.includeSignalCams || !c.signalOnly)
         val rel = index.near(fix.lat, fix.lon, config.lookaheadM)
             .filter { passesFilter(it) }
-            .filter { c -> c.bearingDeg?.let { Geo.angleDiff(course, it) <= config.maxHeadingDiffDeg } ?: true }
+            .filter { headingOk(course, it) }
             .filter { c -> roads?.servesHeading(c, course) != false }
             .map { c -> Geo.alongCross(fix.lat, fix.lon, course, c.lat, c.lon).let { (a, x) -> Rel(c, a, x) } }
 
         val ahead: List<Rel> = if (view != null) {
             val gap = config.roadMaxspeedGapKmh
             val onRoad = view.ahead
-                .filter { passesFilter(it.cam) }
+                .filter { passesFilter(it.cam) && headingOk(course, it.cam) }
                 .filter { gap <= 0 || view.maxspeedKmh <= 0 || it.cam.limitKmh > view.maxspeedKmh - gap }
                 .map { Rel(it.cam, it.alongM, 0.0, viaRoad = true) }
             val loose = rel.filter { !roads!!.isAttached(it.cam) && it.along > 0 && isAhead(it.along, it.cross, it.cam) }
@@ -251,7 +317,7 @@ class SlowdownEngine(
         val next = ahead.firstOrNull { it.cam.kind != CamKind.SECTION_END }
 
         fun triggerCandidate(): Rel? = ahead.firstOrNull { r ->
-            r.cam.kind != CamKind.SECTION_END &&
+            r.cam.kind != CamKind.SECTION_END && r.cam !== suppressed &&
                 r.along <= triggerDistance(fix.speedMps, r.cam.limitKmh) &&
                 (seen[r.cam] ?: 0) >= config.confirmFixes &&
                 !(config.skipIfBelowLimit && speedKmh <= r.cam.limitKmh) &&
@@ -260,10 +326,13 @@ class SlowdownEngine(
 
         var camDown: Rel? = null
         var camUpReason: String? = null
+        var holdEvent: EngineEvent.Hold? = null
+        fun drop(reason: String) { target = null; passedHoldUntilOdo = null; passCourse = null; reverseCount = 0; lostCount = 0; camUpReason = reason }
+
         val t = target
         if (t == null) {
             triggerCandidate()?.let { r ->
-                target = r.cam; passedHoldUntilOdo = null; lostCount = 0
+                target = r.cam; passedHoldUntilOdo = null; passCourse = null; reverseCount = 0; lostCount = 0
                 camDown = r
             }
         } else if (!fix.estimated) {
@@ -276,31 +345,55 @@ class SlowdownEngine(
                 // 도로망으로 붙은 카메라는 "내 앞길에서 사라짐", 아니면 "허용폭(추적용) 밖"이 이탈
                 val attachedNow = view != null && roads!!.isAttached(t)
                 // 통과 = 바로 옆을 지나침. 교차로에서 꺾어 카메라가 옆쪽 멀리(가로 30m 밖) 남았으면 통과가 아니라 이탈
-                if (along <= 0 && along > -300 && (!attachedNow || kotlin.math.abs(gCross) <= 30.0)) {
-                    val extra = if (t.kind == CamKind.SECTION_START)
-                        (if (t.sectionLenM > 0) t.sectionLenM.toDouble() else config.maxSectionHoldM) else 0.0
+                if (along <= 0 && along > -300 && (!attachedNow || abs(gCross) <= 30.0)) {
+                    val section = t.kind == CamKind.SECTION_START
+                    val extra = if (section) (if (t.sectionLenM > 0) t.sectionLenM.toDouble() else config.maxSectionHoldM) else 0.0
                     passedHoldUntilOdo = odo + config.restoreAfterM + extra
                     passedAtOdo = odo
+                    passCourse = course
+                    reverseCount = 0
                     lostCount = 0
+                    if (section) holdEvent = EngineEvent.Hold(t, config.restoreAfterM + extra, t.sectionLenM > 0)
                 } else {
                     val lostNow = along <= -300 || (entry == null && (attachedNow || !isAhead(gAlong, gCross, t, tracking = true)))
                     if (lostNow) {
                         // 카메라를 지나치지 않았는데 앞에서 사라짐 = 다른 길로 빠짐
-                        if (++lostCount >= config.lostFixes) { target = null; passedHoldUntilOdo = null; lostCount = 0; camUpReason = "경로 이탈" }
+                        if (++lostCount >= config.lostFixes) drop("경로 이탈")
                     } else lostCount = 0
                 }
             } else {
-                // 구간단속: 종점 카메라를 지나면 거기서부터 복귀 거리만 남긴다(길이를 알아도 — 데이터의 길이가 틀릴 수 있다).
-                // 시점 바로 옆의 종점은 반대 방향 구간의 종점이므로 minSectionM 이후부터만 인정한다.
-                if (t.kind == CamKind.SECTION_START && odo - passedAtOdo >= config.minSectionM &&
-                    rel.any { it.cam.kind == CamKind.SECTION_END && it.along in -60.0..0.0 && isAhead(0.0, it.cross, it.cam) }
-                ) passedHoldUntilOdo = minOf(hold, odo + config.restoreAfterM)
-                if (odo >= (passedHoldUntilOdo ?: hold)) {
-                    val again = triggerCandidate()
-                    if (again != null) {
-                        // 다음 카메라가 이미 가까우면 올리지 않고 그대로 이어간다
-                        target = again.cam; passedHoldUntilOdo = null; lostCount = 0
-                    } else { target = null; passedHoldUntilOdo = null; lostCount = 0; camUpReason = "카메라 통과" }
+                if (t.kind == CamKind.SECTION_START) {
+                    // 구간 방향: 짝 종점이 있으면 시점→종점, 없으면 시점을 지날 때의 진행 방향
+                    val pLat = t.partnerLat; val pLon = t.partnerLon
+                    val axis = if (pLat != null && pLon != null) Geo.bearing(t.lat, t.lon, pLat, pLon) else passCourse
+                    if (pLat != null && pLon != null && axis != null) {
+                        // 짝 종점을 지남(옆이거나 뒤, partnerReachM 안) = 종점 통과(종점 카메라를 못 봐도 복귀 거리만 남긴다)
+                        val (pa, _) = Geo.alongCross(fix.lat, fix.lon, course, pLat, pLon)
+                        if (odo - passedAtOdo >= config.minSectionM && pa <= 0 && Geo.distance(fix.lat, fix.lon, pLat, pLon) <= config.partnerReachM)
+                            passedHoldUntilOdo = min(passedHoldUntilOdo ?: hold, odo + config.restoreAfterM)
+                        // 종점 반대쪽으로 멀어짐 = 반대 방향 구간을 잡은 것
+                        val (p, _) = Geo.alongCross(t.lat, t.lon, axis, fix.lat, fix.lon)
+                        if (p < -config.holdBackM) drop("반대 방향")
+                    }
+                    if (target != null && axis != null) {
+                        // 진행 방향이 구간 방향과 뒤집힘(유턴·반대 방향)
+                        if (Geo.angleDiff(course, axis) > config.holdReverseDeg) { if (++reverseCount >= config.holdReverseFixes) drop("반대 방향") }
+                        else reverseCount = 0
+                    }
+                }
+                if (target != null) {
+                    // 구간단속: 종점 카메라를 지나면 거기서부터 복귀 거리만 남긴다(길이를 알아도 — 데이터의 길이가 틀릴 수 있다).
+                    // 시점 바로 옆의 종점은 반대 방향 구간의 종점이므로 minSectionM 이후부터만 인정한다.
+                    if (t.kind == CamKind.SECTION_START && odo - passedAtOdo >= config.minSectionM &&
+                        rel.any { it.cam.kind == CamKind.SECTION_END && it.along in -60.0..0.0 && isAhead(0.0, it.cross, it.cam) }
+                    ) passedHoldUntilOdo = min(passedHoldUntilOdo ?: hold, odo + config.restoreAfterM)
+                    if (odo >= (passedHoldUntilOdo ?: hold)) {
+                        val again = triggerCandidate()
+                        if (again != null) {
+                            // 다음 카메라가 이미 가까우면 올리지 않고 그대로 이어간다
+                            target = again.cam; passedHoldUntilOdo = null; passCourse = null; reverseCount = 0; lostCount = 0
+                        } else drop("카메라 통과")
+                    }
                 }
             }
         }
@@ -312,6 +405,7 @@ class SlowdownEngine(
             val z = zone
             if (z == null) {
                 zones.near(fix.lat, fix.lon, config.schoolZoneRadiusM)
+                    .filter { it !== suppressedZone }
                     .minByOrNull { Geo.distance(fix.lat, fix.lon, it.lat, it.lon) }
                     ?.let { zone = it; zoneEntered = it }
             } else if (zones.near(fix.lat, fix.lon, config.schoolZoneRadiusM + config.restoreAfterM).isEmpty()) {
@@ -328,8 +422,16 @@ class SlowdownEngine(
         } else if (slowedBefore && !slowedAfter) {
             events += EngineEvent.Up(camUpReason ?: (if (zoneLeft) "보호구역 벗어남" else "복귀"))
         }
+        holdEvent?.let { events += it }
 
         val nowTarget = target
+        val holdUntil = passedHoldUntilOdo
+        val holdRemain = if (nowTarget != null && holdUntil != null) max(0.0, holdUntil - odo) else null
+        val holdKind = when {
+            holdRemain == null -> null
+            nowTarget?.kind == CamKind.SECTION_START -> "구간단속"
+            else -> "통과"
+        }
         status = EngineStatus(
             slowed = slowedAfter,
             target = nowTarget,
@@ -341,19 +443,22 @@ class SlowdownEngine(
                 fix.estimated -> "대기(추측 항법)"
                 nowTarget == null && zone != null -> "보호구역 감속 중"
                 nowTarget == null -> "대기"
-                passedHoldUntilOdo != null -> "통과, 복귀 대기 ${max(0.0, passedHoldUntilOdo!! - odo).toInt()}m"
+                holdRemain != null && holdKind == "구간단속" -> "구간단속 유지, 종점까지 ${holdRemain.toInt()}m"
+                holdRemain != null -> "통과, 복귀 대기 ${holdRemain.toInt()}m"
                 else -> "감속 중"
             },
             zone = zone?.name,
             estimated = fix.estimated,
-            courseDeg = course,
-            ahead = ahead.map { AheadCam(it.cam, it.along, it.viaRoad) },
             triggerM = next?.let { triggerDistance(fix.speedMps, it.cam.limitKmh) },
+            holdRemainM = holdRemain,
+            holdKind = holdKind,
             road = when {
                 !hasRoads -> null
                 view == null -> "도로 미확인 — GPS 방향으로 판단"
                 else -> view.describe()
             },
+            courseDeg = course,
+            ahead = ahead.map { AheadCam(it.cam, it.along, it.viaRoad) },
         )
         return events
     }

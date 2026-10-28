@@ -60,6 +60,9 @@ object S3xyButton {
     private val sent = Semaphore(0)
     /** 주행과 무관하게 페어링을 위해 켜 둔 상태. 서비스가 끝나도 끄지 않는다. */
     @Volatile var pairingMode = false
+    /** 보내는 중인 누름 묶음의 진행: (보낸 수, 전체). 다 보내면 null. 화면이 "클릭 2/3"을 보여 주는 데 쓴다. */
+    @Volatile var progress: Pair<Int, Int>? = null
+    @Volatile var progressKind: Press? = null
 
     val running: Boolean get() = server != null
     val ready: Boolean get() = device != null && subscribed
@@ -228,17 +231,21 @@ object S3xyButton {
     fun press(kind: Press, times: Int, gapMs: Long) {
         worker.execute {
             if (!ready) { log("커맨더가 연결·구독되지 않아 ${kind.label} 못 보냄 (상태: $status)"); return@execute }
-            repeat(times) { i ->
-                val ok = when (kind) {
-                    Press.SINGLE -> notify(byteArrayOf(0x01)) && gap(5) && notify(byteArrayOf(0x00)) && gap(5) &&
-                        notify(byteArrayOf(0xC1.toByte(), 0x01)) && gap(5) && notify(byteArrayOf(0x00))
-                    Press.DOUBLE -> notify(byteArrayOf(0xC1.toByte(), 0x02))
-                    Press.LONG -> notify(byteArrayOf(0xC3.toByte(), 0x01))
+            progressKind = kind; progress = 0 to times
+            try {
+                repeat(times) { i ->
+                    val ok = when (kind) {
+                        Press.SINGLE -> notify(byteArrayOf(0x01)) && gap(5) && notify(byteArrayOf(0x00)) && gap(5) &&
+                            notify(byteArrayOf(0xC1.toByte(), 0x01)) && gap(5) && notify(byteArrayOf(0x00))
+                        Press.DOUBLE -> notify(byteArrayOf(0xC1.toByte(), 0x02))
+                        Press.LONG -> notify(byteArrayOf(0xC3.toByte(), 0x01))
+                    }
+                    if (ok) progress = (i + 1) to times
+                    log(if (ok) "BLE ${kind.label} ${i + 1}/$times 송출" else "BLE ${kind.label} ${i + 1}/$times 실패 (상태: $status)")
+                    if (!ok) return@execute
+                    Thread.sleep(gapMs)
                 }
-                log(if (ok) "BLE ${kind.label} ${i + 1}/$times 송출" else "BLE ${kind.label} ${i + 1}/$times 실패 (상태: $status)")
-                if (!ok) return@execute
-                Thread.sleep(gapMs)
-            }
+            } finally { progress = null; progressKind = null }
         }
     }
 

@@ -22,6 +22,7 @@ class SettingsActivity : Activity() {
     private lateinit var cmdStatus: TextView
     private lateinit var permStatus: TextView
     private lateinit var zoneStatus: TextView
+    private lateinit var ttsStatus: TextView
     private var fixedEdit: EditText? = null
     private var limitEdit: EditText? = null
     private val listener = { refreshStatus() }
@@ -103,6 +104,12 @@ class SettingsActivity : Activity() {
         // 7 안내
         ui.question(7, "안내·화면")
         ui.switchRow("음성·효과음", "", Prefs.alertsOn(this)) { Prefs.setAlertsOn(this, it) }
+        ui.text("소리를 어디로 낼까요?", 14f)
+        val routes = VoiceRoute.values()
+        ui.radioGroup(routes.map { "${it.label}\n${it.sub}" }, Prefs.voiceRoute(this).ordinal) { i -> Prefs.setVoiceRoute(this, routes[i]) }
+        ui.hint("테슬라는 미디어 소스가 블루투스(폰)일 때만 폰의 미디어 소리를 틀어 줍니다. 그래서 기본은 폰 스피커(알람 채널)입니다. 차 스피커(통화 채널)는 차에서 테스트 버튼으로 직접 들어 보고 고르세요.")
+        ui.row(ui.button("안내 소리 테스트") { outputs.test(); refreshStatus() })
+        ttsStatus = ui.text("", 13f)
         ui.switchRow("감시 중 화면 켜 두기", "거치대에 올려 두고 볼 때", Prefs.keepScreenOn(this)) { Prefs.setKeepScreenOn(this, it) }
         val themes = listOf("AUTO", "DAY", "NIGHT")
         ui.radioGroup(listOf("낮·밤 자동 (폰 다크 모드를 따라감 — 폰 설정에서 일몰 예약 가능)", "항상 낮 (파스텔)", "항상 밤 (네온)"), themes.indexOf(Prefs.theme(this)).coerceAtLeast(0)) { i -> Prefs.setTheme(this, themes[i]) }
@@ -124,10 +131,12 @@ class SettingsActivity : Activity() {
             hint("허용폭은 도로망에 안 붙은 카메라를 GPS 방향으로 판단할 때만 쓴다. 거리 비례분(왼쪽 1.5%, 오른쪽 3~5%)이 더해진다.")
             numberRow("도심 왼쪽 허용폭(m)", "제한 80 미만 카메라. 작을수록 반대 차로를 잘 거름 (8)", Prefs.cityLeftTol(this@SettingsActivity).toInt().toString(), false) { Prefs.setCityLeftTol(this@SettingsActivity, it) }
             numberRow("도심 오른쪽 허용폭(m)", "(25)", Prefs.cityRightTol(this@SettingsActivity).toInt().toString(), false) { Prefs.setCityRightTol(this@SettingsActivity, it) }
+            numberRow("제한 40 이하 오른쪽 허용폭(m)", "어린이보호구역·이면도로 카메라. 옆 큰길에서 잡히지 않도록 좁게 (15)", Prefs.narrowRightTol(this@SettingsActivity).toInt().toString(), false) { Prefs.setNarrowRightTol(this@SettingsActivity, it) }
             numberRow("고속도로 왼쪽 허용폭(m)", "제한 80 이상이면서 방향을 모르는 카메라 (15)", Prefs.hwyLeftTol(this@SettingsActivity).toInt().toString(), false) { Prefs.setHwyLeftTol(this@SettingsActivity, it) }
             numberRow("고속도로 오른쪽 허용폭(m)", "(60)", Prefs.hwyRightTol(this@SettingsActivity).toInt().toString(), false) { Prefs.setHwyRightTol(this@SettingsActivity, it) }
             numberRow("속도 타당성 배수", "제한속도의 이 배수 이상으로 달리면 다른 도로의 카메라로 봄. 0이면 끔 (1.5)", Prefs.fastRatio(this@SettingsActivity).toString(), true) { Prefs.setFastRatio(this@SettingsActivity, it) }
             numberRow("도로공사 구간 제한속도", "경찰청 데이터에서 못 찾았을 때 (100)", Prefs.kecLimitKmh(this@SettingsActivity).toString(), false) { Prefs.setKecLimitKmh(this@SettingsActivity, it.toInt()); CameraRepo.invalidate() }
+            numberRow("길이 모르는 구간 최대 유지(m)", "길이도 짝 종점도 없는 구간단속 시점을 지난 뒤 (10000)", Prefs.maxSectionHoldM(this@SettingsActivity).toString(), false) { Prefs.setMaxSectionHoldM(this@SettingsActivity, it.toInt()) }
             numberRow("여분 클릭", "나무늘보까지 내릴 때만, 유실 대비 (1)", Prefs.extraDownClicks(this@SettingsActivity).toString(), false) { Prefs.setExtraDownClicks(this@SettingsActivity, it.toInt()); showResult() }
             numberRow("누름 사이 간격(ms)", "커맨더가 한 번씩 처리할 시간 (400)", Prefs.pressGapMs(this@SettingsActivity).toString(), false) { Prefs.setPressGapMs(this@SettingsActivity, it.toInt()) }
             switchRow("폰 블루투스 이름을 ENH_BTN으로", "실제 버튼 이름. 커맨더가 못 찾을 때만 끔", Prefs.renameAdapter(this@SettingsActivity)) { Prefs.setRenameAdapter(this@SettingsActivity, it) }
@@ -164,6 +173,8 @@ class SettingsActivity : Activity() {
             else if (missing.isEmpty()) "✔  자동 시작 조건 모두 충족" else "✖  아직 필요: ${missing.joinToString(", ")}"
         val zones = CameraRepo.cachedZoneCount()
         zoneStatus.text = if (!Prefs.schoolZoneOn(this)) "" else when (zones) { null -> "보호구역 파일 확인 중"; 0 -> "✖  보호구역 파일 없음 — 메인 메뉴에서 '어린이보호구역 CSV'"; else -> "✔  보호구역 ${zones}곳" }
+        val t = DriveState.ttsStatus.ifEmpty { outputs.ttsStatus }
+        ttsStatus.text = (if (t.contains("준비됨")) "✔  " else "✖  ") + t
     }
 
     private fun togglePairing() {

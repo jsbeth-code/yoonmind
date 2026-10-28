@@ -11,13 +11,17 @@ import android.content.Intent
 import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
+import android.media.AudioAttributes
+import android.media.AudioDeviceInfo
 import android.media.AudioManager
 import android.media.ToneGenerator
+import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.os.SystemClock
 import android.speech.tts.TextToSpeech
+import android.speech.tts.UtteranceProgressListener
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -30,6 +34,13 @@ object DriveState {
     /** 지금 쓰는 엔진 설정(화면에 감속 시작 거리를 보여 주기 위해). */
     var config: EngineConfig? = null
     var outputs: OutputSettings? = null
+    /** 차에 보내 둔 것으로 아는 프로필. 시작 때 평소 프로필, 감속 신호 뒤 내릴 프로필, 복귀 뒤 평소 프로필. 감시가 꺼져 있으면 null. */
+    @Volatile var carProfile: Profile? = null
+    /** 마지막 감속·복귀 신호 시각(elapsedRealtime). 0이면 없음. 화면에 "복귀 완료"를 잠깐 보여 주는 데 쓴다. */
+    @Volatile var lastDownAt = 0L
+    @Volatile var lastUpAt = 0L
+    /** 서비스 음성 엔진 상태. */
+    @Volatile var ttsStatus = ""
     /** 마지막 실제 GPS fix 시각(elapsedRealtime). 0이면 아직 없음. */
     @Volatile var lastFixAt = 0L
     @Volatile var lastAccM: Double? = null
@@ -60,6 +71,7 @@ object DriveState {
  */
 data class OutputSettings(
     val alerts: Boolean,
+    val route: VoiceRoute,
     val ble: Boolean,
     val usual: Profile,
     val slow: Profile,
@@ -71,7 +83,7 @@ data class OutputSettings(
 ) {
     companion object {
         fun load(ctx: Context) = OutputSettings(
-            alerts = Prefs.alertsOn(ctx), ble = Prefs.bleOn(ctx),
+            alerts = Prefs.alertsOn(ctx), route = Prefs.voiceRoute(ctx), ble = Prefs.bleOn(ctx),
             usual = Prefs.usualProfile(ctx), slow = Prefs.slowProfile(ctx),
             downPresses = Prefs.downPresses(ctx), upPresses = Prefs.upPresses(ctx),
             autoRestore = Prefs.autoRestore(ctx), pressGapMs = Prefs.pressGapMs(ctx), renameAdapter = Prefs.renameAdapter(ctx),
@@ -84,26 +96,168 @@ data class OutputSettings(
     fun describe(): String = buildString {
         append("${usual.label} → ${slow.label}: 클릭 ${downPresses}회")
         append(if (autoRestore) " / 복귀 더블클릭 ${upPresses}회" else " / 자동 복귀 안 함")
-        append(if (ble) " (BLE 켬)" else " (BLE 꺼짐 — 음성만)")
+        append(if (ble) " (BLE 켬" else " (BLE 꺼짐 — 음성만")
+        append(if (alerts) ", 소리: ${route.label})" else ", 소리 끔)")
     }
 }
 
-/** 감속·복귀 신호 출력: 음성 안내 + (설정 시) 가상 S3XY 버튼. */
-class Outputs(private val ctx: Context) {
+/**
+ * 감속·복귀 신호 출력: 효과음 + 음성 안내 + (설정 시) 가상 S3XY 버튼.
+ *
+ * 소리 경로(VoiceRoute):
+ *  - 알람 채널: 폰 스피커. 안드로이드는 블루투스가 붙어 있어도 알람은 폰에서 낸다. 진동 모드에도 난다.
+ *  - 통화 채널: SCO(전화 음성) 링크를 잠깐 열어 차가 통화처럼 받게 한다. 열리는 데 ~1초. 말이 끝나면 닫는다.
+ *  - 미디어 채널: 예전 방식. 차가 폰을 재생 소스로 쓰고 있을 때만 들린다.
+ * logInit: 서비스가 만든 것만 음성 엔진 상태를 기록에 남긴다(화면마다 만드는 것은 조용히).
+ */
+class Outputs(ctx: Context, private val logInit: Boolean = false) {
+    private val app = ctx.applicationContext
+    private val main = Handler(Looper.getMainLooper())
+    private val am: AudioManager? = app.getSystemService(AudioManager::class.java)
     private var tts: TextToSpeech? = null
-    private val tone = ToneGenerator(AudioManager.STREAM_NOTIFICATION, 90)
+    @Volatile var ttsStatus: String = "음성 엔진 준비 중"
+        private set
+    private var tone: ToneGenerator? = null
+    private var toneStream = -1
     @Volatile var settings: OutputSettings = OutputSettings.load(ctx)
         private set
+    private var scoActive = false
+    private val scoStop = Runnable { stopSco() }
+    /** 마지막 감속 신호로 차를 내려 둔 프로필. 복귀 클릭 수는 그때 실제로 내린 만큼으로 계산한다(그 사이 설정이 바뀌어도). */
+    @Volatile private var sentDown: Profile? = null
+
+    companion object {
+        /** 통화 채널이 열리고 소리가 나기까지 기다리는 시간(ms). */
+        private const val SCO_DELAY_MS = 1000L
+        /** 말이 끝나지 않아도 통화 채널을 닫는 최대 시간(ms). */
+        private const val SCO_MAX_MS = 15_000L
+    }
 
     init {
-        tts = TextToSpeech(ctx) { st -> if (st == TextToSpeech.SUCCESS) tts?.language = Locale.KOREAN }
+        tts = TextToSpeech(app) { st ->
+            if (st == TextToSpeech.SUCCESS) {
+                val r = try { tts?.setLanguage(Locale.KOREAN) ?: TextToSpeech.ERROR } catch (e: Exception) { TextToSpeech.ERROR }
+                ttsStatus = when (r) {
+                    TextToSpeech.LANG_MISSING_DATA, TextToSpeech.LANG_NOT_SUPPORTED -> "한국어 음성 없음 — 폰 설정 > 일반 > 텍스트 음성 변환에서 한국어 음성을 설치하세요"
+                    TextToSpeech.ERROR -> "음성 엔진 오류"
+                    else -> "음성 엔진 준비됨 (한국어)"
+                }
+                applyRoute()
+                tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+                    override fun onStart(utteranceId: String?) {}
+                    override fun onDone(utteranceId: String?) { main.post { if (scoActive) { main.removeCallbacks(scoStop); main.postDelayed(scoStop, 500) } } }
+                    @Deprecated("Deprecated in Java")
+                    override fun onError(utteranceId: String?) { onDone(utteranceId) }
+                })
+            } else ttsStatus = "음성 엔진 초기화 실패 — 폰에 TTS 엔진(삼성·구글)이 있는지 확인"
+            if (logInit) { DriveState.ttsStatus = ttsStatus; DriveState.log(ttsStatus) }
+        }
     }
 
     /** 설정을 다시 읽는다. 서비스는 주행 시작 때만 부른다. */
-    fun refresh(): OutputSettings { settings = OutputSettings.load(ctx); return settings }
+    fun refresh(): OutputSettings { settings = OutputSettings.load(app); applyRoute(); return settings }
+
+    private fun usageOf(route: VoiceRoute) = when (route) {
+        VoiceRoute.SPEAKER -> AudioAttributes.USAGE_ALARM
+        VoiceRoute.CAR_CALL -> AudioAttributes.USAGE_VOICE_COMMUNICATION
+        VoiceRoute.MEDIA -> AudioAttributes.USAGE_MEDIA
+    }
+
+    private fun streamOf(route: VoiceRoute) = when (route) {
+        VoiceRoute.SPEAKER -> AudioManager.STREAM_ALARM
+        VoiceRoute.CAR_CALL -> AudioManager.STREAM_VOICE_CALL
+        VoiceRoute.MEDIA -> AudioManager.STREAM_MUSIC
+    }
+
+    private fun applyRoute() {
+        try {
+            tts?.setAudioAttributes(AudioAttributes.Builder().setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).setUsage(usageOf(settings.route)).build())
+        } catch (_: Exception) {}
+    }
+
+    private fun toneFor(route: VoiceRoute): ToneGenerator? {
+        val st = streamOf(route)
+        if (tone == null || toneStream != st) {
+            try { tone?.release() } catch (_: Exception) {}
+            tone = try { ToneGenerator(st, 90) } catch (_: RuntimeException) { null }
+            toneStream = st
+        }
+        return tone
+    }
+
+    /** 효과음 뒤에 말한다. 통화 채널이면 먼저 링크를 열고 1초 기다린다(못 열면 폰 스피커로). */
+    private fun announce(toneType: Int, toneMs: Int, text: String, id: String) {
+        val s = settings
+        if (!s.alerts) return
+        var route = s.route
+        if (route == VoiceRoute.CAR_CALL && !startSco()) {
+            DriveState.log("통화 채널을 못 열어 폰 스피커로 냅니다")
+            route = VoiceRoute.SPEAKER
+        }
+        val r = route
+        val play = Runnable {
+            try {
+                tts?.setAudioAttributes(AudioAttributes.Builder().setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).setUsage(usageOf(r)).build())
+                // durationMs 0은 "멈출 때까지"라는 뜻이라 효과음이 없으면 아예 부르지 않는다
+                if (toneMs > 0) toneFor(r)?.startTone(toneType, toneMs)
+            } catch (_: Exception) {}
+            main.postDelayed({
+                val res = tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, id) ?: TextToSpeech.ERROR
+                if (res != TextToSpeech.SUCCESS) DriveState.log("음성 출력 실패 — $ttsStatus")
+            }, toneMs + 50L)
+        }
+        if (r == VoiceRoute.CAR_CALL) main.postDelayed(play, SCO_DELAY_MS) else play.run()
+    }
 
     fun say(text: String) {
-        if (settings.alerts) tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "say")
+        if (!settings.alerts) return
+        announce(ToneGenerator.TONE_PROP_BEEP, 0, text, "say")
+    }
+
+    /** 통화 채널(SCO)을 연다. 이미 열려 있으면 닫기 예약만 미룬다. */
+    @Suppress("DEPRECATION")
+    private fun startSco(): Boolean {
+        val a = am ?: return false
+        try {
+            main.removeCallbacks(scoStop)
+            if (!scoActive) {
+                if (Build.VERSION.SDK_INT >= 31) {
+                    val dev = a.availableCommunicationDevices.firstOrNull { it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO } ?: return false
+                    a.mode = AudioManager.MODE_IN_COMMUNICATION
+                    if (!a.setCommunicationDevice(dev)) { a.mode = AudioManager.MODE_NORMAL; return false }
+                } else {
+                    if (!a.isBluetoothScoAvailableOffCall) return false
+                    a.mode = AudioManager.MODE_IN_COMMUNICATION
+                    a.startBluetoothSco()
+                    a.isBluetoothScoOn = true
+                }
+                scoActive = true
+            }
+            main.postDelayed(scoStop, SCO_MAX_MS)
+            return true
+        } catch (e: Exception) {
+            DriveState.log("통화 채널 열기 실패: ${e.message}")
+            return false
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun stopSco() {
+        if (!scoActive) return
+        scoActive = false
+        val a = am ?: return
+        try {
+            if (Build.VERSION.SDK_INT >= 31) a.clearCommunicationDevice() else { a.isBluetoothScoOn = false; a.stopBluetoothSco() }
+            a.mode = AudioManager.MODE_NORMAL
+        } catch (_: Exception) {}
+    }
+
+    /** 설정 화면의 "안내 소리 테스트". */
+    fun test() {
+        refresh()
+        DriveState.log("안내 소리 테스트 (${settings.route.label}) — $ttsStatus")
+        if (!settings.alerts) { DriveState.log("음성·효과음이 꺼져 있습니다"); return }
+        announce(ToneGenerator.TONE_PROP_BEEP2, 300, "안내 소리 테스트입니다. 이 소리가 들리면 설정이 맞습니다", "test")
     }
 
     fun down(cam: Camera, distM: Double) {
@@ -111,33 +265,46 @@ class Outputs(private val ctx: Context) {
         val zone = cam.code == ZoneCsv.CODE
         DriveState.log(if (zone) "▼ 어린이보호구역 진입. 감속 → ${s.slow.label} (${cam.name})"
             else "▼ 카메라 ${distM.toInt()}m 앞, 제한 ${cam.limitKmh}. 감속 → ${s.slow.label} (${cam.name})")
-        if (s.alerts) {
-            tone.startTone(ToneGenerator.TONE_PROP_BEEP2, 300)
-            tts?.speak(if (zone) "어린이보호구역. 감속합니다" else "과속 카메라, 제한속도 ${cam.limitKmh}. 감속합니다", TextToSpeech.QUEUE_FLUSH, null, "down")
-        }
+        DriveState.carProfile = s.slow
+        DriveState.lastDownAt = SystemClock.elapsedRealtime()
+        sentDown = s.slow
+        announce(ToneGenerator.TONE_PROP_BEEP2, 300, if (zone) "어린이보호구역. 감속합니다" else "과속 카메라, 제한속도 ${cam.limitKmh}. 감속합니다", "down")
         if (s.ble) S3xyButton.press(S3xyButton.Press.SINGLE, s.downPresses, s.pressGapMs)
     }
 
-    /** force: 테스트 버튼처럼 자동 복귀 설정과 무관하게 복귀 신호를 보낼 때. */
+    /** 구간단속 시점을 지나 유지에 들어감. */
+    fun hold(cam: Camera, holdM: Double, lengthKnown: Boolean) {
+        val km = "%.1f".format(holdM / 1000.0)
+        DriveState.log(if (lengthKnown) "구간단속 시점 통과 — 종점까지 약 ${km}km 유지 (${cam.name})"
+            else "구간단속 시점 통과 — 길이 모름, 종점 카메라까지(최대 ${km}km) 유지 (${cam.name})")
+        announce(ToneGenerator.TONE_PROP_BEEP, 150, if (lengthKnown) "구간단속 시작. 종점까지 ${km} 킬로미터 유지합니다" else "구간단속 시작. 종점 카메라까지 유지합니다", "hold")
+    }
+
+    /** force: 테스트 버튼·직접 복귀처럼 자동 복귀 설정과 무관하게 복귀 신호를 보낼 때. */
     fun up(reason: String, force: Boolean = false) {
         val s = settings
         if (!s.autoRestore && !force) {
             DriveState.log("△ 카메라 통과 ($reason) — 자동 복귀 꺼짐, 휠로 직접 올리세요")
-            if (s.alerts) {
-                tone.startTone(ToneGenerator.TONE_PROP_ACK, 200)
-                tts?.speak("카메라 통과. 직접 복귀하세요", TextToSpeech.QUEUE_FLUSH, null, "up")
-            }
+            announce(ToneGenerator.TONE_PROP_ACK, 200, "카메라 통과. 직접 복귀하세요", "up")
             return
         }
-        DriveState.log("▲ 복귀 → ${s.usual.label} ($reason)")
-        if (s.alerts) {
-            tone.startTone(ToneGenerator.TONE_PROP_ACK, 200)
-            tts?.speak("복귀합니다", TextToSpeech.QUEUE_FLUSH, null, "up")
-        }
-        if (s.ble) S3xyButton.press(S3xyButton.Press.DOUBLE, s.upPresses, s.pressGapMs)
+        // 올릴 단수 = 지금 평소 프로필 − 실제로 내려 둔 프로필 (감속 중에 평소 프로필을 바꿨어도 정확히 거기로 간다)
+        val from = sentDown ?: s.slow
+        val presses = (s.usual.ordinal - from.ordinal).coerceAtLeast(0)
+        DriveState.log("▲ 복귀 → ${s.usual.label} ($reason)" + (if (from != s.slow) " · ${from.label}에서 ${presses}번" else ""))
+        DriveState.carProfile = s.usual
+        DriveState.lastUpAt = SystemClock.elapsedRealtime()
+        sentDown = null
+        announce(ToneGenerator.TONE_PROP_ACK, 200, "복귀합니다", "up")
+        if (s.ble) S3xyButton.press(S3xyButton.Press.DOUBLE, presses, s.pressGapMs)
     }
 
-    fun shutdown() { tts?.shutdown(); tone.release() }
+    fun shutdown() {
+        main.removeCallbacks(scoStop); stopSco()
+        try { tts?.shutdown() } catch (_: Exception) {}
+        try { tone?.release() } catch (_: Exception) {}
+        tone = null
+    }
 }
 
 class DriveService : Service(), LocationListener {
@@ -148,6 +315,10 @@ class DriveService : Service(), LocationListener {
         const val ACTION_RELOAD = "reload"
         const val ACTION_SIMULATE = "simulate"
         const val ACTION_STOP = "stop"
+        /** 운전자가 "지금 복귀"를 누름: 감속 상태를 풀고 복귀 신호를 보낸다. */
+        const val ACTION_RELEASE = "release"
+        /** 메인 화면에서 설정(평소 프로필)을 바꿈: 감시 중이어도 바로 적용한다. */
+        const val ACTION_SETTINGS_CHANGED = "settings_changed"
         /** 차 블루투스가 끊김 → 잠시 뒤 자동 정지 예약. 다시 붙으면 취소. */
         const val ACTION_CAR_DISCONNECTED = "car_disconnected"
         const val ACTION_CAR_CONNECTED = "car_connected"
@@ -162,7 +333,8 @@ class DriveService : Service(), LocationListener {
 
         fun send(ctx: Context, action: String) {
             val i = Intent(ctx, DriveService::class.java).setAction(action)
-            if (action == ACTION_STOP) ctx.startService(i) else ctx.startForegroundService(i)
+            // 이미 떠 있는 서비스에 보내는 명령은 startService로(포그라운드 승격 의무가 없다)
+            if (action == ACTION_STOP || action == ACTION_RELEASE || action == ACTION_SETTINGS_CHANGED) ctx.startService(i) else ctx.startForegroundService(i)
         }
     }
 
@@ -199,12 +371,38 @@ class DriveService : Service(), LocationListener {
 
     override fun onCreate() {
         super.onCreate()
-        outputs = Outputs(this)
+        outputs = Outputs(this, logInit = true)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_STOP -> { stopAll(); stopSelf(); return START_NOT_STICKY }
+            ACTION_RELEASE -> {
+                val e = engine
+                if (DriveState.running && e != null) {
+                    // 감속 중이면 상태를 풀고 복귀 신호. 자동 복귀를 꺼 두어 내린 채로 남아 있을 때도 복귀 신호를 보낸다.
+                    if (e.release() || DriveState.carProfile != outputs.settings.usual) outputs.up("직접 복귀", force = true)
+                    else DriveState.log("복귀할 감속 상태가 아닙니다")
+                    DriveState.status = e.status
+                    DriveState.changed()
+                } else if (!DriveState.running) stopSelf()
+                return START_STICKY
+            }
+            ACTION_SETTINGS_CHANGED -> {
+                val e = engine
+                if (DriveState.running && e != null) {
+                    val out = outputs.refresh()
+                    val cfg = Prefs.engine(this).copy(bleLatencyS = out.bleDownSeconds())
+                    e.config = cfg
+                    DriveState.config = cfg
+                    DriveState.outputs = out
+                    // 감속 중이 아니면 차가 (새) 평소 프로필에 있다고 본다. 감속 중이면 복귀 때 내린 만큼 올려 새 평소 프로필로 간다.
+                    if (!e.isSlowed) DriveState.carProfile = out.usual
+                    DriveState.log("설정 바로 적용 — ${out.describe()}")
+                    DriveState.changed()
+                } else if (!DriveState.running) stopSelf()
+                return START_STICKY
+            }
             ACTION_CAR_DISCONNECTED -> {
                 if (DriveState.running && !DriveState.simulating) {
                     main.removeCallbacks(autoStopRunnable)
@@ -281,6 +479,7 @@ class DriveService : Service(), LocationListener {
         val cfg = Prefs.engine(this).let { c -> c.copy(bleLatencyS = out.bleDownSeconds()) }
         DriveState.config = cfg
         DriveState.outputs = out
+        DriveState.carProfile = out.usual
         drOn = Prefs.deadReckoning(this)
         drMaxM = Prefs.deadReckonMaxM(this).toDouble()
         if (out.ble) S3xyButton.start(this, { DriveState.log(it) }, out.renameAdapter)
@@ -395,6 +594,7 @@ class DriveService : Service(), LocationListener {
         for (ev in e.update(fix)) when (ev) {
             is EngineEvent.Down -> outputs.down(ev.camera, ev.distM)
             is EngineEvent.Up -> outputs.up(ev.reason)
+            is EngineEvent.Hold -> outputs.hold(ev.camera, ev.holdM, ev.lengthKnown)
         }
         val st = e.status
         DriveState.status = st
@@ -402,6 +602,7 @@ class DriveService : Service(), LocationListener {
         DriveState.changed()
         val text = buildString {
             append(if (st.slowed) "감속 중" else "대기")
+            st.holdRemainM?.let { append(" · ${st.holdKind} ${it.toInt()}m 남음") }
             st.nextDistM?.let { append(" · 다음 카메라 ${it.toInt()}m (${st.nextCamera?.limitKmh})") }
             st.road?.let { if (it.startsWith("도로 미확인")) append(" · 도로 미확인") }
         }
@@ -466,11 +667,12 @@ class DriveService : Service(), LocationListener {
         engine?.reset()
         DriveState.running = false
         DriveState.status = null
-        DriveState.log("가상 주행 끝 — 실제 주행은 [주행 시작]을 누르세요")
-        outputs.say("가상 주행 끝. 실제 주행은 주행 시작을 누르세요")
+        DriveState.carProfile = null
+        DriveState.log("가상 주행 끝 — 실제 주행은 [감시 켜기]를 누르세요")
+        outputs.say("가상 주행 끝. 실제 주행은 감시 켜기를 누르세요")
         DriveState.changed()
         notify("가상 주행 끝 — 감시 꺼짐")
-        // 음성이 끝날 시간을 준 뒤 종료. 그 사이 [주행 시작]을 눌렀으면 그대로 둔다.
+        // 음성이 끝날 시간을 준 뒤 종료. 그 사이 [감시 켜기]를 눌렀으면 그대로 둔다.
         main.postDelayed({ if (!DriveState.running) { stopForeground(STOP_FOREGROUND_REMOVE); stopSelf() } }, 4_000)
     }
 
@@ -498,6 +700,7 @@ class DriveService : Service(), LocationListener {
         DriveState.running = false
         DriveState.status = null
         DriveState.map = null
+        DriveState.carProfile = null
         if (S3xyButton.running && !S3xyButton.pairingMode) S3xyButton.stop()
         DriveState.log("주행 감시 정지")
         DriveState.changed()

@@ -4,6 +4,7 @@ import java.nio.charset.Charset
 import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.floor
+import kotlin.math.max
 
 enum class CamKind { SPOT, SECTION_START, SECTION_END }
 
@@ -19,7 +20,16 @@ data class Camera(
     val code: String = "",
     /** 이 카메라가 단속하는 주행 방향(도, 북=0). 모르면 null(경찰청 데이터). 알면 반대 방향 주행은 무시한다. */
     val bearingDeg: Double? = null,
+    /**
+     * bearingDeg를 얼마나 엄격하게 볼지(도). null이면 엔진 기본(60도). 시점→종점 직선으로 추정한 방향은 굽은 길에서
+     * 틀어질 수 있어 120도로 느슨하게 두고 반대로 가는 차만 거른다.
+     */
+    val headingTolDeg: Double? = null,
+    /** 구간단속 짝의 위치(시점이면 종점, 종점이면 시점). 유지 중 "종점 쪽으로 가고 있는지"와 "종점에 닿았는지"를 판단하는 데 쓴다. */
+    val partnerLat: Double? = null,
+    val partnerLon: Double? = null,
 ) {
+    val hasPartner: Boolean get() = partnerLat != null && partnerLon != null
     val fromKec: Boolean get() = code == KecCsv.CODE
     /** 신호 단속으로만 표시된 카메라(단속구분 2). 실제론 대부분 신호·과속 겸용이라 기본은 포함한다. */
     val signalOnly: Boolean get() = code.trimStart('0') == "2"
@@ -44,6 +54,10 @@ object CameraCsv {
     const val MAX_SECTION_M = 30_000
     /** 길이를 모르는 시점·종점이 같은 노선에서 짝을 찾는 반경(m). */
     const val PARTNER_RADIUS_M = 25_000.0
+    /** 방향을 추정할 때 시점·종점 짝의 최소 거리(m). 이보다 가까운 종점은 반대 방향 구간의 종점(시점 바로 옆)이다. */
+    const val MIN_PAIR_M = 500.0
+    /** 시점→종점 직선으로 추정한 방향에 적용하는 허용 각도(도). 반대로 가는 차만 거른다. */
+    const val LOOSE_HEADING_DEG = 120.0
 
     fun decode(bytes: ByteArray): String {
         val strict = Charsets.UTF_8.newDecoder()
@@ -64,7 +78,7 @@ object CameraCsv {
     private fun cp949(): Charset = listOf("x-windows-949", "MS949", "EUC-KR")
         .firstNotNullOf { n -> runCatching { Charset.forName(n) }.getOrNull() }
 
-    private class Row(val cam: Camera, val explicit: Boolean, val road: String)
+    private class Row(val cam: Camera, val explicit: Boolean, val road: String, val dir: String)
 
     fun parse(text: String): List<Camera> {
         val rows = splitCsv(text)
@@ -86,6 +100,7 @@ object CameraCsv {
         val iLen = col("과속단속구간길이")
         val iPlace = col("설치장소")
         val iRoad = col("도로노선명")
+        val iDir = col("도로노선방향")
 
         val out = ArrayList<Row>()
         for (r in rows.drop(1)) {
@@ -108,28 +123,66 @@ object CameraCsv {
             val len = if (kind == CamKind.SPOT) 0
                 else get(iLen).replace(",", "").toDoubleOrNull()?.let { lenToMeters(it) } ?: 0
             val name = listOf(get(iRoad), place).filter { it.isNotEmpty() }.joinToString(" ")
-            out += Row(Camera(lat, lon, limit, kind, len, name, kindText), place.contains("구간"), get(iRoad).replace(" ", ""))
+            out += Row(Camera(lat, lon, limit, kind, len, name, kindText), place.contains("구간"), get(iRoad).replace(" ", ""), dirCode(get(iDir)))
         }
-        return resolveSections(out)
+        return pairSections(resolveSections(out))
     }
+
+    /** 도로노선방향 코드. "01"→"1". 1·2만 쓴다(도로마다 뜻은 다르지만 같은 도로 안에선 같은 방향끼리 같은 코드). 3(양방향)·빈칸은 모름. */
+    private fun dirCode(s: String): String = s.trim().trimStart('0').let { if (it == "1" || it == "2") it else "" }
 
     /**
      * 시점·종점 표시가 믿을 만한지 가린다. 길이가 타당하거나, 설치장소에 "구간"이 명시돼 있거나,
      * 같은 노선 25 km 안에 반대쪽 짝이 있어야 구간단속으로 본다. 아니면 일반 카메라로 되돌린다.
      */
-    private fun resolveSections(rows: List<Row>): List<Camera> {
+    private fun resolveSections(rows: List<Row>): List<Row> {
         val starts = rows.filter { it.cam.kind == CamKind.SECTION_START }
         val ends = rows.filter { it.cam.kind == CamKind.SECTION_END }
         fun hasPartner(r: Row, pool: List<Row>) = pool.any { p ->
             p.road == r.road && Geo.distance(r.cam.lat, r.cam.lon, p.cam.lat, p.cam.lon) <= PARTNER_RADIUS_M
         }
+        fun spot(r: Row) = Row(r.cam.copy(kind = CamKind.SPOT, sectionLenM = 0), r.explicit, r.road, r.dir)
         return rows.map { r ->
             when (r.cam.kind) {
-                CamKind.SPOT -> r.cam
-                CamKind.SECTION_START -> if (r.cam.sectionLenM > 0 || r.explicit || hasPartner(r, ends)) r.cam else r.cam.copy(kind = CamKind.SPOT, sectionLenM = 0)
-                CamKind.SECTION_END -> if (r.cam.sectionLenM > 0 || r.explicit || hasPartner(r, starts)) r.cam else r.cam.copy(kind = CamKind.SPOT, sectionLenM = 0)
+                CamKind.SPOT -> r
+                CamKind.SECTION_START -> if (r.cam.sectionLenM > 0 || r.explicit || hasPartner(r, ends)) r else spot(r)
+                CamKind.SECTION_END -> if (r.cam.sectionLenM > 0 || r.explicit || hasPartner(r, starts)) r else spot(r)
             }
         }
+    }
+
+    /**
+     * 경찰청 구간단속 시점에 같은 노선의 종점을 짝지어 진행 방향(시점→종점 방위각)을 붙인다.
+     * 경찰청 데이터엔 방향이 없어서, 반대 차로의 시점을 지나도 내 카메라로 잡혀 구간 길이만큼 감속이 유지되는 문제가 있었다
+     * (동부간선도로 면목삼익아파트 시점, 2026-10). 짝 조건: 같은 노선, 방향 코드가 둘 다 1·2면 같은 것, 거리 500 m~30 km,
+     * 길이를 알면 거리가 길이와 맞을 것(±35%, 최소 ±500 m). 길이를 모르거나 맞는 후보가 서로 60도 넘게 다른 방향에 있으면
+     * (어느 쪽인지 모름) 방향을 붙이지 않고 둔다. 짝지은 종점에도 같은 방향을 붙이고, 서로의 위치를 partner로 기억한다.
+     */
+    private fun pairSections(rows: List<Row>): List<Camera> {
+        val endsByRoad = rows.filter { it.cam.kind == CamKind.SECTION_END }.groupBy { it.road }
+        val startOut = HashMap<Row, Camera>()
+        val endOut = HashMap<Row, Camera>()
+        for (r in rows) {
+            if (r.cam.kind != CamKind.SECTION_START) continue
+            val pool = endsByRoad[r.road].orEmpty().mapNotNull { e ->
+                if (r.dir.isNotEmpty() && e.dir.isNotEmpty() && r.dir != e.dir) return@mapNotNull null
+                val d = Geo.distance(r.cam.lat, r.cam.lon, e.cam.lat, e.cam.lon)
+                if (d < MIN_PAIR_M || d > MAX_SECTION_M) null else e to d
+            }
+            val len = r.cam.sectionLenM
+            val fit = if (len > 0) pool.filter { (_, d) -> abs(d - len) <= max(0.35 * len, 500.0) } else pool
+            if (fit.isEmpty()) continue
+            val best = if (len > 0) fit.minBy { abs(it.second - len) } else fit.minBy { it.second }
+            val b = Geo.bearing(r.cam.lat, r.cam.lon, best.first.cam.lat, best.first.cam.lon)
+            val ambiguous = fit.any { (e, _) -> Geo.angleDiff(b, Geo.bearing(r.cam.lat, r.cam.lon, e.cam.lat, e.cam.lon)) > 60.0 }
+            if (ambiguous) continue
+            val end = best.first
+            startOut[r] = r.cam.copy(bearingDeg = b, headingTolDeg = LOOSE_HEADING_DEG, partnerLat = end.cam.lat, partnerLon = end.cam.lon)
+            // 고른 종점과 같은 자리의 종점들(차로별 행: "1,2차로"/"3차로")에도 같은 방향
+            for ((e, _) in fit) if (e !in endOut && Geo.distance(e.cam.lat, e.cam.lon, end.cam.lat, end.cam.lon) <= 30.0)
+                endOut[e] = e.cam.copy(bearingDeg = b, headingTolDeg = LOOSE_HEADING_DEG, partnerLat = r.cam.lat, partnerLon = r.cam.lon)
+        }
+        return rows.map { r -> startOut[r] ?: endOut[r] ?: r.cam }
     }
 
     /** 구간 길이는 km 또는 m로 들어온다. 100 미만이면 km로 본다. 타당한 범위 밖이면 0(모름). */
@@ -361,8 +414,8 @@ object KecCsv {
                 .filter { it.isNotBlank() }.joinToString(" ")
             val (sLat, sLon) = Geo.offset(start.first, start.second, bStart + 90.0, LANE_OFFSET_M)
             val (eLat, eLon) = Geo.offset(end.first, end.second, bEnd + 90.0, LANE_OFFSET_M)
-            cams += Camera(sLat, sLon, limit, CamKind.SECTION_START, lenM, "$base 시점", CODE, bStart)
-            cams += Camera(eLat, eLon, limit, CamKind.SECTION_END, lenM, "$base 종점", CODE, bEnd)
+            cams += Camera(sLat, sLon, limit, CamKind.SECTION_START, lenM, "$base 시점", CODE, bStart, partnerLat = eLat, partnerLon = eLon)
+            cams += Camera(eLat, eLon, limit, CamKind.SECTION_END, lenM, "$base 종점", CODE, bEnd, partnerLat = sLat, partnerLon = sLon)
         }
         return cams to warn
     }
