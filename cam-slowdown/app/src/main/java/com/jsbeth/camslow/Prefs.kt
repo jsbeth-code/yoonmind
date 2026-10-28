@@ -148,6 +148,9 @@ object Prefs {
     fun overlayX(ctx: Context) = sp(ctx).getInt("overlayX", 24)
     fun overlayY(ctx: Context) = sp(ctx).getInt("overlayY", 160)
     fun setOverlayPos(ctx: Context, x: Int, y: Int) = put(ctx) { putInt("overlayX", x); putInt("overlayY", y) }
+    /** 알약을 옆으로 밀어 가장자리 탭으로 접은 상태: "" 알약, "L" 왼쪽, "R" 오른쪽. */
+    fun overlayDock(ctx: Context) = sp(ctx).getString("overlayDock", "") ?: ""
+    fun setOverlayDock(ctx: Context, v: String) = put(ctx) { putString("overlayDock", v) }
 
     // ---- 출력·연결
     fun alertsOn(ctx: Context) = sp(ctx).getBoolean("alerts", true)
