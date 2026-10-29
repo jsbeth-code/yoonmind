@@ -44,5 +44,12 @@ android {
 dependencies {
     // 카카오내비 SDK: 목적지 없는 "안전 운행" 단속카메라 정보
     implementation("com.kakaomobility.knsdk:knsdk_ui:1.12.7")
+    // KNSDK가 앱 쪽에 있다고 가정하는 라이브러리(없으면 SDK 리소스·클래스가 깨진다)
+    implementation("com.kakao.maps.open:android:2.15.2")
+    implementation("androidx.constraintlayout:constraintlayout:2.1.4")
+    implementation("androidx.core:core-ktx:1.15.0")
+    implementation("androidx.appcompat:appcompat:1.7.0")
+    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     testImplementation("junit:junit:4.13.2")
 }
