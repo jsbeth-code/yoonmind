@@ -533,6 +533,8 @@ class DriveService : Service(), LocationListener {
             else outputs.say("감시 시작. 카메라 ${"%,d".format(e.cameraCount)}개" + (if (e.hasRoads) ", 도로망 있음" else ", 도로망 없음"))
             if (e.config.schoolZoneOn && e.zoneCount == 0) DriveState.log("어린이보호구역 감속이 켜져 있지만 보호구역 파일이 없습니다")
             if (s.ble && !S3xyButton.ready) DriveState.log("BLE 켜짐, 커맨더 대기 중 (${S3xyButton.status}) — 커맨더가 붙어야 신호가 나갑니다")
+            // 카카오내비 안전 운행(시험): 연결 결과와 앞 카메라를 기록에만 남긴다
+            KakaoSafety.start(application) { msg -> DriveState.log(msg) }
             notify("GPS 대기")
         }
     }
@@ -697,6 +699,7 @@ class DriveService : Service(), LocationListener {
         main.removeCallbacks(autoStopRunnable); autoStopPending = false
         stopSimulation()
         getSystemService(LocationManager::class.java).removeUpdates(this)
+        KakaoSafety.stop()
         loadSeq++ // 읽는 중이던 엔진은 버린다
         if (!DriveState.running) return
         if (engine?.isSlowed == true) {

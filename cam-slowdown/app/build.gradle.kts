@@ -5,14 +5,21 @@ plugins {
 
 android {
     namespace = "com.jsbeth.camslow"
-    compileSdk = 34
+    compileSdk = 35
 
     defaultConfig {
         applicationId = "com.jsbeth.camslow"
         minSdk = 26
         targetSdk = 34
-        versionCode = 14
-        versionName = "0.8.0"
+        versionCode = 15
+        versionName = "0.8.1"
+        // 카카오 네이티브 앱 키: CI는 GitHub Secrets KAKAO_NATIVE_APP_KEY 환경변수, 로컬은 -PKAKAO_NATIVE_APP_KEY=…
+        val kakaoKey = (System.getenv("KAKAO_NATIVE_APP_KEY") ?: (project.findProperty("KAKAO_NATIVE_APP_KEY") as String?) ?: "").trim()
+        buildConfigField("String", "KAKAO_NATIVE_APP_KEY", "\"$kakaoKey\"")
+    }
+
+    buildFeatures {
+        buildConfig = true
     }
 
     // 고정 디버그 키: 빌드마다 서명이 바뀌면 업데이트 설치가 막히므로 저장소에 둔다
@@ -35,5 +42,7 @@ android {
 }
 
 dependencies {
+    // 카카오내비 SDK: 목적지 없는 "안전 운행" 단속카메라 정보
+    implementation("com.kakaomobility.knsdk:knsdk_ui:1.12.7")
     testImplementation("junit:junit:4.13.2")
 }
