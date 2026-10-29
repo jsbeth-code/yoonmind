@@ -25,6 +25,8 @@ class MapData(
     val triggerM: Float?,
     val slowed: Boolean,
     val estimated: Boolean,
+    /** 구간단속 유지 중이면 지도 왼쪽 위에 "구간단속 중". */
+    val inSection: Boolean = false,
 )
 
 /**
@@ -49,9 +51,14 @@ class MiniMapView(ctx: Context) : View(ctx) {
     private val text = Paint(Paint.ANTI_ALIAS_FLAG)
     private val lineBuf = FloatArray(4096)
 
+    /** true면 주어진 높이를 다 쓴다(폴드 두 열 화면의 왼쪽 열). false면 가로폭 × 0.95. */
+    var fillHeight = false
+
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         val w = MeasureSpec.getSize(widthMeasureSpec)
-        setMeasuredDimension(w, (w * 0.95f).toInt())
+        val h = MeasureSpec.getSize(heightMeasureSpec)
+        if (fillHeight && MeasureSpec.getMode(heightMeasureSpec) == MeasureSpec.EXACTLY && h > 0) setMeasuredDimension(w, h)
+        else setMeasuredDimension(w, (w * 0.95f).toInt())
     }
 
     override fun onDraw(c: Canvas) {
@@ -156,6 +163,14 @@ class MiniMapView(ctx: Context) : View(ctx) {
         text.textAlign = Paint.Align.LEFT; text.typeface = Typeface.DEFAULT
         c.drawText("100 m", dp(12f), h - dp(18f), text)
         if (caption.isNotEmpty()) { text.textAlign = Paint.Align.RIGHT; c.drawText(caption, w - dp(12f), h - dp(14f), text) }
+        if (d.inSection) {
+            val label = "구간단속 중"
+            text.textSize = dp(11f); text.typeface = Typeface.DEFAULT_BOLD; text.textAlign = Paint.Align.LEFT
+            val tw = text.measureText(label)
+            fill.color = t.pathSlow; fill.alpha = 40
+            c.drawRoundRect(dp(10f), dp(10f), dp(10f) + tw + dp(14f), dp(30f), dp(8f), dp(8f), fill); fill.alpha = 255
+            text.color = t.pathSlow; c.drawText(label, dp(17f), dp(24f), text)
+        }
         if (d.estimated) { text.textAlign = Paint.Align.CENTER; text.color = t.dash; text.textSize = dp(11f); c.drawText("추측 항법 중", w / 2, dp(18f), text) }
         if (segs == null) { text.textAlign = Paint.Align.CENTER; text.color = t.muted; text.textSize = dp(10f); c.drawText("도로망 없음 — 카메라만 표시", w / 2, dp(18f), text) }
     }

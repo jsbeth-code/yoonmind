@@ -275,8 +275,13 @@ class Outputs(ctx: Context, private val logInit: Boolean = false) {
     }
 
     /** 구간단속 시점을 지나 유지에 들어감. */
-    fun hold(cam: Camera, holdM: Double, lengthKnown: Boolean) {
+    fun hold(cam: Camera, holdM: Double, lengthKnown: Boolean, midEntry: Boolean = false) {
         val km = "%.1f".format(holdM / 1000.0)
+        if (midEntry) {
+            DriveState.log("구간단속 중간 진입 — 끝까지 약 ${km}km 유지 (${cam.name})")
+            announce(ToneGenerator.TONE_PROP_BEEP, 150, "구간단속 중입니다. 끝까지 ${km} 킬로미터 유지합니다", "hold")
+            return
+        }
         DriveState.log(if (lengthKnown) "구간단속 시점 통과 — 종점까지 약 ${km}km 유지 (${cam.name})"
             else "구간단속 시점 통과 — 길이 모름, 종점 카메라까지(최대 ${km}km) 유지 (${cam.name})")
         announce(ToneGenerator.TONE_PROP_BEEP, 150, if (lengthKnown) "구간단속 시작. 종점까지 ${km} 킬로미터 유지합니다" else "구간단속 시작. 종점 카메라까지 유지합니다", "hold")
@@ -366,7 +371,12 @@ class DriveService : Service(), LocationListener {
     private val autoStopRunnable = Runnable {
         autoStopPending = false
         DriveState.log("차 연결 끊김 — 자동 정지")
-        stopAll(); stopSelf()
+        stopAll(); stopAfterSpeech()
+    }
+
+    /** 안내 음성이 끝날 시간을 준 뒤 서비스를 끝낸다. 그 사이 다시 켰으면 그대로 둔다. */
+    private fun stopAfterSpeech() {
+        main.postDelayed({ if (!DriveState.running) { stopForeground(STOP_FOREGROUND_REMOVE); stopSelf() } }, 3_000)
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -378,7 +388,7 @@ class DriveService : Service(), LocationListener {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
-            ACTION_STOP -> { stopAll(); stopSelf(); return START_NOT_STICKY }
+            ACTION_STOP -> { stopAll(); stopAfterSpeech(); return START_NOT_STICKY }
             ACTION_RELEASE -> {
                 val e = engine
                 if (DriveState.running && e != null) {
@@ -599,10 +609,12 @@ class DriveService : Service(), LocationListener {
 
     private fun handle(fix: Fix) {
         val e = engine ?: return
+        // 카카오 안전 운행이 신선하면 그 앞 카메라로, 아니면 내장 판단(가상 주행은 늘 내장)
+        e.external = if (DriveState.simulating) null else KakaoSafety.feed()
         for (ev in e.update(fix)) when (ev) {
             is EngineEvent.Down -> outputs.down(ev.camera, ev.distM)
             is EngineEvent.Up -> outputs.up(ev.reason)
-            is EngineEvent.Hold -> outputs.hold(ev.camera, ev.holdM, ev.lengthKnown)
+            is EngineEvent.Hold -> outputs.hold(ev.camera, ev.holdM, ev.lengthKnown, ev.midEntry)
         }
         val st = e.status
         DriveState.status = st
@@ -623,12 +635,14 @@ class DriveService : Service(), LocationListener {
         val course = st.courseDeg ?: fix.courseDeg ?: DriveState.map?.courseDeg ?: 0.0
         val segs = roads?.snapshot(fix.lat, fix.lon, MAP_RADIUS_M)
         val aheadSet = st.ahead.associateBy { it.cam }
-        val cams = e.camerasNear(fix.lat, fix.lon, MAP_RADIUS_M).map { c ->
+        // 카카오 판단 중엔 카카오가 준 내 방향 카메라만 그린다(경찰청 빈 원은 안 그림)
+        val source = if (st.external) st.ahead.map { it.cam } else e.camerasNear(fix.lat, fix.lon, MAP_RADIUS_M)
+        val cams = source.map { c ->
             val (east, north) = Geo.toLocal(fix.lat, fix.lon, c.lat, c.lon)
             val state = when { st.target == c -> 2; aheadSet.containsKey(c) -> 1; else -> 0 }
             MapCam(east.toFloat(), north.toFloat(), c.limitKmh, state)
         }
-        return MapData(course, segs, cams, st.triggerM?.toFloat(), st.slowed, fix.estimated)
+        return MapData(course, segs, cams, st.triggerM?.toFloat(), st.slowed, fix.estimated, inSection = st.holdKind == "구간단속")
     }
 
     /**
@@ -702,7 +716,8 @@ class DriveService : Service(), LocationListener {
         KakaoSafety.stop()
         loadSeq++ // 읽는 중이던 엔진은 버린다
         if (!DriveState.running) return
-        if (engine?.isSlowed == true) {
+        val wasSlowed = engine?.isSlowed == true
+        if (wasSlowed) {
             DriveState.log("정지 — 감속 상태에서 멈췄습니다. 필요하면 휠로 직접 복귀하세요")
             outputs.say("감속 상태에서 정지했습니다. 휠을 확인하세요")
         }
@@ -715,6 +730,7 @@ class DriveService : Service(), LocationListener {
         OverlayWindow.hide()
         if (S3xyButton.running && !S3xyButton.pairingMode) S3xyButton.stop()
         DriveState.log("주행 감시 정지")
+        if (!wasSlowed) outputs.say("감시를 끕니다")
         DriveState.changed()
     }
 

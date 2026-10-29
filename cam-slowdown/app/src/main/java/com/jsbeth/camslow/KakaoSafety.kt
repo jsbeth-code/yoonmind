@@ -19,8 +19,8 @@ import com.kakaomobility.knsdk.guidance.knguidance.voiceguide.KNGuide_Voice
 import java.util.UUID
 
 /**
- * 카카오내비 SDK(KNSDK)의 "안전 운행"(목적지 없는 주행) 정보를 받는다. 시험 단계(v0.8.1):
- * 연결 결과와 앞에 나타난 단속카메라를 기록에만 남기고, 감속 판단에는 아직 쓰지 않는다.
+ * 카카오내비 SDK(KNSDK)의 "안전 운행"(목적지 없는 주행) 정보를 받는다(v0.9: 감속 판단 1순위).
+ * 신선한 동안(FRESH_MS 안에 갱신) feed()가 엔진에 앞 카메라를 주고, 끊기면 null → 엔진은 내장(경찰청 데이터) 판단.
  *
  * - 앱 키는 빌드 때 GitHub Secrets(KAKAO_NATIVE_APP_KEY)에서 BuildConfig로 들어온다. 비어 있으면 아무것도 안 한다.
  * - 카카오 음성·과속 경고음은 끈다(우리 안내와 겹치지 않게).
@@ -48,6 +48,34 @@ object KakaoSafety : KNGuidance_SafetyGuideDelegate, KNGuidance_LocationGuideDel
     private val logged = HashSet<String>()
 
     val hasKey: Boolean get() = BuildConfig.KAKAO_NATIVE_APP_KEY.isNotBlank()
+    /** 지금 켜져 있는지(감시 중 연결 시도 포함). */
+    val active: Boolean get() = running
+
+    /** 마지막 갱신 뒤 지난 초. 받은 적이 없으면 null. */
+    fun ageS(): Long? = if (updatedAt == 0L) null else (System.currentTimeMillis() - updatedAt) / 1000
+
+    /** 엔진에 줄 앞 카메라. 신선하지 않으면 null(내장 판단으로). 이동식·보호구역은 뺀다. */
+    fun feed(): List<SlowdownEngine.ExternalCam>? {
+        if (!running || updatedAt == 0L || System.currentTimeMillis() - updatedAt > FRESH_MS) return null
+        return cams.mapNotNull { c ->
+            val limit = c.limitKmh ?: return@mapNotNull null
+            if (c.distM < 0) return@mapNotNull null
+            val kind = when (c.kind) {
+                "구간단속 시작" -> CamKind.SECTION_START
+                "구간단속 끝" -> CamKind.SECTION_END
+                "이동식 과속카메라", "어린이보호구역" -> return@mapNotNull null
+                else -> CamKind.SPOT
+            }
+            val name = listOf(c.road, c.kind).filter { it.isNotEmpty() }.joinToString(" ")
+            SlowdownEngine.ExternalCam(
+                Camera(c.lat, c.lon, limit, kind, 0, name, CODE, roadName = c.road, placeText = "kakao:${c.id}"),
+                c.distM.toDouble())
+        }
+    }
+
+    const val CODE = "KAKAO"
+    /** 이보다 오래 갱신이 없으면 끊긴 것으로 본다. */
+    const val FRESH_MS = 5_000L
 
     /** 주행 감시 시작 때. 메인 스레드에서 부른다. */
     fun start(app: Application, logger: (String) -> Unit) {

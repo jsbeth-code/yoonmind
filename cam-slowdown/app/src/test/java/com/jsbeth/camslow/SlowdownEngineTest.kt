@@ -563,6 +563,88 @@ class SlowdownEngineTest {
         assertEquals(0, CameraCsv.lenToMeters(200.0))    // 200m: 너무 짧음
         assertEquals(0, CameraCsv.lenToMeters(99999.0))
     }
+    // ---- 카카오 안전 운행(외부) 정보로 판단
+
+    /** 북쪽 주행, 매 fix마다 extCams 중 아직 안 지난 것을 도로 거리(북 차이)로 넣는다. */
+    private fun driveNorthExternal(
+        police: List<Camera>, extCams: List<Camera>, kmh: Double, fromN: Double, toN: Double, kakaoOn: (Double) -> Boolean = { true },
+    ): List<Pair<EngineEvent, Double>> {
+        val e = SlowdownEngine(CameraIndex(police), EngineConfig())
+        val v = kmh / 3.6
+        val out = ArrayList<Pair<EngineEvent, Double>>()
+        var n = fromN
+        while (n <= toN) {
+            val (la, lo) = at(0.0, n)
+            e.external = if (!kakaoOn(n)) null else extCams.mapNotNull { c ->
+                val camN = (c.lat - lat0) * mPerDegLat
+                if (camN - n < 0 || camN - n > 2000) null else SlowdownEngine.ExternalCam(c.copy(), camN - n)
+            }
+            e.update(Fix(la, lo, v, 0.0)).forEach { out += it to n }
+            assertEquals(kakaoOn(n), e.status.external)
+            n += v
+        }
+        return out
+    }
+
+    @Test fun external_spotCamera_downAndUp() {
+        val k = cam(0.0, 3000.0, 80, code = "KAKAO")
+        val ev = driveNorthExternal(emptyList(), listOf(k), 90.0, 0.0, 5000.0).filter { it.first !is EngineEvent.Hold }
+        assertEquals(2, ev.size)
+        assertTrue(ev[0].first is EngineEvent.Down); assertTrue(ev[1].first is EngineEvent.Up)
+        assertTrue(3000.0 - ev[0].second in 200.0..450.0)
+        assertTrue(ev[1].second - 3000.0 in 90.0..170.0)
+    }
+
+    @Test fun external_ignoresPoliceCamerasWhileFresh_fallsBackWhenStale() {
+        val police = cam(8.0, 2000.0, 80)
+        // 카카오가 살아 있으면 경찰청 카메라는 안 본다
+        assertTrue(driveNorthExternal(listOf(police), emptyList(), 90.0, 0.0, 3000.0).isEmpty())
+        // 카카오가 끊기면(null) 내장 판단으로 경찰청 카메라에 감속
+        val ev = driveNorthExternal(listOf(police), emptyList(), 90.0, 0.0, 3000.0, kakaoOn = { false })
+        assertTrue(ev.any { it.first is EngineEvent.Down })
+    }
+
+    @Test fun external_midSectionEntry_holdsUntilEndThenRestores() {
+        // 구간 시작을 못 보고 들어옴: 앞에 "구간 끝"(1.5 km)만 보인다
+        val end = cam(0.0, 1500.0, 80, kind = CamKind.SECTION_END, code = "KAKAO")
+        val ev = driveNorthExternal(emptyList(), listOf(end), 80.0, 0.0, 2500.0)
+        val down = ev.first { it.first is EngineEvent.Down }
+        assertTrue("바로 내림 ${down.second}", down.second < 100.0)
+        val hold = ev.first { it.first is EngineEvent.Hold }.first as EngineEvent.Hold
+        assertTrue(hold.midEntry)
+        val up = ev.first { it.first is EngineEvent.Up }.second
+        assertTrue("끝 지나 복귀 $up", up - 1500.0 in 80.0..160.0)
+    }
+
+    @Test fun external_sectionStartThenEnd_releasedAtKakaoEnd() {
+        val start = cam(0.0, 1000.0, 80, kind = CamKind.SECTION_START, code = "KAKAO")
+        val end = cam(0.0, 4000.0, 80, kind = CamKind.SECTION_END, code = "KAKAO")
+        val ev = driveNorthExternal(emptyList(), listOf(start, end), 90.0, 0.0, 6000.0)
+        val downs = ev.filter { it.first is EngineEvent.Down }
+        val ups = ev.filter { it.first is EngineEvent.Up }
+        assertEquals(1, downs.size); assertEquals(1, ups.size)
+        assertTrue(downs[0].second < 1000.0)
+        assertTrue("끝 지나 복귀 ${ups[0].second}", ups[0].second - 4000.0 in 80.0..170.0)
+    }
+
+    @Test fun external_releaseSuppressesSameCameraEvenWithNewObjects() {
+        val k = cam(0.0, 2000.0, 80, code = "KAKAO")
+        val e = SlowdownEngine(CameraIndex(emptyList()), EngineConfig())
+        val v = 25.0
+        var n = 0.0
+        var released = false
+        var downs = 0
+        while (n < 1990.0) {
+            val (la, lo) = at(0.0, n)
+            e.external = listOf(SlowdownEngine.ExternalCam(k.copy(), 2000.0 - n))
+            downs += e.update(Fix(la, lo, v, 0.0)).count { it is EngineEvent.Down }
+            if (e.isSlowed && !released) { assertTrue(e.release()); released = true }
+            n += v
+        }
+        assertEquals(1, downs)
+        assertFalse(e.isSlowed)
+    }
+
 }
 
 class KecCsvTest {
@@ -724,4 +806,5 @@ class KecCsvTest {
         assertEquals(180.0, Geo.angleDiff(0.0, 180.0), 1e-9)
         assertEquals(90.0, Geo.angleDiff(45.0, 315.0), 1e-9)
     }
+
 }

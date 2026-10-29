@@ -84,7 +84,11 @@ class MainActivity : Activity() {
         actionBar?.setBackgroundDrawable(ColorDrawable(t.appbar))
         actionBar?.title = SpannableString(getString(R.string.app_name)).apply { setSpan(ForegroundColorSpan(t.fg), 0, length, 0) }
 
+        // 폴드 펼침·가로처럼 폭이 600dp 이상이면 두 열: 왼쪽 = 거리·속도·지도(남는 높이 전부), 오른쪽 = 프로필·버튼·점검표·기록
+        val wide = resources.configuration.screenWidthDp >= 600
         val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val leftCol = if (wide) LinearLayout(this).apply { orientation = LinearLayout.VERTICAL } else root
+        val rightCol = if (wide) LinearLayout(this).apply { orientation = LinearLayout.VERTICAL } else root
         val lp = { top: Int, bottom: Int -> LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(top); bottomMargin = dp(bottom) } }
 
         // 색 띠
@@ -116,13 +120,16 @@ class MainActivity : Activity() {
         signLabel = TextView(this).apply { text = "제한"; textSize = 10f; setTextColor(t.muted); gravity = Gravity.CENTER }
         right.addView(signLabel)
         top.addView(right)
-        root.addView(top)
+        leftCol.addView(top)
         subView = TextView(this).apply { textSize = 12f; setTextColor(t.muted); setPadding(dp(16), dp(2), dp(16), dp(8)) }
-        root.addView(subView)
+        leftCol.addView(subView)
 
         // 지도
         map = MiniMapView(this).apply { theme = t; display = jua }
-        if (Prefs.mapOn(this)) root.addView(map, lp(0, 0))
+        if (Prefs.mapOn(this)) {
+            if (wide) { map.fillHeight = true; leftCol.addView(map, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f)) }
+            else root.addView(map, lp(0, 0))
+        }
 
         // 프로필 두 칸
         val prof = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(dp(16), dp(10), dp(16), dp(2)) }
@@ -131,28 +138,35 @@ class MainActivity : Activity() {
         prof.addView(usualChip, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
         prof.addView(TextView(this).apply { text = "→"; textSize = 20f; setTextColor(t.muted); setPadding(dp(8), 0, dp(8), 0) })
         prof.addView(slowChip, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-        root.addView(prof)
+        rightCol.addView(prof)
 
         // 지금 복귀 (감속 중이거나 차가 평소 프로필이 아닐 때만)
         releaseBtn = bigButton(t.bandProblem) { DriveService.send(this, DriveService.ACTION_RELEASE) }
-        root.addView(releaseBtn, lp(8, 0).apply { leftMargin = dp(16); rightMargin = dp(16) })
+        rightCol.addView(releaseBtn, lp(8, 0).apply { leftMargin = dp(16); rightMargin = dp(16) })
 
         // 감시 켜기/끄기
         toggleBtn = bigButton(t.toggleOn) { if (DriveState.running) DriveService.send(this@MainActivity, DriveService.ACTION_STOP) else startDrive() }
-        root.addView(toggleBtn, lp(8, 4).apply { leftMargin = dp(16); rightMargin = dp(16) })
+        rightCol.addView(toggleBtn, lp(8, 4).apply { leftMargin = dp(16); rightMargin = dp(16) })
 
         nowView = TextView(this).apply { textSize = 12f; setTextColor(t.muted); setPadding(dp(16), dp(4), dp(16), dp(6)) }
-        root.addView(nowView)
+        rightCol.addView(nowView)
 
         checkView = TextView(this).apply { textSize = 12.5f; setTextColor(t.fg); setPadding(dp(16), dp(4), dp(16), dp(4)); setLineSpacing(0f, 1.25f) }
-        root.addView(checkView)
+        rightCol.addView(checkView)
 
         logHead = TextView(this).apply { textSize = 13f; typeface = Typeface.DEFAULT_BOLD; setTextColor(t.fg); setPadding(dp(16), dp(10), dp(16), dp(2)); setOnClickListener { logExpanded = !logExpanded; render() } }
-        root.addView(logHead)
+        rightCol.addView(logHead)
         logView = TextView(this).apply { textSize = 12f; setTextColor(t.fg); setPadding(dp(16), 0, dp(16), dp(20)) }
-        root.addView(logView)
+        rightCol.addView(logView)
 
-        setContentView(ScrollView(this).apply { addView(root); setBackgroundColor(t.bg) })
+        if (wide) {
+            val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+            row.addView(leftCol, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1.15f))
+            row.addView(View(this).apply { setBackgroundColor(t.line) }, LinearLayout.LayoutParams(dp(1), LinearLayout.LayoutParams.MATCH_PARENT))
+            row.addView(ScrollView(this).apply { addView(rightCol) }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f))
+            root.addView(row, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f))
+            setContentView(root.apply { setBackgroundColor(t.bg) })
+        } else setContentView(ScrollView(this).apply { addView(root); setBackgroundColor(t.bg) })
         render()
     }
 
@@ -312,6 +326,18 @@ class MainActivity : Activity() {
 
     private fun km(m: Double) = if (m >= 950) "%.1fkm".format(m / 1000.0) else "${m.toInt()}m"
 
+    /** "다음 카메라 · …" 뒤에 출처 표시(노란 "카카오" / 주황 "내장"). 카카오 키가 없는 빌드면 표시 안 함. */
+    private fun withSource(text: String, kakao: Boolean): CharSequence = android.text.SpannableStringBuilder(text).apply {
+        if (!KakaoSafety.hasKey) return@apply
+        append("  ")
+        val start = length
+        append(if (kakao) " 카카오 " else " 내장 ")
+        setSpan(android.text.style.BackgroundColorSpan(if (kakao) 0xFFFEE500.toInt() else 0xFFFFE1C4.toInt()), start, length, 0)
+        setSpan(ForegroundColorSpan(if (kakao) 0xFF3A2F00.toInt() else 0xFF8A4B12.toInt()), start, length, 0)
+        setSpan(android.text.style.RelativeSizeSpan(0.85f), start, length, 0)
+        setSpan(android.text.style.StyleSpan(Typeface.BOLD), start, length, 0)
+    }
+
     private fun setBand(color: Int, big: String, sub: String) {
         (band.background as GradientDrawable).setColor(color)
         band.text = android.text.SpannableStringBuilder().apply {
@@ -338,6 +364,8 @@ class MainActivity : Activity() {
         val sinceUp = if (DriveState.lastUpAt == 0L) Long.MAX_VALUE else SystemClock.elapsedRealtime() - DriveState.lastUpAt
         val next = st?.nextCamera
         val restore = cfg.restoreAfterM.toInt()
+        // 카카오 키가 있는데 지금 판단이 카카오가 아니면 "예비 판단"(끊김·연결 실패)
+        val kakaoDown = running && !sim && st != null && KakaoSafety.hasKey && !st.external
 
         // ---- 문제 목록
         val problems = ArrayList<String>()
@@ -356,6 +384,11 @@ class MainActivity : Activity() {
                 if (DriveState.drActive) "추측 항법: 감속만 하고 복귀는 GPS가 돌아온 뒤에" else "카메라를 감지하지 못합니다")
             slowed && prog != null && progKind == S3xyButton.Press.SINGLE ->
                 setBand(t.bandSlow, "▼ ${out.slow.label}로 내리는 중", "휠 아래 클릭 ${prog.first}/${prog.second} 보냄 · 커맨더 응답 대기")
+            slowed && st.holdKind == "구간단속" && st.target?.kind == CamKind.SECTION_END -> {
+                val remain = ((st.holdRemainM ?: 0.0) - cfg.restoreAfterM).coerceAtLeast(0.0)
+                setBand(t.bandSlow, "▼ 구간단속 중 · 끝까지 ${km(remain)}", "중간에 들어옴 · ${out.slow.label} 유지" +
+                    (if (out.autoRestore) " · 끝 지나 ${restore}m 뒤 ${out.usual.label}으로 복귀" else " · 복귀는 직접"))
+            }
             slowed && st.holdKind == "구간단속" -> {
                 val remain = st.holdRemainM ?: 0.0
                 val len = st.target?.sectionLenM ?: 0
@@ -377,6 +410,8 @@ class MainActivity : Activity() {
             sinceUp < 10_000 -> setBand(t.bandOn, "▲ ${out.usual.label}으로 복귀 완료",
                 if (next != null) "다음 카메라 ${km(st.nextDistM ?: 0.0)}" else "2km 안에 카메라 없음")
             problems.isNotEmpty() -> setBand(t.bandProblem, "● 작동 중 · 문제", problems.joinToString(" · "))
+            kakaoDown -> setBand(t.bandProblem, "● 작동 중 · 예비 판단",
+                (KakaoSafety.ageS()?.let { "카카오 끊김 ${it}초" } ?: KakaoSafety.status) + " · 내장 데이터로 판단")
             next != null -> setBand(t.bandOn, "● 작동 중 · 대기",
                 "${(st.triggerM ?: 0.0).toInt()}m 앞에서 신호 · ${out.usual.label} → ${out.slow.label}" + (if (out.ble) ", 클릭 ${out.downPresses}번" else " (음성만)"))
             else -> setBand(t.bandOn, "● 작동 중",
@@ -405,14 +440,20 @@ class MainActivity : Activity() {
             speedView.text = "${st.speedKmh.toInt()}"
             speedView.setTextColor(if (limit != null && st.speedKmh > limit + 5) t.cam else t.fg)
             signView.text = limit?.toString() ?: "–"
-            if (next != null) {
+            val midTarget = st.target?.takeIf { it.kind == CamKind.SECTION_END && st.holdKind == "구간단속" }
+            if (midTarget != null) {
+                val remain = ((st.holdRemainM ?: 0.0) - cfg.restoreAfterM).coerceAtLeast(0.0)
+                distView.text = if (remain >= 950) "%.1f km".format(remain / 1000.0) else "${remain.toInt()} m"
+                lineView.text = withSource("구간단속 끝" + (if (midTarget.roadName.isNotEmpty()) " · ${midTarget.roadName.take(14)}" else ""), st.external)
+                subView.text = "구간 제한 ${midTarget.limitKmh} · 평균속도 단속 · 지나면 ${out.usual.label}로 복귀"
+            } else if (next != null) {
                 val dist = st.nextDistM ?: 0.0
                 distView.text = "${"%,d".format(dist.toInt())} m"
-                lineView.text = buildString {
+                lineView.text = withSource(buildString {
                     append("다음 카메라")
-                    if (next.kind == CamKind.SECTION_START) append(" · 구간단속 ${if (next.sectionLenM > 0) "%.1fkm".format(next.sectionLenM / 1000.0) else "길이 모름"}")
+                    if (next.kind == CamKind.SECTION_START) append(" · 구간단속" + (if (next.sectionLenM > 0) " %.1fkm".format(next.sectionLenM / 1000.0) else if (st.external) "" else " 길이 모름"))
                     if (next.name.isNotEmpty()) append(" · ").append(next.name.take(18))
-                }
+                }, st.external)
                 val trig = st.triggerM ?: 0.0
                 subView.text = when {
                     slowed && st.target === next -> "이 카메라에 감속 신호를 보냈습니다 · ${st.note}"
@@ -489,7 +530,15 @@ class MainActivity : Activity() {
         val zoneLine = if (!Prefs.schoolZoneOn(this)) null else when (zoneCount) {
             null -> "–  보호구역 읽는 중"; 0 -> "✖  어린이보호구역 파일 없음 — 메뉴에서 불러오기"; else -> "✔  어린이보호구역 ${zoneCount}곳 · 반경 ${Prefs.schoolZoneRadiusM(this)}m"
         }
-        checkView.text = listOfNotNull(gpsLine, dataLine, roadsLine, cmdLine, soundLine, overlayLine, autoLine, zoneLine).joinToString("\n")
+        val kakaoAge = KakaoSafety.ageS()
+        val kakaoLine = when {
+            !KakaoSafety.hasKey -> "–  카카오 안전 운행: 앱 키 없음(빌드)"
+            !running || sim -> "–  카카오 안전 운행: 켜면 연결"
+            st?.external == true -> "✔  카카오 안전 운행 · ${kakaoAge ?: 0}초 전 · 앞 카메라 ${st.ahead.size}"
+            kakaoAge != null -> "✖  카카오 끊김 ${kakaoAge}초 — 터널·통신 확인 · 내장 데이터로 판단"
+            else -> "△  ${KakaoSafety.status}"
+        }
+        checkView.text = listOfNotNull(gpsLine, kakaoLine, dataLine, roadsLine, cmdLine, soundLine, overlayLine, autoLine, zoneLine).joinToString("\n")
 
         // ---- 기록
         val lines = DriveState.log
