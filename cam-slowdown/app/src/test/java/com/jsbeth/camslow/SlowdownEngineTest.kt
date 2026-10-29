@@ -317,6 +317,22 @@ class SlowdownEngineTest {
 
     private val header = "무인교통단속카메라관리번호,시도명,도로노선명,설치장소,단속구분,제한속도,단속구간위치구분,과속단속구간길이,위도,경도\n"
 
+    @Test fun csvParse_schoolZoneNameForcesLimit30() {
+        // 설치장소에 학교·보호구역이 들어가면 데이터 제한(50)을 30으로. 지명만 있으면 그대로. 이미 30 이하면 그대로.
+        val csv = header +
+            "S1,서울,동일로,중목초교초교 앞 3차로,1,50,,,37.1,127.1\n" +
+            "S2,서울,동일로,OO초등학교 정문,2,60,,,37.2,127.2\n" +
+            "S3,서울,동일로,어린이보호구역,1,50,,,37.3,127.3\n" +
+            "S4,서울,동일로,중화역 앞,1,50,,,37.4,127.4\n" +
+            "S5,서울,동일로,OO유치원 앞,1,30,,,37.5,127.5\n"
+        val byName = CameraCsv.parse(csv).associateBy { it.name }
+        assertEquals(30, byName.getValue("동일로 중목초교초교 앞 3차로").limitKmh)
+        assertEquals(30, byName.getValue("동일로 OO초등학교 정문").limitKmh)
+        assertEquals(30, byName.getValue("동일로 어린이보호구역").limitKmh)
+        assertEquals(50, byName.getValue("동일로 중화역 앞").limitKmh)
+        assertEquals(30, byName.getValue("동일로 OO유치원 앞").limitKmh)
+    }
+
     @Test fun csvParse_realCodes() {
         // 실제 데이터 규칙: 단속구분 1=속도, 2=신호, 4=불법주정차(제한속도 보통 없음); 단속구간위치구분 1=시점, 2=종점; 길이는 km 또는 m
         val csv = header +
