@@ -8,7 +8,10 @@
   <node id="6" lat="37.0724830" lon="127.0500000" version="1"/>
   <node id="7" lat="37.0769796" lon="127.0500000" version="1"/>
   <node id="8" lat="37.0814762" lon="127.0500000" version="1"/>
-  <node id="9" lat="37.0859728" lon="127.0500000" version="1"/>
+  <node id="9" lat="37.0859728" lon="127.0500000" version="1">
+    <tag k="junction" v="yes"/>
+    <tag k="name" v="북쪽교차로"/>
+  </node>
   <node id="10" lat="37.0904694" lon="127.0500000" version="1"/>
   <node id="11" lat="37.0949661" lon="127.0500000" version="1"/>
   <node id="12" lat="37.0994627" lon="127.0500000" version="1"/>
@@ -55,6 +58,30 @@
   <node id="53" lat="37.0679864" lon="127.0612681" version="1"/>
   <node id="54" lat="37.0724830" lon="127.0612681" version="1"/>
   <node id="55" lat="37.0769796" lon="127.0612681" version="1"/>
+  <node id="56" lat="37.0473020" lon="127.0503380" version="1">
+    <tag k="railway" v="station"/>
+    <tag k="name" v="남쪽역"/>
+  </node>
+  <node id="57" lat="37.0634898" lon="127.0635218" version="1">
+    <tag k="amenity" v="school"/>
+    <tag k="name" v="동쪽초등학교"/>
+  </node>
+  <node id="58" lat="37.1039593" lon="127.0500000" version="1">
+    <tag k="place" v="neighbourhood"/>
+    <tag k="name" v="북동"/>
+  </node>
+  <node id="59" lat="37.0320136" lon="127.0500000" version="1">
+    <tag k="place" v="neighbourhood"/>
+    <tag k="name" v="남동"/>
+  </node>
+  <node id="60" lat="37.0500000" lon="126.7119560" version="1">
+    <tag k="place" v="city"/>
+    <tag k="name" v="서울"/>
+  </node>
+  <node id="61" lat="37.0679864" lon="127.0623949" version="1"/>
+  <node id="62" lat="37.0679864" lon="127.0629584" version="1"/>
+  <node id="63" lat="37.0684361" lon="127.0629584" version="1"/>
+  <node id="64" lat="37.0684361" lon="127.0623949" version="1"/>
   <way id="1" version="1">
     <nd ref="1"/>
     <nd ref="2"/>
@@ -154,5 +181,14 @@
     <tag k="highway" v="tertiary"/>
     <tag k="maxspeed" v="60"/>
     <tag k="ref" v="지방도 7"/>
+  </way>
+  <way id="10" version="1">
+    <nd ref="61"/>
+    <nd ref="62"/>
+    <nd ref="63"/>
+    <nd ref="64"/>
+    <nd ref="61"/>
+    <tag k="building" v="apartments"/>
+    <tag k="name" v="샘플아파트"/>
   </way>
 </osm>

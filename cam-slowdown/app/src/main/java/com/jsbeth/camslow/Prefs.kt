@@ -292,19 +292,35 @@ object CameraRepo {
     @Volatile var roadsInfo: String = ""
         private set
 
-    /** 도로망을 연다(zip은 열어 두고 타일은 필요할 때 읽는다). 없거나 깨졌으면 null. 카메라는 나중에 setCameras로. */
+    /**
+     * 도로망을 연다(zip은 열어 두고 타일은 필요할 때 읽는다). 없거나 깨졌으면 null.
+     * 열면서 zip의 OSM 지명(places.tsv)으로 카메라 설치장소 글의 "A→B"·"X방향"을 풀어 단속 방향을 붙인다(CamDirection).
+     * 방향이 붙은 카메라 목록은 net.cameras — 엔진도 이 목록을 써야 GPS 기하 판단에도 방향이 적용된다.
+     */
     fun openRoads(ctx: Context, cams: List<Camera>): RoadNet? {
         val f = roadsFile(ctx)
-        if (!f.exists()) { roadsInfo = ""; return null }
+        if (!f.exists()) { roadsInfo = ""; directionNote = ""; return null }
         return try {
-            val net = RoadNet.open(f, cams)
+            val net = RoadNet.open(f)
             roadsInfo = roadsInfoOf(net.info)
+            val t0 = System.currentTimeMillis()
+            // 같은 카메라 목록·같은 도로망이면 다시 풀지 않는다(지명 사전 읽기 수 초)
+            val key = Triple(System.identityHashCode(cams), f.length(), f.lastModified())
+            val res = resolvedCache?.takeIf { it.first == key }?.second
+                ?: CamDirection.assign(cams, net.gazetteer(CamDirection.wantedNames(cams))).also { resolvedCache = key to it }
+            net.setCameras(res.cameras)
+            directionNote = (if (net.hasPlaces) res.describe() else "지명 사전 없음(옛 도로망 파일) — " + res.describe()) + " (${System.currentTimeMillis() - t0}ms)"
             net
-        } catch (e: Exception) { roadsInfo = "도로망 파일 오류: ${e.message}"; null }
+        } catch (e: Exception) { roadsInfo = "도로망 파일 오류: ${e.message}"; directionNote = ""; null }
     }
 
+    /** 기록용: 글·코드 전파로 방향을 붙인 결과. */
+    @Volatile var directionNote: String = ""
+        private set
+    private var resolvedCache: Pair<Triple<Int, Long, Long>, CamDirection.Result>? = null
+
     /** 설정이 바뀌어 다시 만들어야 할 때. */
-    fun invalidate() { synchronized(this) { cached = null; cachedZones = null } }
+    fun invalidate() { synchronized(this) { cached = null; cachedZones = null; resolvedCache = null } }
 
     /** 파일 파싱은 수 초 걸릴 수 있다. 메인 스레드에서 부르지 말 것. 동시에 두 번 파싱하지 않도록 잠근다. */
     fun load(ctx: Context): CameraIndex {

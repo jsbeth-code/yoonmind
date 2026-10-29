@@ -62,21 +62,59 @@ class RoadNetTest {
         assertNull(n.viewAt(0.0, 2000.0, 90.0))
     }
 
-    @Test fun parallelAndOppositeRoads_excluded() {
+    @Test fun parallelRoad_excluded_oppositeCarriageway_unknownDirection_servesBoth() {
         val side = cam(55.0, 3000.0, 50, "옆길")
         val mine = cam(5.0, 3200.0, 80, "내길")
         val opposite = cam(-17.0, 2500.0, 80, "반대편")
         val n = net(listOf(side, mine, opposite))
         val v = n.viewAt(0.0, 2000.0, 0.0)!!
-        assertEquals(listOf("내길"), v.names())
-        assertEquals(1200.0, v.ahead[0].alongM, 15.0)
+        // 옆길(안 이어진 도로)은 빠지고, 방향 모르는 반대 차로 카메라는 양쪽에 다 붙는다(좌표 좌우로 방향을 추정하지 않음)
+        assertEquals(listOf("반대편", "내길"), v.names())
+        assertEquals(1200.0, v.ahead.first { it.cam.name == "내길" }.alongM, 15.0)
         assertTrue(n.isAttached(side)); assertTrue(n.isAttached(opposite))
-        // 반대편 카메라는 남행 차로 몫
-        assertEquals(false, n.servesHeading(opposite, 0.0))
+        assertEquals(true, n.servesHeading(opposite, 0.0))
         assertEquals(true, n.servesHeading(opposite, 180.0))
         val south = n.viewAt(-12.0, 3000.0, 180.0)!!
         assertEquals(listOf("반대편"), south.names())
         assertEquals(500.0, south.ahead[0].alongM, 15.0)
+        // 남행 카메라를 도로에 내린 점은 남행 차로(east=-12) 위
+        val (_, lo12) = at(-12.0, 2500.0)
+        assertEquals(lo12, south.ahead[0].lon, 2e-5)
+    }
+
+    @Test fun directedCamera_onOppositeCarriageway_attachesToOwnDirectionFarAway() {
+        // 북행 구간 시점이 남행 차로(east=-12) 위에 찍힘(동부간선 면목) — 같은 이름(간선도로)의 북행 차로에 붙는다
+        val start = cam(-12.0, 2500.0, 80, "북행시점").copy(bearingDeg = 0.0, headingTolDeg = 120.0, roadName = "간선도로")
+        val n = net(listOf(start))
+        assertEquals(listOf("북행시점"), n.viewAt(0.0, 2000.0, 0.0)!!.names())
+        assertEquals(emptyList<String>(), n.viewAt(-12.0, 3000.0, 180.0)!!.names())
+        val rc = n.viewAt(0.0, 2000.0, 0.0)!!.ahead[0]
+        val (_, lo0) = at(0.0, 2500.0)
+        assertEquals(lo0, rc.lon, 2e-5)   // 도로에 내린 점은 북행 차로 위
+        assertEquals(500.0, rc.alongM, 15.0)
+    }
+
+    @Test fun directedCamera_twoWayRoad_sideFromBearing_notFromCoordinate() {
+        // 왕복 2차선(east=1000)에서 좌표는 왼쪽(994)인데 글로 북행이라고 알면 북행
+        val north = cam(994.0, 2000.0, 60, "북행").copy(bearingDeg = 10.0, headingTolDeg = 90.0)
+        val south = cam(1005.0, 2000.0, 60, "남행").copy(bearingDeg = 170.0, headingTolDeg = 90.0)
+        val sideways = cam(1001.0, 2200.0, 60, "어긋남").copy(bearingDeg = 90.0, headingTolDeg = 90.0)   // 길과 90° → 모름 = 양쪽
+        val n = net(listOf(north, south, sideways))
+        assertEquals(setOf("북행", "어긋남"), n.viewAt(1000.0, 1000.0, 0.0)!!.names().toSet())
+        assertEquals(setOf("남행", "어긋남"), n.viewAt(1000.0, 3000.0, 180.0)!!.names().toSet())
+    }
+
+    @Test fun roadNameMatch_preferredOverNearerSideRoad() {
+        // 간선(east=0)과 옆길(east=50) 사이, 옆길에 더 가까운(east=32) 좌표지만 도로노선명이 간선도로면 간선에 붙는다
+        val c = cam(32.0, 2000.0, 80, "교차로좌표").copy(roadName = "간선도로")
+        val plain = cam(32.0, 1500.0, 80, "이름없음")
+        val n = net(listOf(c, plain))
+        assertEquals(listOf("교차로좌표"), n.viewAt(0.0, 1000.0, 0.0)!!.names())
+        // 이름 없으면 가까운 옆길
+        assertEquals(listOf("이름없음"), n.viewAt(50.0, 1000.0, 0.0)!!.names())
+        // "도로"→"로" 같은 이름으로 본다
+        val c2 = cam(32.0, 2500.0, 80, "축약").copy(roadName = "간선로")
+        assertEquals(listOf("축약"), net(listOf(c2)).viewAt(0.0, 1000.0, 0.0)!!.names())
     }
 
     @Test fun medianCamera_attachedToBothCarriageways() {
@@ -100,13 +138,14 @@ class RoadNetTest {
         assertEquals(listOf("옆으로 꺾는 길"), e.names())
     }
 
-    @Test fun twoWayRoad_sideOfCenterlineDecidesDirection() {
-        val right = cam(1005.0, 2000.0, 60, "북행")
-        val left = cam(994.0, 2000.0, 60, "남행")
+    @Test fun twoWayRoad_unknownDirection_servesBothSides() {
+        val right = cam(1005.0, 2000.0, 60, "오른쪽")
+        val left = cam(994.0, 2000.0, 60, "왼쪽")
         val center = cam(1001.0, 2000.0, 60, "가운데")
         val n = net(listOf(right, left, center))
-        assertEquals(setOf("북행", "가운데"), n.viewAt(1000.0, 1000.0, 0.0)!!.names().toSet())
-        assertEquals(setOf("남행", "가운데"), n.viewAt(1000.0, 3000.0, 180.0)!!.names().toSet())
+        val all = setOf("오른쪽", "왼쪽", "가운데")
+        assertEquals(all, n.viewAt(1000.0, 1000.0, 0.0)!!.names().toSet())
+        assertEquals(all, n.viewAt(1000.0, 3000.0, 180.0)!!.names().toSet())
         assertEquals(60, n.viewAt(1000.0, 1000.0, 0.0)!!.maxspeedKmh)
     }
 

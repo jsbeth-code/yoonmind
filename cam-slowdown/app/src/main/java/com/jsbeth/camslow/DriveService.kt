@@ -490,11 +490,13 @@ class DriveService : Service(), LocationListener {
             val idx = CameraRepo.load(this)
             val zones = CameraRepo.loadZones(this)
             val net = if (cfg.useRoads) CameraRepo.openRoads(this, idx.cameras) else null
+            // 도로망이 설치장소 글로 방향을 붙인 목록을 엔진에도 준다(GPS 기하 판단에서도 반대 방향을 거르도록)
+            val index = if (net != null) CameraIndex(net.cameras) else idx
             main.post {
                 if (seq != loadSeq) { net?.close(); return@post }
                 net?.onTileLoaded = { msg -> DriveState.log(msg) }
                 roads = net
-                val e = SlowdownEngine(idx, cfg, zones, net)
+                val e = SlowdownEngine(index, cfg, zones, net)
                 engine = e
                 DriveState.zoneCount = zones.cameras.size
                 onReady(e)
@@ -526,7 +528,9 @@ class DriveService : Service(), LocationListener {
             main.removeCallbacks(drRunnable); main.postDelayed(drRunnable, 1_000)
             val s = outputs.settings
             DriveState.log("주행 감시 시작 — 카메라 ${e.cameraCount}개, ${s.describe()}" + (if (e.hasRoads) ", 도로망 맵매칭" else ", 도로망 없음(GPS 방향 판단)"))
+            if (e.hasRoads && CameraRepo.directionNote.isNotEmpty()) DriveState.log("카메라 ${CameraRepo.directionNote}")
             if (e.cameraCount == 0) { DriveState.log("카메라 데이터가 없습니다 — CSV를 불러오세요"); outputs.say("카메라 데이터가 없습니다") }
+            else outputs.say("감시 시작. 카메라 ${"%,d".format(e.cameraCount)}개" + (if (e.hasRoads) ", 도로망 있음" else ", 도로망 없음"))
             if (e.config.schoolZoneOn && e.zoneCount == 0) DriveState.log("어린이보호구역 감속이 켜져 있지만 보호구역 파일이 없습니다")
             if (s.ble && !S3xyButton.ready) DriveState.log("BLE 켜짐, 커맨더 대기 중 (${S3xyButton.status}) — 커맨더가 붙어야 신호가 나갑니다")
             notify("GPS 대기")

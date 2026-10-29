@@ -14,6 +14,10 @@
   junctionCount, 각 교차 노드: 노드 인덱스 차이(uvar) entryCount, 엔트리(way<<11 | 노드위치) 첫값 uvar 이후 차이 zigzag
 flags: bit0-3 등급, bit4 일방통행(노드 순서 방향), bit5 교량, bit6 터널.
 
+places.tsv (zip 안, UTF-8): 이름 \t 위도e7 \t 경도e7 \t 종류 한 글자. 경찰청 카메라 설치장소의 "A→B"·"X방향" 글에서
+지명을 좌표로 풀어 단속 방향을 정하는 데 쓴다(CamDirection.kt). 교차로·나들목·역·학교·병원·관공서·교량·터널·동네·아파트 등.
+종류: j 교차로/나들목, s 역·터미널, e 학교, h 병원, g 관공서, p 지명(동·리·마을·시), b 교량·터널, a 아파트·단지, o 기타.
+
 사용: osm2roads.py south-korea-latest.osm.pbf kr-roads.zip [--major] [--source 설명]
 """
 import argparse
@@ -55,6 +59,60 @@ def parse_maxspeed(v):
     return n if 0 < n < 255 else 0
 
 
+# 지명 종류 판정. (키, 값 집합 또는 None=아무 값) → 종류 글자. 순서대로 처음 맞는 것.
+PLACE_RULES = [
+    ("highway", {"motorway_junction"}, "j"),
+    ("junction", {"yes"}, "j"),
+    ("highway", {"traffic_signals", "crossing", "stop"}, "j"),   # 이름 있는 교차로 노드
+    ("railway", {"station", "halt"}, "s"),
+    ("public_transport", {"station"}, "s"),
+    ("amenity", {"bus_station", "ferry_terminal"}, "s"),
+    ("aeroway", {"aerodrome", "terminal"}, "s"),
+    ("amenity", {"school", "kindergarten", "college", "university", "childcare"}, "e"),
+    ("amenity", {"hospital", "clinic", "doctors", "dentist"}, "h"),
+    ("amenity", {"townhall", "community_centre", "police", "fire_station", "post_office", "courthouse", "library", "public_building", "social_facility"}, "g"),
+    ("office", {"government", "administrative"}, "g"),
+    ("place", None, "p"),
+    ("man_made", {"bridge"}, "b"),
+    ("natural", {"peak", "hill"}, "p"),
+    ("amenity", {"marketplace", "place_of_worship", "bank", "parking", "fuel", "cinema", "theatre"}, "o"),
+    ("shop", {"mall", "supermarket", "department_store", "wholesale"}, "o"),
+    ("leisure", {"park", "stadium", "sports_centre", "golf_course", "water_park", "pitch"}, "o"),
+    ("tourism", {"attraction", "museum", "theme_park", "zoo", "viewpoint", "hotel"}, "o"),
+    ("landuse", {"residential", "commercial", "industrial", "retail", "military", "cemetery"}, "a"),
+    ("building", {"apartments", "residential", "dormitory", "commercial", "office", "industrial", "public", "civic", "hospital", "school", "university", "retail", "hotel"}, "a"),
+    ("historic", None, "o"),
+    ("industrial", None, "a"),
+    ("military", None, "a"),
+]
+
+
+def place_kind(tags, is_way):
+    """(이름, 종류) 또는 None."""
+    name = (tags.get("name") or "").strip()
+    if is_way:
+        # 길 자체의 이름은 지명이 아니다. 교량·터널 구간은 bridge:name/tunnel:name, 없으면 name이 "…교/…터널"일 때만(성수대교, 남산1호터널).
+        if tags.get("highway") or tags.get("railway"):
+            if tags.get("bridge") not in (None, "no"):
+                bn = (tags.get("bridge:name") or "").strip() or (name if name.endswith("교") else "")
+                return (bn, "b") if bn and len(bn) <= 40 else None
+            if tags.get("tunnel") not in (None, "no"):
+                tn = (tags.get("tunnel:name") or "").strip() or (name if name.endswith("터널") else "")
+                return (tn, "b") if tn and len(tn) <= 40 else None
+            if tags.get("highway") in ("services", "rest_area") and name:
+                return (name, "o")
+            return None
+        if tags.get("waterway"):
+            return None
+    if not name or len(name) > 40:
+        return None
+    for key, vals, kind in PLACE_RULES:
+        v = tags.get(key)
+        if v is not None and (vals is None or v in vals):
+            return (name, kind)
+    return None
+
+
 class Collector(osmium.SimpleHandler):
     def __init__(self, major):
         super().__init__()
@@ -62,9 +120,41 @@ class Collector(osmium.SimpleHandler):
         self.ways = []  # (flags, maxspeed, [node_id...], name)
         self.coords = {}  # node_id -> (lat_e7, lon_e7)
         self.skipped = 0
+        self.places = {}  # (name, kind, lat_e7//3000, lon_e7//3000) -> (name, lat_e7, lon_e7, kind) — 300 m 격자로 중복 제거
+
+    def add_place(self, name, kind, lat_e7, lon_e7):
+        key = (name, kind, lat_e7 // 30000, lon_e7 // 30000)
+        if key not in self.places:
+            self.places[key] = (name, lat_e7, lon_e7, kind)
+
+    def node(self, n):
+        pk = place_kind(n.tags, False)
+        if pk is None:
+            return
+        try:
+            loc = n.location
+            if not loc.valid():
+                return
+        except osmium.InvalidLocationError:
+            return
+        self.add_place(pk[0], pk[1], int(round(loc.lat * 1e7)), int(round(loc.lon * 1e7)))
 
     def way(self, w):
         tags = w.tags
+        pk = place_kind(tags, True)
+        if pk is not None:
+            lats = []
+            lons = []
+            for n in w.nodes:
+                try:
+                    loc = n.location
+                    if loc.valid():
+                        lats.append(loc.lat)
+                        lons.append(loc.lon)
+                except osmium.InvalidLocationError:
+                    pass
+            if lats:
+                self.add_place(pk[0], pk[1], int(round(sum(lats) / len(lats) * 1e7)), int(round(sum(lons) / len(lons) * 1e7)))
         hw = tags.get("highway")
         cls = CLASSES.get(hw)
         if cls is None:
@@ -242,8 +332,12 @@ def main():
             f"margin_km={args.margin_km}",
             f"classes={'major' if args.major else 'all'}",
             f"format=KRRT2",
+            f"places={len(col.places)}",
         ])
         z.writestr("index.txt", info + "\n")
+        places = sorted(col.places.values())
+        z.writestr("places.tsv", "".join(f"{name}\t{la}\t{lo}\t{kind}\n" for name, la, lo, kind in places))
+        print(f"places {len(places)}", file=sys.stderr)
     print(info, file=sys.stderr)
     print(f"biggest tile {biggest[1]} = {biggest[0] / 1e6:.1f} MB raw, tile nodes total {total_nodes}", file=sys.stderr)
 

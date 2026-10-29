@@ -28,6 +28,16 @@ data class Camera(
     /** 구간단속 짝의 위치(시점이면 종점, 종점이면 시점). 유지 중 "종점 쪽으로 가고 있는지"와 "종점에 닿았는지"를 판단하는 데 쓴다. */
     val partnerLat: Double? = null,
     val partnerLon: Double? = null,
+    /** 데이터의 도로 이름(경찰청 도로노선명). 도로망에 붙일 때 같은 이름의 길을 우선한다. */
+    val roadName: String = "",
+    /** 도로노선방향 코드 "1"/"2"(모르면 ""). 뜻은 도로마다 다르지만 같은 기관·같은 도로 안에선 일관된다 — CamDirection이 전파에 쓴다. */
+    val dirCode: String = "",
+    /** 설치장소 원문. "A→B"·"X방향" 글에서 방향을 뽑는다. */
+    val placeText: String = "",
+    /** 관리기관명. 방향 코드 전파의 묶음 단위. */
+    val agency: String = "",
+    /** 방향의 출처: "" 없음 / "section" 구간 짝 / "kec" 도로공사 중심선 / "text" 설치장소 글 / "code" 같은 도로 코드 전파. */
+    val bearingSource: String = "",
 ) {
     val hasPartner: Boolean get() = partnerLat != null && partnerLon != null
     val fromKec: Boolean get() = code == KecCsv.CODE
@@ -101,6 +111,7 @@ object CameraCsv {
         val iPlace = col("설치장소")
         val iRoad = col("도로노선명")
         val iDir = col("도로노선방향")
+        val iAgency = col("관리기관명")
 
         val out = ArrayList<Row>()
         for (r in rows.drop(1)) {
@@ -123,7 +134,8 @@ object CameraCsv {
             val len = if (kind == CamKind.SPOT) 0
                 else get(iLen).replace(",", "").toDoubleOrNull()?.let { lenToMeters(it) } ?: 0
             val name = listOf(get(iRoad), place).filter { it.isNotEmpty() }.joinToString(" ")
-            out += Row(Camera(lat, lon, limit, kind, len, name, kindText), place.contains("구간"), get(iRoad).replace(" ", ""), dirCode(get(iDir)))
+            out += Row(Camera(lat, lon, limit, kind, len, name, kindText, roadName = get(iRoad), dirCode = dirCode(get(iDir)), placeText = place, agency = get(iAgency)),
+                place.contains("구간"), get(iRoad).replace(" ", ""), dirCode(get(iDir)))
         }
         return pairSections(resolveSections(out))
     }
@@ -177,10 +189,10 @@ object CameraCsv {
             val ambiguous = fit.any { (e, _) -> Geo.angleDiff(b, Geo.bearing(r.cam.lat, r.cam.lon, e.cam.lat, e.cam.lon)) > 60.0 }
             if (ambiguous) continue
             val end = best.first
-            startOut[r] = r.cam.copy(bearingDeg = b, headingTolDeg = LOOSE_HEADING_DEG, partnerLat = end.cam.lat, partnerLon = end.cam.lon)
+            startOut[r] = r.cam.copy(bearingDeg = b, headingTolDeg = LOOSE_HEADING_DEG, partnerLat = end.cam.lat, partnerLon = end.cam.lon, bearingSource = "section")
             // 고른 종점과 같은 자리의 종점들(차로별 행: "1,2차로"/"3차로")에도 같은 방향
             for ((e, _) in fit) if (e !in endOut && Geo.distance(e.cam.lat, e.cam.lon, end.cam.lat, end.cam.lon) <= 30.0)
-                endOut[e] = e.cam.copy(bearingDeg = b, headingTolDeg = LOOSE_HEADING_DEG, partnerLat = r.cam.lat, partnerLon = r.cam.lon)
+                endOut[e] = e.cam.copy(bearingDeg = b, headingTolDeg = LOOSE_HEADING_DEG, partnerLat = r.cam.lat, partnerLon = r.cam.lon, bearingSource = "section")
         }
         return rows.map { r -> startOut[r] ?: endOut[r] ?: r.cam }
     }
@@ -476,8 +488,8 @@ object KecCsv {
             val (dist, cross, bearing) = near
             when {
                 dist > 60.0 || abs(cross) < 4.0 -> c
-                cross > 0 -> c.copy(bearingDeg = bearing)
-                else -> c.copy(bearingDeg = (bearing + 180.0) % 360.0)
+                cross > 0 -> c.copy(bearingDeg = bearing, bearingSource = "kec")
+                else -> c.copy(bearingDeg = (bearing + 180.0) % 360.0, bearingSource = "kec")
             }
         }
     }

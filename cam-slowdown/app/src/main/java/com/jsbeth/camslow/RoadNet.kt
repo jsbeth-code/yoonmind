@@ -40,7 +40,8 @@ class MapSegments(val xy: FloatArray, val kind: ByteArray) {
     val count: Int get() = kind.size
 }
 
-class RoadCam(val cam: Camera, val alongM: Double)
+/** 앞길 위의 카메라. lat/lon은 카메라를 도로에 내린 점(좌표가 반대 차로·강 건너에 찍힌 경우 원좌표와 멀다). */
+class RoadCam(val cam: Camera, val alongM: Double, val lat: Double = cam.lat, val lon: Double = cam.lon)
 
 class RoadView(
     /** 지금 올라탄 도로 세그먼트의 진행 방향(도). GPS 방향보다 안정적이라 기하 판단의 기준으로 쓴다. */
@@ -184,38 +185,72 @@ class RoadTile(
         for (c in cams) if (c.lat in minLat..maxLat && c.lon in minLon..maxLon) attach(c)
     }
 
+    /** 이름 비교용: 공백 제거, "도로"→"로"(동부간선도로 ↔ 동부간선로). */
+    private fun normName(s: String) = s.replace(" ", "").replace("도로", "로")
+    private fun nameMatch(cam: Camera, w: Int): Boolean {
+        if (cam.roadName.isBlank()) return false
+        val n = name(w); if (n.isEmpty()) return false
+        return normName(n) == normName(cam.roadName)
+    }
+
     /**
-     * 카메라를 가장 가까운 도로(30 m 안)에 붙인다. 방향을 아는 카메라(도로공사)는 방향이 맞는 도로에만.
-     * 중앙분리된 길(일방통행 way)에서 카메라가 왼쪽(중앙분리대 쪽)에 있고 25 m 안에 반대 방향 일방통행 way가 있으면
-     * 좌표가 중앙에 찍힌 것으로 보고 양쪽에 다 붙인다(놓치는 쪽보다 불필요한 감속이 낫다).
+     * 카메라를 도로에 붙인다. 데이터의 도로 이름(도로노선명)과 같은 길은 45 m까지, 아니면 30 m까지(교차로 중심 좌표가 옆길에 붙던 문제).
+     *
+     * 방향을 아는 카메라(구간 짝·도로공사·설치장소 글·코드 전파): 길 방향과 60도 안이면 그 방향, 120도 넘으면 반대 방향(양방향 길)이고,
+     * 일방통행 길이 반대 방향이면 같은 이름의 내 방향 차로를 250 m까지 찾아 거기에 붙인다(동부간선 면목 구간 시점: 북행 시점이
+     * 강 건너 남행 차로 위). 60~120도로 어긋나면(굽은 길에서 전파된 주축 방향) 방향을 모르는 것으로 본다.
+     *
+     * 방향을 모르는 카메라: 좌표의 좌우로는 방향을 추정하지 않는다(실데이터에서 반대로 찍힌 경우가 많다). 양방향 길이면 양쪽,
+     * 일방통행 길이면 같은 이름의 반대 방향 차로(60 m 안)에도 붙여 양쪽 다 본다. 놓치는 것보다 불필요한 감속이 낫다.
      */
     fun attach(cam: Camera) {
-        val segs = segmentsNear(cam.lat, cam.lon, ATTACH_MAX_M)
+        val segs = segmentsNear(cam.lat, cam.lon, ATTACH_NAMED_M)
         var best: Proj? = null; var bestScore = Double.MAX_VALUE; var bestSide = 0
+        var oppositeOneway: Proj? = null   // 방향 아는 카메라가 반대 방향 일방통행 way 위에 찍힌 경우
+        val dir = cam.bearingDeg
         for (p in segs) {
             val pr = project(p, cam.lat, cam.lon)
-            if (pr.distM > ATTACH_MAX_M) continue
-            var side: Int
-            if (cam.bearingDeg != null) {
+            val named = nameMatch(cam, pr.way)
+            if (pr.distM > (if (named) ATTACH_NAMED_M else ATTACH_MAX_M)) continue
+            var side = 0
+            if (dir != null) {
+                val d = Geo.angleDiff(dir, pr.bearingDeg)
                 side = when {
-                    Geo.angleDiff(cam.bearingDeg, pr.bearingDeg) <= 45.0 -> 1
-                    !oneway(pr.way) && Geo.angleDiff(cam.bearingDeg, (pr.bearingDeg + 180.0) % 360.0) <= 45.0 -> -1
-                    else -> continue
+                    d <= DIR_SPLIT_DEG -> 1
+                    d >= 180.0 - DIR_SPLIT_DEG -> if (oneway(pr.way)) {
+                        if (pr.distM <= ATTACH_MAX_M && (oppositeOneway == null || pr.distM < oppositeOneway!!.distM)) oppositeOneway = pr
+                        continue
+                    } else -1
+                    else -> 0
                 }
-            } else side = if (oneway(pr.way)) 1 else if (pr.crossM > SIDE_MIN_M) 1 else if (pr.crossM < -SIDE_MIN_M) -1 else 0
-            val score = pr.distM + classPenalty(pr.way)
+            } else if (oneway(pr.way)) side = 1
+            val score = pr.distM + classPenalty(pr.way) - (if (named) NAME_BONUS_M else 0.0)
             if (score < bestScore) { best = pr; bestScore = score; bestSide = side }
         }
-        val b = best ?: return
-        add(Attached(cam, b.way, b.seg, b.t, bestSide, b.distM))
-        if (oneway(b.way) && b.crossM < -1.5 && cam.bearingDeg == null) {
-            // 중앙분리대 쪽: 반대 방향 차로에도
-            var twin: Proj? = null
-            for (p in segs) {
+        if (best == null) {
+            val opp = oppositeOneway ?: return
+            val n = name(opp.way); if (n.isEmpty() || dir == null) return
+            var far: Proj? = null
+            for (p in segmentsNear(cam.lat, cam.lon, CARRIAGEWAY_FAR_M)) {
                 val pr = project(p, cam.lat, cam.lon)
-                if (pr.way == b.way || pr.distM > MEDIAN_TWIN_M || !oneway(pr.way)) continue
+                if (pr.distM > CARRIAGEWAY_FAR_M || !oneway(pr.way) || name(pr.way) != n) continue
+                if (Geo.angleDiff(dir, pr.bearingDeg) > DIR_SPLIT_DEG) continue
+                if (far == null || pr.distM < far!!.distM) far = pr
+            }
+            far?.let { add(Attached(cam, it.way, it.seg, it.t, 1, it.distM)) }
+            return
+        }
+        val b = best!!
+        add(Attached(cam, b.way, b.seg, b.t, bestSide, b.distM))
+        if (oneway(b.way) && (dir == null || bestSide == 0)) {
+            val n = name(b.way)
+            var twin: Proj? = null
+            for (p in segmentsNear(cam.lat, cam.lon, CARRIAGEWAY_TWIN_M)) {
+                val pr = project(p, cam.lat, cam.lon)
+                if (pr.way == b.way || pr.distM > CARRIAGEWAY_TWIN_M || !oneway(pr.way)) continue
                 if (Geo.angleDiff(pr.bearingDeg, b.bearingDeg) < 150.0) continue
-                if (twin == null || pr.distM < twin.distM) twin = pr
+                if (n.isNotEmpty() && name(pr.way) != n) continue
+                if (twin == null || pr.distM < twin!!.distM) twin = pr
             }
             twin?.let { add(Attached(cam, it.way, it.seg, it.t, 1, it.distM)) }
         }
@@ -280,6 +315,11 @@ class RoadTile(
      * 스냅 지점에서 진행 방향으로 lookaheadM까지 길을 따라간다. 교차로에서는 들어온 방향과 MAX_TURN_DEG 안으로
      * 꺾이는 모든 갈래를 따라간다(직진 우선이 아니라 "크게 꺾지 않는 길 전부"). 지나는 way를 reach에, 길 위 카메라를 out에.
      */
+    private fun roadCam(a: Attached, along: Double): RoadCam {
+        val n0 = node(a.way, a.seg); val n1 = node(a.way, a.seg + 1)
+        return RoadCam(a.cam, along, lat(n0) + (lat(n1) - lat(n0)) * a.t, lon(n0) + (lon(n1) - lon(n0)) * a.t)
+    }
+
     fun walk(s: Snap, lookaheadM: Double, out: MutableList<RoadCam>, reach: MutableSet<Int>) {
         val visited = HashSet<Int>()
         val queue = ArrayDeque<State>()
@@ -291,7 +331,7 @@ class RoadTile(
         camsByWay[s.way]?.forEach { a ->
             if (a.seg == s.seg && sideOk(a.side, s.dir)) {
                 val ahead = if (s.dir == 1) a.t > s.t else a.t < s.t
-                if (ahead) out += RoadCam(a.cam, abs(a.t - s.t) * len0)
+                if (ahead) out += roadCam(a, abs(a.t - s.t) * len0)
             }
         }
         val firstNode = if (s.dir == 1) s.seg + 1 else s.seg
@@ -330,7 +370,7 @@ class RoadTile(
                 camsByWay[st.way]?.forEach { a ->
                     if (a.seg == seg && sideOk(a.side, st.dir)) {
                         val along = dist + (if (st.dir == 1) a.t else 1 - a.t) * len
-                        if (along <= lookaheadM) out += RoadCam(a.cam, along)
+                        if (along <= lookaheadM) out += roadCam(a, along)
                     }
                 }
                 inB = if (st.dir == 1) segBearing(st.way, seg) else (segBearing(st.way, seg) + 180.0) % 360.0
@@ -344,8 +384,15 @@ class RoadTile(
 
     companion object {
         const val ATTACH_MAX_M = 30.0
-        const val SIDE_MIN_M = 2.0
-        const val MEDIAN_TWIN_M = 25.0
+        /** 데이터의 도로 이름과 같은 길은 이만큼까지 붙인다(교차로 중심에 찍힌 좌표). */
+        const val ATTACH_NAMED_M = 45.0
+        const val NAME_BONUS_M = 25.0
+        /** 방향 아는 카메라: 길 방향과 이 각도 안이면 그 방향, 180−이 각도 밖이면 반대 방향, 사이면 모름. */
+        const val DIR_SPLIT_DEG = 60.0
+        /** 방향 모르는 카메라: 같은 이름의 반대 방향 차로가 이 안에 있으면 양쪽에 붙인다. */
+        const val CARRIAGEWAY_TWIN_M = 60.0
+        /** 방향 아는 카메라가 반대 차로에 찍힌 경우 내 방향 차로를 찾는 반경(동부간선 면목: 강 건너 167 m). */
+        const val CARRIAGEWAY_FAR_M = 250.0
         const val SERVE_MAX_DEG = 60.0
         const val SNAP_MAX_M = 35.0
         const val SNAP_MAX_DEG = 45.0
@@ -438,6 +485,8 @@ class RoadNet(private val zip: ZipFile, private var cams: List<Camera> = emptyLi
         cams = list
         cache.clear(); current = null; currentKey = Long.MIN_VALUE
     }
+    /** 지금 붙이는 카메라 목록(openRoads가 방향을 붙인 것). */
+    val cameras: List<Camera> get() = cams
 
     private fun tileKey(lat: Double, lon: Double): Long {
         val a = floor(lat / TILE_LAT).toInt(); val b = floor(lon / TILE_LON).toInt()
@@ -504,6 +553,30 @@ class RoadNet(private val zip: ZipFile, private var cams: List<Camera> = emptyLi
 
     override fun isAttached(cam: Camera): Boolean = current?.isAttached(cam) ?: false
     override fun servesHeading(cam: Camera, courseDeg: Double): Boolean? = current?.servesHeading(cam, courseDeg)
+
+    /**
+     * zip 안 places.tsv(OSM 지명: 이름 \t 위도e7 \t 경도e7 \t 종류)에서 wanted(정규화된 이름)에 든 것만 읽는다.
+     * 전국 수십만 줄이라 전부 올리지 않는다. 파일이 없으면(옛 zip) 빈 사전.
+     */
+    fun gazetteer(wanted: Set<String>): CamDirection.Gazetteer {
+        val map = HashMap<String, MutableList<CamDirection.Place>>()
+        val e = zip.getEntry("places.tsv")
+        if (e != null && wanted.isNotEmpty()) {
+            zip.getInputStream(e).bufferedReader(Charsets.UTF_8).useLines { lines ->
+                for (line in lines) {
+                    val tab = line.indexOf('\t'); if (tab <= 0) continue
+                    val name = CamDirection.normalize(line.substring(0, tab))
+                    if (name !in wanted) continue
+                    val f = line.split('\t')
+                    if (f.size < 3) continue
+                    val la = f[1].toLongOrNull() ?: continue; val lo = f[2].toLongOrNull() ?: continue
+                    map.getOrPut(name) { ArrayList(1) } += CamDirection.Place(name, la / 1e7, lo / 1e7)
+                }
+            }
+        }
+        return CamDirection.Gazetteer { n -> map[n] ?: emptyList() }
+    }
+    val hasPlaces: Boolean get() = zip.getEntry("places.tsv") != null
 
     fun close() = runCatching { zip.close() }
 

@@ -160,6 +160,9 @@ class SlowdownEngine(
     private var passedAtOdo = 0.0
     /** 시점을 지날 때의 진행 방향. 짝 종점이 없는 구간의 방향 기준. */
     private var passCourse: Double? = null
+    /** 목표 카메라를 도로에 내린 점(도로망으로 잡은 경우). 좌표가 반대 차로·강 건너에 찍혀 있어도 통과 판단은 이 점으로. */
+    private var targetRoadLat: Double? = null
+    private var targetRoadLon: Double? = null
     private var reverseCount = 0
     private var lostCount = 0
     private var odo = 0.0
@@ -229,7 +232,7 @@ class SlowdownEngine(
     }
 
     /** 앞 카메라 하나. viaRoad = 도로망 경로로 확인된 것(along은 경로 거리). */
-    private class Rel(val cam: Camera, val along: Double, val cross: Double, val viaRoad: Boolean = false)
+    private class Rel(val cam: Camera, val along: Double, val cross: Double, val viaRoad: Boolean = false, val roadLat: Double? = null, val roadLon: Double? = null)
 
     /** 정확한 방향(도로공사·중심선 추정)을 아는 카메라. 시점→종점 추정 방향(headingTolDeg 있음)은 느슨해서 일반 규칙대로 본다. */
     private fun preciselyDirected(cam: Camera) = cam.bearingDeg != null && cam.headingTolDeg == null
@@ -301,10 +304,11 @@ class SlowdownEngine(
 
         val ahead: List<Rel> = if (view != null) {
             val gap = config.roadMaxspeedGapKmh
+            // 도로망이 붙일 때 이미 방향(어느 차로·어느 쪽)을 정했으므로 여기선 방향을 다시 보지 않는다
             val onRoad = view.ahead
-                .filter { passesFilter(it.cam) && headingOk(course, it.cam) }
+                .filter { passesFilter(it.cam) }
                 .filter { gap <= 0 || view.maxspeedKmh <= 0 || it.cam.limitKmh > view.maxspeedKmh - gap }
-                .map { Rel(it.cam, it.alongM, 0.0, viaRoad = true) }
+                .map { Rel(it.cam, it.alongM, 0.0, viaRoad = true, roadLat = it.lat, roadLon = it.lon) }
             val loose = rel.filter { !roads!!.isAttached(it.cam) && it.along > 0 && isAhead(it.along, it.cross, it.cam) }
             (onRoad + loose).sortedBy { it.along }
         } else rel.filter { it.along > 0 && isAhead(it.along, it.cross, it.cam) }.sortedBy { it.along }
@@ -333,6 +337,7 @@ class SlowdownEngine(
         if (t == null) {
             triggerCandidate()?.let { r ->
                 target = r.cam; passedHoldUntilOdo = null; passCourse = null; reverseCount = 0; lostCount = 0
+                targetRoadLat = r.roadLat; targetRoadLon = r.roadLon
                 camDown = r
             }
         } else if (!fix.estimated) {
@@ -340,7 +345,8 @@ class SlowdownEngine(
             val hold = passedHoldUntilOdo
             if (hold == null) {
                 val entry = ahead.firstOrNull { it.cam == t }
-                val (gAlong, gCross) = Geo.alongCross(fix.lat, fix.lon, course, t.lat, t.lon)
+                if (entry?.roadLat != null) { targetRoadLat = entry.roadLat; targetRoadLon = entry.roadLon }
+                val (gAlong, gCross) = Geo.alongCross(fix.lat, fix.lon, course, targetRoadLat ?: t.lat, targetRoadLon ?: t.lon)
                 val along = entry?.along ?: gAlong
                 // 도로망으로 붙은 카메라는 "내 앞길에서 사라짐", 아니면 "허용폭(추적용) 밖"이 이탈
                 val attachedNow = view != null && roads!!.isAttached(t)
@@ -392,6 +398,7 @@ class SlowdownEngine(
                         if (again != null) {
                             // 다음 카메라가 이미 가까우면 올리지 않고 그대로 이어간다
                             target = again.cam; passedHoldUntilOdo = null; passCourse = null; reverseCount = 0; lostCount = 0
+                            targetRoadLat = again.roadLat; targetRoadLon = again.roadLon
                         } else drop("카메라 통과")
                     }
                 }
