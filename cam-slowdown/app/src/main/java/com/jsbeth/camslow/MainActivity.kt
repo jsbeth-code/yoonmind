@@ -53,6 +53,8 @@ class MainActivity : Activity() {
     private lateinit var logView: TextView
     private lateinit var outputs: Outputs
     private var logExpanded = false
+    private var checkExpanded = false
+    private lateinit var checkHead: TextView
     private var builtNight = false
     private val listener = { render() }
     private val main = Handler(Looper.getMainLooper())
@@ -151,13 +153,23 @@ class MainActivity : Activity() {
         nowView = TextView(this).apply { textSize = 12f; setTextColor(t.muted); setPadding(dp(16), dp(4), dp(16), dp(6)) }
         rightCol.addView(nowView)
 
-        checkView = TextView(this).apply { textSize = 12.5f; setTextColor(t.fg); setPadding(dp(16), dp(4), dp(16), dp(4)); setLineSpacing(0f, 1.25f) }
-        rightCol.addView(checkView)
+        // 점검·기록: 평소엔 한 줄로 접어 두고 누르면 펼친다(앱을 다시 열면 접힘)
+        fun foldBox(): LinearLayout = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = GradientDrawable().apply { setColor(t.chipBg); setStroke(dp(1), t.chipLine); cornerRadius = dp(12).toFloat() }
+        }
+        val headStyle: TextView.() -> Unit = { textSize = 13f; setTextColor(t.fg); setPadding(dp(12), dp(10), dp(12), dp(10)); maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END }
+        val checkBox = foldBox()
+        checkHead = TextView(this).apply { headStyle(); setOnClickListener { checkExpanded = !checkExpanded; render() } }
+        checkView = TextView(this).apply { textSize = 12.5f; setTextColor(t.fg); setPadding(dp(12), 0, dp(12), dp(10)); setLineSpacing(0f, 1.25f) }
+        checkBox.addView(checkHead); checkBox.addView(checkView)
+        rightCol.addView(checkBox, lp(4, 0).apply { leftMargin = dp(16); rightMargin = dp(16) })
 
-        logHead = TextView(this).apply { textSize = 13f; typeface = Typeface.DEFAULT_BOLD; setTextColor(t.fg); setPadding(dp(16), dp(10), dp(16), dp(2)); setOnClickListener { logExpanded = !logExpanded; render() } }
-        rightCol.addView(logHead)
-        logView = TextView(this).apply { textSize = 12f; setTextColor(t.fg); setPadding(dp(16), 0, dp(16), dp(20)) }
-        rightCol.addView(logView)
+        val logBox = foldBox()
+        logHead = TextView(this).apply { headStyle(); setOnClickListener { logExpanded = !logExpanded; render() } }
+        logView = TextView(this).apply { textSize = 12f; setTextColor(t.fg); setPadding(dp(12), 0, dp(12), dp(10)) }
+        logBox.addView(logHead); logBox.addView(logView)
+        rightCol.addView(logBox, lp(8, 20).apply { leftMargin = dp(16); rightMargin = dp(16) })
 
         if (wide) {
             val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
@@ -325,6 +337,16 @@ class MainActivity : Activity() {
     private fun gpsAgeS(): Long? = if (DriveState.lastFixAt == 0L) null else (SystemClock.elapsedRealtime() - DriveState.lastFixAt) / 1000
 
     private fun km(m: Double) = if (m >= 950) "%.1fkm".format(m / 1000.0) else "${m.toInt()}m"
+
+    /** 접는 칸 머리줄: "점검  ✔ 모두 정상   ▾" (펼쳐 있으면 ▴). */
+    private fun foldHead(title: String, summary: String, color: Int, open: Boolean): CharSequence = android.text.SpannableStringBuilder().apply {
+        append(title); setSpan(android.text.style.StyleSpan(Typeface.BOLD), 0, length, 0)
+        append("   ")
+        val s = length
+        append(if (open) "" else summary)
+        setSpan(ForegroundColorSpan(color), s, length, 0)
+        append(if (open) "접기 ▴" else "  ▾")
+    }
 
     /** "다음 카메라 · …" 뒤에 출처 표시(노란 "카카오" / 주황 "내장"). 카카오 키가 없는 빌드면 표시 안 함. */
     private fun withSource(text: String, kakao: Boolean): CharSequence = android.text.SpannableStringBuilder(text).apply {
@@ -538,12 +560,19 @@ class MainActivity : Activity() {
             kakaoAge != null -> "✖  카카오 끊김 ${kakaoAge}초 — 터널·통신 확인 · 내장 데이터로 판단"
             else -> "△  ${KakaoSafety.status}"
         }
-        checkView.text = listOfNotNull(gpsLine, kakaoLine, dataLine, roadsLine, cmdLine, soundLine, overlayLine, autoLine, zoneLine).joinToString("\n")
+        val checks = listOfNotNull(gpsLine, kakaoLine, dataLine, roadsLine, cmdLine, soundLine, overlayLine, autoLine, zoneLine)
+        checkView.text = checks.joinToString("\n")
+        checkView.visibility = if (checkExpanded) View.VISIBLE else View.GONE
+        val bad = checks.filter { it.startsWith("✖") }
+        checkHead.text = foldHead("점검",
+            if (bad.isEmpty()) "✔ 모두 정상" else bad.first().replace(Regex("^✖\\s+"), "✖ ") + (if (bad.size > 1) " 외 ${bad.size - 1}" else ""),
+            if (bad.isEmpty()) t.bandOn else t.bandProblem, checkExpanded)
 
         // ---- 기록
         val lines = DriveState.log
-        logHead.text = if (logExpanded) "기록   접기 ▴" else "기록   전체 보기 ›"
-        logView.text = (if (logExpanded) lines else lines.take(5)).joinToString("\n")
+        logHead.text = foldHead("기록", lines.firstOrNull() ?: "아직 없음", t.muted, logExpanded)
+        logView.text = lines.joinToString("\n")
+        logView.visibility = if (logExpanded) View.VISIBLE else View.GONE
     }
 
     @Deprecated("Deprecated in Java")

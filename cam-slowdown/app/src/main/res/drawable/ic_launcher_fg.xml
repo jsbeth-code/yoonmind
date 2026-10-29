@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 앱 아이콘 앞면(적응형 108dp, 가운데 66dp가 안전 영역): 빨간 T + 제한속도 50 표지. 시안 2안. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <group android:translateX="26" android:translateY="22" android:scaleX="0.56" android:scaleY="0.56">
+        <path android:fillColor="#E31937"
+            android:pathData="M6,18 C26,8 74,8 94,18 L90,28 C80,22 66,20 58,20 L58,24 L53,92 L47,92 L42,24 L42,20 C34,20 20,22 10,28 Z" />
+        <path android:fillColor="#E31937"
+            android:pathData="M12,9 C34,1 66,1 88,9 L86,13.5 C66,6 34,6 14,13.5 Z" />
+    </group>
+    <!-- 제한속도 표지 -->
+    <path android:fillColor="#FFFFFF" android:strokeColor="#E31937" android:strokeWidth="3.5"
+        android:pathData="M70,60 A10,10 0 1,1 69.99,60 Z" />
+    <path android:strokeColor="#111216" android:strokeWidth="1.6" android:strokeLineCap="round" android:strokeLineJoin="round"
+        android:pathData="M68.4,66 L65.6,66 L65.3,69.4 C66.6,68.7 68.7,69.1 68.7,71.4 C68.7,73.6 66.3,74.4 65.1,73.2" />
+    <path android:strokeColor="#111216" android:strokeWidth="1.6"
+        android:pathData="M72.6,66 C71.1,66 70.6,67.8 70.6,70 C70.6,72.2 71.1,74 72.6,74 C74.1,74 74.6,72.2 74.6,70 C74.6,67.8 74.1,66 72.6,66 Z" />
+</vector>

@@ -93,7 +93,7 @@ object AutoStart {
             else "탭해서 시작. 자동 시작하려면 설정에서 ${missing.joinToString(", ")} 필요"
         nm.notify(NOTI_ID, Notification.Builder(ctx, CHANNEL)
             .setSmallIcon(android.R.drawable.ic_menu_compass)
-            .setContentTitle("차 연결됨 — 카메라 감속")
+            .setContentTitle("차 연결됨 — FSD 감속")
             .setContentText(text)
             .setStyle(Notification.BigTextStyle().bigText(text))
             .setContentIntent(open)

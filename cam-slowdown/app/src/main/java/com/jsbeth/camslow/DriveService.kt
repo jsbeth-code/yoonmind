@@ -466,7 +466,7 @@ class DriveService : Service(), LocationListener {
         )
         return Notification.Builder(this, CHANNEL)
             .setSmallIcon(android.R.drawable.ic_menu_compass)
-            .setContentTitle("카메라 감속")
+            .setContentTitle("FSD 감속")
             .setContentText(text)
             .setContentIntent(open)
             .setOngoing(true)
