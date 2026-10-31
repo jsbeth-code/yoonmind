@@ -153,6 +153,17 @@ object Prefs {
     fun setOverlayDock(ctx: Context, v: String) = put(ctx) { putString("overlayDock", v) }
 
     // ---- 출력·연결
+    /** 카메라 500 m 앞 "500미터 앞, 제한속도 50 과속카메라입니다". */
+    fun approachVoice(ctx: Context) = sp(ctx).getBoolean("approachVoice", true)
+    fun setApproachVoice(ctx: Context, v: Boolean) = put(ctx) { putBoolean("approachVoice", v) }
+    /** 300 m·100 m 거리 안내를 늘(꺼져 있으면 과속일 때만). */
+    fun distanceVoiceAlways(ctx: Context) = sp(ctx).getBoolean("distanceVoiceAlways", false)
+    fun setDistanceVoiceAlways(ctx: Context, v: Boolean) = put(ctx) { putBoolean("distanceVoiceAlways", v) }
+    fun overspeedBeep(ctx: Context) = sp(ctx).getBoolean("overspeedBeep", true)
+    fun setOverspeedBeep(ctx: Context, v: Boolean) = put(ctx) { putBoolean("overspeedBeep", v) }
+    /** 제한속도보다 이만큼(km/h) 넘으면 과속 경고. */
+    fun overspeedMargin(ctx: Context) = sp(ctx).getInt("overspeedMargin", 7)
+    fun setOverspeedMargin(ctx: Context, v: Int) = put(ctx) { putInt("overspeedMargin", v.coerceIn(0, 40)) }
     fun alertsOn(ctx: Context) = sp(ctx).getBoolean("alerts", true)
     fun setAlertsOn(ctx: Context, v: Boolean) = put(ctx) { putBoolean("alerts", v) }
     fun voiceRoute(ctx: Context) = VoiceRoute.byName(sp(ctx).getString("voiceRoute", null))

@@ -58,6 +58,13 @@ class MainActivity : Activity() {
     private var builtNight = false
     private val listener = { render() }
     private val main = Handler(Looper.getMainLooper())
+    /** 과속 경고 중 0.5초마다 깜빡임. */
+    private var blinkOn = false
+    private var blinkPosted = false
+    private val blinkRunnable = Runnable {
+        blinkPosted = false
+        if (DriveState.running && DriveState.overspeedKmh != null) { blinkOn = !blinkOn; render() }
+    }
     private val tick = object : Runnable { override fun run() { render(); main.postDelayed(this, 1_000) } }
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
@@ -388,6 +395,9 @@ class MainActivity : Activity() {
         val restore = cfg.restoreAfterM.toInt()
         // 카카오 키가 있는데 지금 판단이 카카오가 아니면 "예비 판단"(끊김·연결 실패)
         val kakaoDown = running && !sim && st != null && KakaoSafety.hasKey && !st.external
+        val over = if (running) DriveState.overspeedKmh else null
+        if (over != null && !blinkPosted) { blinkPosted = true; main.postDelayed(blinkRunnable, 500) }
+        if (over == null) blinkOn = false
 
         // ---- 문제 목록
         val problems = ArrayList<String>()
@@ -402,6 +412,9 @@ class MainActivity : Activity() {
                 if (autoOn) "감시 켜기를 누르거나, ${Prefs.autoDeviceName(this).ifEmpty { "차" }}에 연결되면 자동 시작" else "감시 켜기를 누르세요")
             sim -> setBand(t.bandSlow, "가상 주행 중", st?.note ?: "준비")
             st == null -> setBand(t.bandProblem, "GPS 대기 중", "위치를 잡으면 카메라를 찾기 시작합니다")
+            over != null -> setBand(if (blinkOn) OVER_DARK else OVER_RED, "⚠ 과속 · 제한 ${DriveState.overLimit ?: "–"} · +$over",
+                if (st?.holdKind == "구간단속") "구간단속 중 — 속도를 줄이세요"
+                else "카메라 ${st?.nextDistM?.toInt() ?: 0}m 앞 — 속도를 줄이세요")
             gpsLost -> setBand(t.bandProblem, if (slowed) "GPS 없음 ${age}초 · ${out.slow.label} 유지 중" else "GPS 없음 ${age}초",
                 if (DriveState.drActive) "추측 항법: 감속만 하고 복귀는 GPS가 돌아온 뒤에" else "카메라를 감지하지 못합니다")
             slowed && prog != null && progKind == S3xyButton.Press.SINGLE ->
@@ -460,7 +473,21 @@ class MainActivity : Activity() {
             distView.text = "GPS 대기"; lineView.text = "위치를 잡으면 카메라를 찾기 시작합니다"; speedView.text = "–"; signView.text = "–"; subView.text = ""
         } else {
             speedView.text = "${st.speedKmh.toInt()}"
-            speedView.setTextColor(if (limit != null && st.speedKmh > limit + 5) t.cam else t.fg)
+            if (over != null) {
+                // 과속 경고: 숫자를 크게, 빨간 상자로 깜빡임(빨강 ↔ 흰 바탕 빨간 글씨)
+                speedView.textSize = 56f
+                speedView.setPadding(dp(14), dp(4), dp(14), dp(6))
+                speedView.background = GradientDrawable().apply {
+                    cornerRadius = dp(16).toFloat()
+                    if (blinkOn) { setColor(Color.WHITE); setStroke(dp(3), OVER_RED) } else setColor(OVER_RED)
+                }
+                speedView.setTextColor(if (blinkOn) OVER_RED else Color.WHITE)
+            } else {
+                speedView.textSize = 32f
+                speedView.setPadding(0, 0, 0, 0)
+                speedView.background = null
+                speedView.setTextColor(if (limit != null && st.speedKmh > limit + 5) t.cam else t.fg)
+            }
             signView.text = limit?.toString() ?: "–"
             val midTarget = st.target?.takeIf { it.kind == CamKind.SECTION_END && st.holdKind == "구간단속" }
             if (midTarget != null) {
@@ -627,3 +654,7 @@ class MainActivity : Activity() {
         private const val M_TEST_SOUND = 111
     }
 }
+
+private const val OVER_RED = 0xFFE5484D.toInt()
+private const val OVER_DARK = 0xFFB8282D.toInt()
+

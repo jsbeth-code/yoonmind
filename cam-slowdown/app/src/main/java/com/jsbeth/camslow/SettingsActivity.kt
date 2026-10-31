@@ -105,6 +105,10 @@ class SettingsActivity : Activity() {
         // 7 안내
         ui.question(7, "안내·화면")
         ui.switchRow("음성·효과음", "", Prefs.alertsOn(this)) { Prefs.setAlertsOn(this, it) }
+        ui.switchRow("카메라 500m 앞 안내", "\"500미터 앞, 제한속도 50 과속카메라입니다\"", Prefs.approachVoice(this)) { Prefs.setApproachVoice(this, it) }
+        ui.switchRow("300m·100m 거리 안내를 늘", "끄면 과속(제한 + 기준 초과)일 때만 \"300미터, 감속하세요\"", Prefs.distanceVoiceAlways(this)) { Prefs.setDistanceVoiceAlways(this, it) }
+        ui.switchRow("과속 경고음", "카메라 500m 안·구간단속 중 제한 + 기준을 넘으면 삐삐(가까울수록 빠르게). 화면 속도도 빨갛게 깜빡임", Prefs.overspeedBeep(this)) { Prefs.setOverspeedBeep(this, it) }
+        ui.numberRow("과속 기준(km/h)", "제한속도보다 이만큼 넘으면 경고 (7)", Prefs.overspeedMargin(this).toString(), false) { Prefs.setOverspeedMargin(this, it.toInt()) }
         ui.text("소리를 어디로 낼까요?", 14f)
         val routes = VoiceRoute.values()
         ui.radioGroup(routes.map { "${it.label}\n${it.sub}" }, Prefs.voiceRoute(this).ordinal) { i -> Prefs.setVoiceRoute(this, routes[i]) }

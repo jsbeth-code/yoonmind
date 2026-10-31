@@ -185,7 +185,12 @@ object OverlayWindow {
         val age = if (DriveState.lastFixAt == 0L) null else (SystemClock.elapsedRealtime() - DriveState.lastFixAt) / 1000
         val sinceUp = if (DriveState.lastUpAt == 0L) Long.MAX_VALUE else SystemClock.elapsedRealtime() - DriveState.lastUpAt
         val docked = builtDock.isNotEmpty()
-        (root?.background as? GradientDrawable)?.setStroke(dp(ctx, 2), if (slowed) t.bandSlow else t.chipLine)
+        val over = DriveState.overspeedKmh
+        val blink = over != null && (SystemClock.elapsedRealtime() / 1000) % 2 == 0L
+        (root?.background as? GradientDrawable)?.apply {
+            setStroke(dp(ctx, if (over != null) 4 else 2), if (over != null) 0xFFE5484D.toInt() else if (slowed) t.bandSlow else t.chipLine)
+            setColor(if (blink) 0xFFFFE3E3.toInt() else t.bg)
+        }
         if (st == null) {
             dist?.text = if (docked) "GPS\n대기" else "GPS 대기"; line?.text = "위치 잡는 중"; speed?.text = "–"; sign?.text = "–"
         } else {
@@ -195,10 +200,11 @@ object OverlayWindow {
             line?.text = st.road?.takeIf { !it.startsWith("도로 미확인") }?.substringBefore(" · 지도") ?: (if (next != null) "다음 카메라" else "2km 안에 없음")
             speed?.text = "${st.speedKmh.toInt()}"
             val limit = (st.target ?: next)?.limitKmh ?: (if (st.zone != null) 30 else null)
-            speed?.setTextColor(if (limit != null && st.speedKmh > limit + 5) t.cam else t.fg)
+            speed?.setTextColor(if (over != null || (limit != null && st.speedKmh > limit + 5)) 0xFFE5484D.toInt() else t.fg)
             sign?.text = limit?.toString() ?: "–"
         }
         state?.text = when {
+            over != null -> "⚠ 과속 +$over"
             DriveState.simulating -> "가상 주행 중"
             age != null && age >= 15 -> "GPS 없음 ${age}초"
             slowed && st?.holdKind == "구간단속" -> "구간단속 유지 · ${km((st.holdRemainM ?: 0.0) - (DriveState.config?.restoreAfterM ?: 100.0))} 남음"

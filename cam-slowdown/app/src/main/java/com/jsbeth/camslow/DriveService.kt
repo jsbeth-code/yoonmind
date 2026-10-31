@@ -39,6 +39,9 @@ object DriveState {
     /** 마지막 감속·복귀 신호 시각(elapsedRealtime). 0이면 없음. 화면에 "복귀 완료"를 잠깐 보여 주는 데 쓴다. */
     @Volatile var lastDownAt = 0L
     @Volatile var lastUpAt = 0L
+    /** 과속 경고 중이면 제한 대비 초과 km/h와 그 제한속도(화면 깜빡임용). */
+    @Volatile var overspeedKmh: Int? = null
+    @Volatile var overLimit: Int? = null
     /** 서비스 음성 엔진 상태. */
     @Volatile var ttsStatus = ""
     /** 마지막 실제 GPS fix 시각(elapsedRealtime). 0이면 아직 없음. */
@@ -216,6 +219,14 @@ class Outputs(ctx: Context, private val logInit: Boolean = false) {
         announce(ToneGenerator.TONE_PROP_BEEP, 0, text, "say")
     }
 
+    /** 과속 경고음 한 번(짧은 삐삐). 통화 채널 설정이어도 SCO를 열지 않고 폰 스피커로(자주 울리므로). */
+    fun beep() {
+        val s = settings
+        if (!s.alerts) return
+        val r = if (s.route == VoiceRoute.CAR_CALL) VoiceRoute.SPEAKER else s.route
+        try { toneFor(r)?.startTone(ToneGenerator.TONE_CDMA_ALERT_CALL_GUARD, 160) } catch (_: Exception) {}
+    }
+
     /** 통화 채널(SCO)을 연다. 이미 열려 있으면 닫기 예약만 미룬다. */
     @Suppress("DEPRECATION")
     private fun startSco(): Boolean {
@@ -353,6 +364,13 @@ class DriveService : Service(), LocationListener {
     private var loadSeq = 0
     private var lastFixAt = 0L
     private var gpsWarned = false
+    /** 접근 안내·과속 경고음. */
+    private val alerts = ApproachAlerts()
+    private var startedAt = 0L
+    private var firstFixSeen = false
+    /** 카카오가 지금 판단에 쓰이는지(null = 이번 감시에서 아직 모름). 바뀔 때 음성으로 알린다. */
+    private var kakaoLive: Boolean? = null
+    private var kakaoFailSaid = false
     // 추측 항법: 마지막 실제 fix
     private var lastFix: Fix? = null
     private var roads: RoadNet? = null
@@ -534,6 +552,10 @@ class DriveService : Service(), LocationListener {
             DriveState.lastFixAt = 0L
             gpsWarned = false
             lastFix = null; DriveState.drActive = false
+            startedAt = SystemClock.elapsedRealtime(); firstFixSeen = false; kakaoLive = null; kakaoFailSaid = false
+            alerts.reset()
+            alerts.margin = Prefs.overspeedMargin(this); alerts.announce = Prefs.approachVoice(this)
+            alerts.distanceAlways = Prefs.distanceVoiceAlways(this); alerts.beepOn = Prefs.overspeedBeep(this)
             main.postDelayed(watchdog, 5_000)
             main.removeCallbacks(drRunnable); main.postDelayed(drRunnable, 1_000)
             val s = outputs.settings
@@ -554,7 +576,10 @@ class DriveService : Service(), LocationListener {
         DriveState.lastFixAt = lastFixAt
         val acc = if (loc.hasAccuracy()) loc.accuracy.toDouble() else null
         DriveState.lastAccM = acc
-        if (gpsWarned || DriveState.drActive) { gpsWarned = false; DriveState.drActive = false; DriveState.log("GPS 복구") }
+        if (gpsWarned || DriveState.drActive) {
+            if (gpsWarned) outputs.say("GPS 다시 잡힘")
+            gpsWarned = false; DriveState.drActive = false; DriveState.log("GPS 복구")
+        }
         val speed = if (loc.hasSpeed()) loc.speed.toDouble() else 0.0
         val course = if (loc.hasBearing() && speed >= 3.0) loc.bearing.toDouble() else null
         val fix = Fix(loc.latitude, loc.longitude, speed, course, acc)
@@ -618,6 +643,35 @@ class DriveService : Service(), LocationListener {
         }
         val st = e.status
         DriveState.status = st
+        val now = SystemClock.elapsedRealtime()
+        // 접근 안내·과속 경고음 (방금 "감속합니다"를 말했으면 거리 안내는 건너뜀)
+        val secLimit = if (st.slowed && st.holdKind == "구간단속") st.target?.limitKmh else null
+        for (o in alerts.update(now, st.nextCamera, st.nextDistM, st.speedKmh, secLimit)) when (o) {
+            is ApproachAlerts.Out.Say -> if (now - DriveState.lastDownAt > 2_500) { DriveState.log("안내: ${o.text}"); outputs.say(o.text) }
+            ApproachAlerts.Out.Beep -> outputs.beep()
+        }
+        DriveState.overspeedKmh = alerts.overspeedKmh; DriveState.overLimit = alerts.overLimit
+        // 감시가 "제대로" 시작됐는지 음성으로: GPS를 늦게 잡았을 때, 카카오가 붙거나 끊길 때
+        if (!DriveState.simulating && !fix.estimated) {
+            if (!firstFixSeen) {
+                firstFixSeen = true
+                if (now - startedAt > 4_000) { DriveState.log("GPS 잡힘 — 감시 시작"); outputs.say("GPS 잡힘. 감시를 시작합니다") }
+            }
+            if (KakaoSafety.hasKey) {
+                val live = e.external != null
+                val prev = kakaoLive
+                when {
+                    live && prev != true -> { DriveState.log(if (prev == null) "카카오 연결 — 카카오로 판단" else "카카오 다시 연결"); outputs.say(if (prev == null) "카카오 연결됨" else "카카오 다시 연결됨") }
+                    !live && prev == true -> { DriveState.log("카카오 끊김 — 내장 데이터로 판단"); outputs.say("카카오 끊김. 내장 데이터로 판단합니다") }
+                    !live && prev != true && !kakaoFailSaid && now - startedAt > 20_000 -> {
+                        kakaoFailSaid = true
+                        DriveState.log("카카오 연결 안 됨 — 내장 데이터로 판단 (${KakaoSafety.status})")
+                        outputs.say("카카오 연결 안 됨. 내장 데이터로 판단합니다")
+                    }
+                }
+                kakaoLive = live
+            }
+        }
         DriveState.map = buildMap(e, fix, st)
         DriveState.changed()
         OverlayWindow.sync(this)
@@ -725,6 +779,7 @@ class DriveService : Service(), LocationListener {
         roads?.close(); roads = null
         DriveState.running = false
         DriveState.status = null
+        DriveState.overspeedKmh = null; DriveState.overLimit = null
         DriveState.map = null
         DriveState.carProfile = null
         OverlayWindow.hide()
