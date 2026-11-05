@@ -80,6 +80,15 @@ data class EngineConfig(
     val holdReverseFixes: Int = 5,
     /** 구간 유지 중: 짝 종점이 이 거리(m) 안에 오면 종점 통과로 본다. */
     val partnerReachM: Double = 150.0,
+    /**
+     * v0.13.4 구간 이탈(짝 종점이 있는 구간): 시점→종점 직선에서 이만큼(m) 넘게 벗어나 있고, 구간 방향으로 가장 멀리 간 지점에서
+     * sectionStallM 넘게 달리는 동안 더 나아가지 않은 fix가 lostFixes번 이어지면 구간을 빠져나간 것으로 보고 복귀.
+     * 굽은 구간은 직선을 벗어나도 종점 쪽으로 계속 나아가므로 안 푼다.
+     */
+    val sectionOffAxisM: Double = 300.0,
+    val sectionStallM: Double = 200.0,
+    /** v0.13.4 구간 이탈(카카오): 앞에 보이던 "구간단속 끝"이 닿기 전에 사라진 채 이만큼(m) 달리면 복귀. 끊김(목록 없음) 동안은 안 셈. */
+    val sectionEndGoneM: Double = 300.0,
     /** GPS 방향 평활화에 쓰는 최근 fix 수. 서로 이 각도(도) 안일 때만 평균한다(커브에선 그대로). */
     val smoothFixes: Int = 3,
     val smoothMaxDiffDeg: Double = 15.0,
@@ -178,6 +187,15 @@ class SlowdownEngine(
     private val seen = HashMap<Camera, Int>()
     /** 구간단속 시작을 못 보고 중간에 들어와 "구간 끝"을 목표로 잡은 상태. */
     private var midSection = false
+    /** 구간 유지 중 카카오가 보여 준 "구간단속 끝"의 위치(누적 거리). 사라지면 이탈 판단에 쓴다. */
+    private var secEndOdo: Double? = null
+    /** 그 "끝"이 닿기 전에 안 보이기 시작한 누적 거리. */
+    private var secEndGoneOdo: Double? = null
+    /** 구간 방향(시점→짝 종점)으로 가장 멀리 간 거리와 그때의 누적 거리, 직선 이탈 연속 횟수. */
+    private var axisMax = Double.NEGATIVE_INFINITY
+    private var axisMaxOdo = 0.0
+    private var offAxisCount = 0
+    private fun resetSectionExit() { secEndOdo = null; secEndGoneOdo = null; axisMax = Double.NEGATIVE_INFINITY; axisMaxOdo = 0.0; offAxisCount = 0 }
 
     /** 외부(카카오 안전 운행)가 준 앞 카메라 하나. distM은 도로를 따라 잰 거리. */
     class ExternalCam(val cam: Camera, val distM: Double)
@@ -207,7 +225,7 @@ class SlowdownEngine(
 
     fun reset() {
         target = null; passedHoldUntilOdo = null; passCourse = null; reverseCount = 0; lostCount = 0; last = null; zone = null
-        suppressed = null; suppressedZone = null; midSection = false; external = null
+        suppressed = null; suppressedZone = null; midSection = false; external = null; resetSectionExit()
         courses.clear(); speeds.clear(); seen.clear()
     }
 
@@ -219,7 +237,7 @@ class SlowdownEngine(
         val was = isSlowed
         suppressed = target ?: suppressed
         suppressedZone = zone ?: suppressedZone
-        target = null; passedHoldUntilOdo = null; passCourse = null; reverseCount = 0; lostCount = 0; zone = null; midSection = false
+        target = null; passedHoldUntilOdo = null; passCourse = null; reverseCount = 0; lostCount = 0; zone = null; midSection = false; resetSectionExit()
         status = status.copy(slowed = false, target = null, zone = null, holdRemainM = null, holdKind = null, note = if (was) "직접 복귀" else status.note)
         return was
     }
@@ -357,13 +375,13 @@ class SlowdownEngine(
         var camDown: Rel? = null
         var camUpReason: String? = null
         var holdEvent: EngineEvent.Hold? = null
-        fun drop(reason: String) { target = null; passedHoldUntilOdo = null; passCourse = null; reverseCount = 0; lostCount = 0; midSection = false; camUpReason = reason }
+        fun drop(reason: String) { target = null; passedHoldUntilOdo = null; passCourse = null; reverseCount = 0; lostCount = 0; midSection = false; resetSectionExit(); camUpReason = reason }
 
         val t = target
         if (t == null) {
             val cand = triggerCandidate()
             if (cand != null) {
-                target = cand.cam; passedHoldUntilOdo = null; passCourse = null; reverseCount = 0; lostCount = 0; midSection = false
+                target = cand.cam; passedHoldUntilOdo = null; passCourse = null; reverseCount = 0; lostCount = 0; midSection = false; resetSectionExit()
                 targetRoadLat = cand.roadLat; targetRoadLon = cand.roadLon
                 camDown = cand
             } else if (ext != null && !fix.estimated) {
@@ -372,7 +390,8 @@ class SlowdownEngine(
                 if (sec != null && sec.cam.kind == CamKind.SECTION_END && sec.cam != suppressed && sec.cam.limitKmh > 0 && passesFilter(sec.cam) &&
                     (seen[sec.cam] ?: 0) >= config.confirmFixes && !(config.skipIfBelowLimit && speedKmh <= sec.cam.limitKmh)
                 ) {
-                    target = sec.cam; midSection = true; reverseCount = 0; lostCount = 0
+                    target = sec.cam; midSection = true; reverseCount = 0; lostCount = 0; resetSectionExit()
+                    secEndOdo = odo + sec.along
                     targetRoadLat = sec.roadLat; targetRoadLon = sec.roadLon
                     passedHoldUntilOdo = odo + sec.along + config.restoreAfterM
                     passedAtOdo = odo; passCourse = course
@@ -407,6 +426,7 @@ class SlowdownEngine(
                     passCourse = course
                     reverseCount = 0
                     lostCount = 0
+                    resetSectionExit()
                     if (section) holdEvent = EngineEvent.Hold(t, config.restoreAfterM + extra, t.sectionLenM > 0)
                 } else {
                     val lostNow = along <= -300 || (entry == null && (attachedNow || !isAhead(gAlong, gCross, t, tracking = true)))
@@ -417,12 +437,25 @@ class SlowdownEngine(
                 }
             } else {
                 // 카카오: 구간 유지 중 "구간 끝"이 앞에 보이면 그 거리로 복귀 지점을 맞춘다(길이 데이터·10 km 상한보다 정확)
-                if (ext != null && (t.kind == CamKind.SECTION_START || midSection)) {
-                    ahead.firstOrNull { it.cam.kind == CamKind.SECTION_END }?.let { end ->
-                        passedHoldUntilOdo = odo + end.along + config.restoreAfterM
+                // v0.13.4 B: 보이던 "구간 끝"이 닿기 전(150 m 넘게 남았을 때) 사라진 채 sectionEndGoneM 달리면 구간을 빠져나간 것.
+                // 카카오 끊김(ext == null) 동안은 세지 않는다(다시 보이면 처음부터).
+                if (t.kind == CamKind.SECTION_START || midSection) {
+                    if (ext == null) secEndGoneOdo = null
+                    else {
+                        val end = ahead.firstOrNull { it.cam.kind == CamKind.SECTION_END }
+                        if (end != null) {
+                            passedHoldUntilOdo = odo + end.along + config.restoreAfterM
+                            secEndOdo = odo + end.along; secEndGoneOdo = null
+                        } else {
+                            val endAt = secEndOdo
+                            if (endAt != null && endAt - odo > 150.0) {
+                                val gone = secEndGoneOdo ?: odo.also { secEndGoneOdo = it }
+                                if (odo - gone >= config.sectionEndGoneM) drop("구간 이탈")
+                            } else secEndGoneOdo = null
+                        }
                     }
                 }
-                if (t.kind == CamKind.SECTION_START) {
+                if (target != null && t.kind == CamKind.SECTION_START) {
                     // 구간 방향: 짝 종점이 있으면 시점→종점, 없으면 시점을 지날 때의 진행 방향
                     val pLat = t.partnerLat; val pLon = t.partnerLon
                     val axis = if (pLat != null && pLon != null) Geo.bearing(t.lat, t.lon, pLat, pLon) else passCourse
@@ -432,8 +465,15 @@ class SlowdownEngine(
                         if (odo - passedAtOdo >= config.minSectionM && pa <= 0 && Geo.distance(fix.lat, fix.lon, pLat, pLon) <= config.partnerReachM)
                             passedHoldUntilOdo = min(passedHoldUntilOdo ?: hold, odo + config.restoreAfterM)
                         // 종점 반대쪽으로 멀어짐 = 반대 방향 구간을 잡은 것
-                        val (p, _) = Geo.alongCross(t.lat, t.lon, axis, fix.lat, fix.lon)
+                        val (p, x) = Geo.alongCross(t.lat, t.lon, axis, fix.lat, fix.lon)
                         if (p < -config.holdBackM) drop("반대 방향")
+                        // v0.13.4 A: 시점→종점 선에서 멀리 벗어났고 구간 방향으로 더 나아가지 않음 = 구간을 빠져나감
+                        if (target != null) {
+                            if (p > axisMax) { axisMax = p; axisMaxOdo = odo }
+                            if (abs(x) > config.sectionOffAxisM && odo - axisMaxOdo >= config.sectionStallM) {
+                                if (++offAxisCount >= config.lostFixes) drop("구간 이탈")
+                            } else offAxisCount = 0
+                        }
                     }
                     if (target != null && axis != null) {
                         // 진행 방향이 구간 방향과 뒤집힘(유턴·반대 방향)
@@ -451,7 +491,7 @@ class SlowdownEngine(
                         val again = triggerCandidate()
                         if (again != null) {
                             // 다음 카메라가 이미 가까우면 올리지 않고 그대로 이어간다
-                            target = again.cam; passedHoldUntilOdo = null; passCourse = null; reverseCount = 0; lostCount = 0; midSection = false
+                            target = again.cam; passedHoldUntilOdo = null; passCourse = null; reverseCount = 0; lostCount = 0; midSection = false; resetSectionExit()
                             targetRoadLat = again.roadLat; targetRoadLon = again.roadLon
                         } else drop("카메라 통과")
                     }

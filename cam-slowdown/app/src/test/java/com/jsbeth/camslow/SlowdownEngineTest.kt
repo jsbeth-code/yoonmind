@@ -568,6 +568,7 @@ class SlowdownEngineTest {
     /** 북쪽 주행, 매 fix마다 extCams 중 아직 안 지난 것을 도로 거리(북 차이)로 넣는다. */
     private fun driveNorthExternal(
         police: List<Camera>, extCams: List<Camera>, kmh: Double, fromN: Double, toN: Double, kakaoOn: (Double) -> Boolean = { true },
+        shown: (Camera, Double) -> Boolean = { _, _ -> true },
     ): List<Pair<EngineEvent, Double>> {
         val e = SlowdownEngine(CameraIndex(police), EngineConfig())
         val v = kmh / 3.6
@@ -577,7 +578,7 @@ class SlowdownEngineTest {
             val (la, lo) = at(0.0, n)
             e.external = if (!kakaoOn(n)) null else extCams.mapNotNull { c ->
                 val camN = (c.lat - lat0) * mPerDegLat
-                if (camN - n < 0 || camN - n > 2000) null else SlowdownEngine.ExternalCam(c.copy(), camN - n)
+                if (camN - n < 0 || camN - n > 2000 || !shown(c, n)) null else SlowdownEngine.ExternalCam(c.copy(), camN - n)
             }
             e.update(Fix(la, lo, v, 0.0)).forEach { out += it to n }
             assertEquals(kakaoOn(n), e.status.external)
@@ -625,6 +626,67 @@ class SlowdownEngineTest {
         assertEquals(1, downs.size); assertEquals(1, ups.size)
         assertTrue(downs[0].second < 1000.0)
         assertTrue("끝 지나 복귀 ${ups[0].second}", ups[0].second - 4000.0 in 80.0..170.0)
+    }
+
+    @Test fun external_sectionEndVanishesBeforeReached_releasesAsExit() {
+        // v0.13.4 B: 구간 시작(1 km) 뒤 카카오가 "구간 끝"(4 km)을 보여 주다가 3 km에서 안 보임(다른 길로 빠짐) → 300 m 뒤 "구간 이탈" 복귀
+        val start = cam(0.0, 1000.0, 80, kind = CamKind.SECTION_START, code = "KAKAO")
+        val end = cam(0.0, 4000.0, 80, kind = CamKind.SECTION_END, code = "KAKAO")
+        val ev = driveNorthExternal(emptyList(), listOf(start, end), 90.0, 0.0, 6000.0, shown = { c, n -> c !== end || n < 3000.0 })
+        val up = ev.first { it.first is EngineEvent.Up }
+        assertEquals("구간 이탈", (up.first as EngineEvent.Up).reason)
+        assertTrue("이탈 복귀 위치 ${up.second}", up.second in 3250.0..3400.0)
+    }
+
+    @Test fun external_sectionEndHiddenWhileKakaoLost_keepsHold() {
+        // 카카오가 끊긴 동안(null)은 "끝이 사라짐"으로 세지 않는다 → 끝까지 유지
+        val start = cam(0.0, 1000.0, 80, kind = CamKind.SECTION_START, code = "KAKAO")
+        val end = cam(0.0, 4000.0, 80, kind = CamKind.SECTION_END, code = "KAKAO")
+        val ev = driveNorthExternal(emptyList(), listOf(start, end), 90.0, 0.0, 6000.0, kakaoOn = { it !in 2500.0..3200.0 })
+        val ups = ev.filter { it.first is EngineEvent.Up }
+        assertEquals(1, ups.size)
+        assertTrue("끝 지나 복귀 ${ups[0].second}", ups[0].second - 4000.0 in 80.0..170.0)
+    }
+
+    @Test fun sectionWithPartner_leavingRoad_releasesAsExit() {
+        // v0.13.4 A: 짝 종점(북 8 km)이 있는 구간. 북 3 km에서 동쪽으로 꺾어 빠져나감 → 직선에서 300 m+ 벗어나고 종점에서 멀어지면 복귀
+        val (pLat, pLon) = at(8.0, 8000.0)
+        val start = cam(8.0, 1000.0, kind = CamKind.SECTION_START, len = 7000).copy(partnerLat = pLat, partnerLon = pLon)
+        val e = SlowdownEngine(CameraIndex(listOf(start)), EngineConfig())
+        val v = 80 / 3.6
+        var up: Pair<EngineEvent.Up, Double>? = null
+        var n = 0.0
+        while (n <= 3000.0) { val (la, lo) = at(0.0, n); e.update(Fix(la, lo, v, 0.0)); n += v }
+        assertTrue(e.isSlowed)
+        var east = 0.0
+        while (east <= 2000.0 && up == null) {
+            val (la, lo) = at(east, 3000.0)
+            e.update(Fix(la, lo, v, 90.0)).filterIsInstance<EngineEvent.Up>().firstOrNull()?.let { up = it to east }
+            east += v
+        }
+        assertEquals("구간 이탈", up!!.first.reason)
+        assertTrue("이탈 복귀 동쪽 ${up!!.second}", up!!.second in 300.0..600.0)
+    }
+
+    @Test fun sectionWithPartner_curvedRoadInside_keepsHold() {
+        // 구간 안에서 길이 직선에서 400 m 휘어도 종점에 가까워지는 중이면 풀지 않는다
+        val (pLat, pLon) = at(8.0, 8000.0)
+        val start = cam(8.0, 1000.0, kind = CamKind.SECTION_START, len = 7000).copy(partnerLat = pLat, partnerLon = pLon)
+        val e = SlowdownEngine(CameraIndex(listOf(start)), EngineConfig())
+        val v = 80 / 3.6
+        var n = 0.0
+        val ups = ArrayList<EngineEvent.Up>()
+        var prev = at(0.0, 0.0)
+        while (n <= 7000.0) {
+            // 북 2~7 km 사이에서 동쪽으로 최대 450 m 휘는 길
+            val bend = if (n in 2000.0..7000.0) 450.0 * Math.sin(Math.PI * (n - 2000.0) / 5000.0) else 0.0
+            val p = at(bend, n)
+            val course = Math.toDegrees(Math.atan2((p.second - prev.second) * mPerDegLon, (p.first - prev.first) * mPerDegLat)).let { (it + 360) % 360 }
+            ups += e.update(Fix(p.first, p.second, v, course)).filterIsInstance<EngineEvent.Up>()
+            prev = p; n += v
+        }
+        assertTrue("구간 안 복귀 없음 $ups", ups.isEmpty())
+        assertTrue(e.isSlowed)
     }
 
     @Test fun sourceSwitchWhileSlowed_keepsTargetNoEarlyUp() {

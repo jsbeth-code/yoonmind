@@ -60,10 +60,13 @@ class MainActivity : AppCompatActivity() {
     private var naviView: KNNaviView? = null
     private var naviFailed = false
     private var naviFailedAt = 0L
+    /** 직접 다시 붙이기: 감속·구간 유지 중에도 미루지 않는다. */
+    private var naviForce = false
     private var naviMissingSince = 0L
     private var naviMissingSaid = false
     private lateinit var mapFrame: FrameLayout
     private lateinit var cardsBox: LinearLayout
+    private var panelView: View? = null
     private var recenterChip: View? = null
     private var panelH = 0
     private var resumed = false
@@ -207,10 +210,11 @@ class MainActivity : AppCompatActivity() {
         } else {
             val root = FrameLayout(this).apply { setBackgroundColor(t.bg) }
             root.addView(mapFrame, FrameLayout.LayoutParams(-1, -1))
-            val sideW = if (bigScreen) dp(440) else -1
-            root.addView(cards, FrameLayout.LayoutParams(sideW, -2, Gravity.TOP or Gravity.END).apply { leftMargin = dp(10); rightMargin = dp(10); topMargin = dp(10) })
-            root.addView(panel, FrameLayout.LayoutParams(sideW, -2, Gravity.BOTTOM or Gravity.END).apply { if (bigScreen) rightMargin = dp(12) })
+            root.addView(cards, FrameLayout.LayoutParams(-1, -2, Gravity.TOP or Gravity.END).apply { leftMargin = dp(10); rightMargin = dp(10); topMargin = dp(10) })
+            root.addView(panel, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM or Gravity.END))
+            panelView = panel
             setContentView(root)
+            applyScreenLayout()
             // 카드가 덮는 높이만큼 지도 중심을 아래로
             cards.addOnLayoutChangeListener { v, _, _, _, _, _, _, _, _ -> mapPane.topInset = v.bottom }
             panel.addOnLayoutChangeListener { v, _, _, _, _, _, _, _, _ ->
@@ -407,6 +411,8 @@ class MainActivity : AppCompatActivity() {
         btnRow.addView(smallBtn("◎ 지도 내 위치로") { recenterMap() },
             LinearLayout.LayoutParams(0, -2, 1f))
         expanded.addView(btnRow)
+        // v0.13.4: 카카오 화면이 멈추거나(간이 지도로 바뀜) 이상할 때 바로 다시 붙인다
+        expanded.addView(smallBtn("↻ 카카오 화면 다시 붙이기") { reattachNavi() }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
         val tools = tv(13f, t.muted).apply { text = "데이터·테스트 도구 ⋮"; setPadding(dp(4), dp(12), dp(4), dp(4)) }
         tools.setOnClickListener { showTools(it) }
         expanded.addView(tools)
@@ -801,6 +807,33 @@ class MainActivity : AppCompatActivity() {
         setSpan(android.text.style.StyleSpan(Typeface.BOLD), start, length, 0)
     }
 
+    /** v0.13.4: [카카오 화면 다시 붙이기] — 지금 화면을 떼고 바로 새로 붙인다(감속·구간 유지 중이어도 기다리지 않음). */
+    private fun reattachNavi() {
+        val running = DriveState.running; val sim = DriveState.simulating
+        if (!running || sim) { Toast.makeText(this, "감시 중일 때만 붙일 수 있습니다", Toast.LENGTH_SHORT).show(); return }
+        if (!KakaoSafety.sdkReady) {
+            DriveState.log("카카오 화면 다시 붙이기(직접) — 카카오 연결 대기 중이라 연결되면 붙임")
+            Toast.makeText(this, "카카오 연결 대기 중 — 연결되면 붙습니다", Toast.LENGTH_LONG).show()
+            naviFailed = false
+            return
+        }
+        DriveState.log("카카오 화면 다시 붙이기(직접)" + if (naviView == null) " — 화면 없음 상태에서" else "")
+        naviView?.let { detachNavi(it) }
+        naviFailed = false
+        naviForce = true
+        updateNavi(running, sim)
+        naviForce = false
+        setSheet(false)
+    }
+
+    private fun detachNavi(v: KNNaviView) {
+        KakaoSafety.detachView(v)
+        mapFrame.removeView(v)
+        naviView = null
+        mapPane.visibility = View.VISIBLE; if (resumed) mapPane.resume()
+        layoutForNavi(false)
+    }
+
     /** 감시 중이고 카카오가 준비되면 카카오내비 화면을 붙이고, 아니면 떼고 기존 지도로. */
     private fun updateNavi(running: Boolean, sim: Boolean) {
         if (!running) { naviFailed = false; naviMissingSince = 0L; naviMissingSaid = false } // 감시를 다시 켜면 카카오 화면을 다시 시도
@@ -829,7 +862,7 @@ class MainActivity : AppCompatActivity() {
             DriveState.say?.invoke("카카오 화면이 안 붙었습니다")
         }
         if (v != null && naviMissingSaid) naviMissingSaid = false
-        if (want && v == null && !busy) {
+        if (want && v == null && (!busy || naviForce)) {
             try {
                 val nv = KNNaviView(this)
                 nv.useDarkMode = t.night
@@ -852,11 +885,7 @@ class MainActivity : AppCompatActivity() {
                 Prefs.setNaviErr(this, "${e.javaClass.simpleName} ${e.message ?: ""}".take(120))
             }
         } else if (!want && v != null) {
-            KakaoSafety.detachView(v)
-            mapFrame.removeView(v)
-            naviView = null
-            mapPane.visibility = View.VISIBLE; if (resumed) mapPane.resume()
-            layoutForNavi(false)
+            detachNavi(v)
         }
     }
 
@@ -865,8 +894,41 @@ class MainActivity : AppCompatActivity() {
         if (wide) return
         (mapFrame.layoutParams as? FrameLayout.LayoutParams)?.let { lp ->
             // 큰 화면은 판이 오른쪽 아래에 떠 있으니 지도는 전체 높이
-            lp.bottomMargin = if (on && !bigScreen) panelH else 0; mapFrame.layoutParams = lp
+            val bm = if (on && !bigScreen) panelH else 0
+            if (lp.bottomMargin != bm) { lp.bottomMargin = bm; mapFrame.layoutParams = lp }
         }
+        // v0.13.4: 큰 화면(폴더 펼침)은 판을 카카오 아래 줄(도착 시간 줄) 바로 위에 띄워 그 줄을 가리지 않는다
+        val pv = panelView ?: return
+        (pv.layoutParams as? FrameLayout.LayoutParams)?.let { lp ->
+            val bm = if (on && bigScreen) dp(KAKAO_BAR_DP) else 0
+            if (lp.bottomMargin != bm) { lp.bottomMargin = bm; pv.layoutParams = lp }
+        }
+    }
+
+    /**
+     * v0.13.4: 화면 크기에 맞춰 판·카드 배치. 큰 화면(폴더 펼침)은 판을 화면 오른쪽 반 너비로.
+     * 폴더를 접고 펼쳐도 화면을 다시 만들지 않고(매니페스트 configChanges) 이것만 다시 부른다 — 카카오 화면·경로가 그대로 남는다.
+     */
+    private fun applyScreenLayout() {
+        if (wide) return
+        bigScreen = resources.configuration.screenWidthDp >= 600
+        (cardsBox.layoutParams as? FrameLayout.LayoutParams)?.let { lp -> lp.width = if (bigScreen) dp(440) else -1; cardsBox.layoutParams = lp }
+        panelView?.let { pv ->
+            (pv.layoutParams as? FrameLayout.LayoutParams)?.let { lp ->
+                lp.width = if (bigScreen) dp(resources.configuration.screenWidthDp / 2) - dp(12) else -1
+                lp.rightMargin = if (bigScreen) dp(12) else 0
+                pv.layoutParams = lp
+            }
+        }
+        layoutForNavi(naviView != null)
+    }
+
+    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+        super.onConfigurationChanged(newConfig)
+        val was = bigScreen
+        applyScreenLayout()
+        if (was != bigScreen) DriveState.log(if (bigScreen) "폴더 펼침 — 화면 배치만 바꿈" else "폴더 접음 — 화면 배치만 바꿈")
+        render()
     }
 
     /** 새 목적지 경로가 시작되면 10초 동안 경로 종류 고르기 창. 안 누르면 그대로(설정의 기본값). */
@@ -1290,6 +1352,8 @@ class MainActivity : AppCompatActivity() {
         private const val M_SIM = 107
         private const val M_PAIR = 108
         private const val M_SCAN = 109
+        /** 카카오내비 화면 아래 줄(도착 시간·남은 거리) 높이(dp) — 큰 화면에서 판을 이 위에 띄운다. 실제 높이를 몰라 어림값. */
+        private const val KAKAO_BAR_DP = 72
         private const val M_ROADS = 110
         private const val M_TEST_SOUND = 111
         private const val M_HELP = 112
