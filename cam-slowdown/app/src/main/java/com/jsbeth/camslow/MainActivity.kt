@@ -816,8 +816,10 @@ class MainActivity : AppCompatActivity() {
         val running = DriveState.running; val sim = DriveState.simulating
         if (!running || sim) { Toast.makeText(this, "감시 중일 때만 붙일 수 있습니다", Toast.LENGTH_SHORT).show(); return }
         if (!KakaoSafety.sdkReady) {
-            DriveState.log("카카오 화면 다시 붙이기(직접) — 카카오 연결 대기 중이라 연결되면 붙임")
-            Toast.makeText(this, "카카오 연결 대기 중 — 연결되면 붙습니다", Toast.LENGTH_LONG).show()
+            // v0.13.6: 연결이 실패해 있으면 기다리지 않고 바로 다시 연결
+            val what = KakaoSafety.retryNow()
+            DriveState.log("카카오 화면 다시 붙이기(직접) — $what, 연결되면 붙임")
+            Toast.makeText(this, "$what — 연결되면 붙습니다", Toast.LENGTH_LONG).show()
             naviFailed = false
             return
         }

@@ -158,13 +158,59 @@ object KakaoSafety : KNGuidance_SafetyGuideDelegate, KNGuidance_LocationGuideDel
     /** 경로 종류 고르기 창을 띄우는 시간. */
     const val ASK_ROUTE_MS = 15_000L
 
+    // ---- v0.13.6 연결 재시도: 실패하면 1분마다 다시, 답이 3분 넘게 없으면 새로 요청(늦게 온 실패 답은 무시).
+    // 실차 2026-11-05 20:11: 핫스팟에서 C103(인증 실패) 한 번 뒤 감시를 껐다 켤 때까지 다시 시도하지 않았고, 다시 켜니 102초 만에 성공.
+    /** 감시가 카카오를 원함(start ~ stop). */
+    private var wanted = false
+    /** 인증 요청 번호. 새로 요청하거나 멈추면 올려서 옛 답을 가린다. */
+    private var initSeq = 0
+    /** 인증 답을 기다리기 시작한 시각(0 = 안 기다림). */
+    private var initPendingSince = 0L
+    private var retryN = 0
+    private const val RETRY_MS = 60_000L
+    private const val STALL_MS = 180_000L
+    private val retryRun = Runnable { if (wanted && !running) { retryN++; connect() } }
+    private val stallRun = Runnable {
+        if (!wanted || initPendingSince == 0L) return@Runnable
+        log("카카오 응답 없음 ${(System.currentTimeMillis() - initPendingSince) / 1000}초 — 새로 요청")
+        initSeq++; initPendingSince = 0L; running = false
+        retryN++; connect()
+    }
+
     /** 주행 감시 시작 때. 메인 스레드에서 부른다. */
     fun start(app: Application, logger: (String) -> Unit) {
         log = logger
         this.app = app
         routeOpt = Prefs.routeOpt(app)
         if (!hasKey) { status = "카카오 앱 키 없음(빌드에 안 들어감)"; log(status); return }
+        wanted = true
         if (running) return
+        retryN = 0
+        connect()
+    }
+
+    /** 연결 실패: 감시 중이면 1분 뒤 다시. */
+    private fun fail() {
+        running = false
+        main.removeCallbacks(retryRun)
+        if (wanted) main.postDelayed(retryRun, RETRY_MS)
+    }
+
+    /**
+     * [카카오 화면 다시 붙이기]에서: 실패해 있으면 바로 다시 연결. 돌려주는 글은 기록·안내용.
+     */
+    fun retryNow(): String {
+        if (!wanted) return "감시가 꺼져 있음"
+        if (initPendingSince > 0L) return "카카오 응답 기다리는 중 (${(System.currentTimeMillis() - initPendingSince) / 1000}초째)"
+        if (running) return "카카오 연결 진행 중 ($status)"
+        retryN++
+        connect()
+        return "카카오 바로 다시 연결 시도"
+    }
+
+    private fun connect() {
+        val app = app ?: return
+        main.removeCallbacks(retryRun); main.removeCallbacks(stallRun)
         running = true
         logged.clear(); cams = emptyList(); updatedAt = 0L
         try {
@@ -173,26 +219,40 @@ object KakaoSafety : KNGuidance_SafetyGuideDelegate, KNGuidance_LocationGuideDel
                 installed = true
             }
             if (ready) { startGuidance(); return }
-            status = "카카오 연결 중…"; log(status)
+            status = "카카오 연결 중…"; log(status + if (retryN > 0) " (다시 시도 ${retryN}번째)" else "")
             val prefs = app.getSharedPreferences("kakao", 0)
             val userKey = prefs.getString("user", null) ?: UUID.randomUUID().toString().also { prefs.edit().putString("user", it).apply() }
+            val seq = ++initSeq
+            val askedAt = System.currentTimeMillis()
+            initPendingSince = askedAt
+            main.postDelayed(stallRun, STALL_MS)
             KNSDK.initializeWithAppKey(BuildConfig.KAKAO_NATIVE_APP_KEY, BuildConfig.VERSION_NAME, userKey,
                 aLangType = KNLanguageType.KNLanguageType_KOREAN, aCompletion = { error ->
                     main.post {
+                        val took = (System.currentTimeMillis() - askedAt) / 1000
+                        val current = seq == initSeq
                         if (error != null) {
                             val detail = listOfNotNull(error.msg, error.tagMsg).firstOrNull { it.isNotBlank() }
+                            if (!current) { log("카카오 늦은 실패 답 무시 (${error.code}, ${took}초 만)"); return@post }
+                            main.removeCallbacks(stallRun); initPendingSince = 0L
                             status = "카카오 연결 실패 ${error.code}" + (detail?.let { " · $it" } ?: "")
-                            log(status + hint(error.code.toString()))
-                            running = false
+                            log(status + hint(error.code.toString()) + (if (wanted) " — 1분 뒤 다시 시도" else ""))
+                            fail()
                         } else {
+                            if (ready) return@post // 다른 요청이 이미 성공
+                            // 옛 요청의 늦은 성공도 받는다(인증은 된 것)
+                            main.removeCallbacks(stallRun); initPendingSince = 0L; initSeq++
                             ready = true
-                            log("카카오 인증 성공")
-                            if (running) startGuidance()
+                            log("카카오 인증 성공 (${took}초 만" + (if (retryN > 0) ", 다시 시도 ${retryN}번째" else "") + ")")
+                            retryN = 0
+                            if (wanted) { running = true; startGuidance() } else running = false
                         }
                     }
                 })
         } catch (e: Throwable) {
-            status = "카카오 SDK 오류: ${e.javaClass.simpleName} ${e.message ?: ""}"; log(status); running = false
+            main.removeCallbacks(stallRun); initPendingSince = 0L
+            status = "카카오 SDK 오류: ${e.javaClass.simpleName} ${e.message ?: ""}"; log(status + if (wanted) " — 1분 뒤 다시 시도" else "")
+            fail()
         }
     }
 
@@ -204,7 +264,7 @@ object KakaoSafety : KNGuidance_SafetyGuideDelegate, KNGuidance_LocationGuideDel
 
     private fun startGuidance() {
         try {
-            val g = KNSDK.sharedGuidance() ?: run { status = "카카오 안내 객체 없음"; log(status); running = false; return }
+            val g = KNSDK.sharedGuidance() ?: run { status = "카카오 안내 객체 없음"; log("$status — 1분 뒤 다시 시도"); fail(); return }
             guidance = g
             setDelegates(g)
             g.useBackgroundUpdate = true
@@ -214,7 +274,7 @@ object KakaoSafety : KNGuidance_SafetyGuideDelegate, KNGuidance_LocationGuideDel
             begin(g, null)
             status = "카카오 안전 운행 시작 · 정보 대기"; log(status)
         } catch (e: Throwable) {
-            status = "카카오 안전 운행 시작 실패: ${e.javaClass.simpleName} ${e.message ?: ""}"; log(status); running = false
+            status = "카카오 안전 운행 시작 실패: ${e.javaClass.simpleName} ${e.message ?: ""}"; log("$status — 1분 뒤 다시 시도"); fail()
         }
     }
 
@@ -410,7 +470,11 @@ object KakaoSafety : KNGuidance_SafetyGuideDelegate, KNGuidance_LocationGuideDel
 
     /** 주행 감시 정지 때. */
     fun stop() {
-        if (!running && guidance == null) return
+        wanted = false
+        main.removeCallbacks(retryRun); main.removeCallbacks(stallRun)
+        if (initPendingSince > 0L) { initSeq++; initPendingSince = 0L }
+        retryN = 0
+        if (!running && guidance == null) { status = "카카오 꺼짐"; return }
         running = false
         guidance?.let { g ->
             runCatching { g.stop() }
