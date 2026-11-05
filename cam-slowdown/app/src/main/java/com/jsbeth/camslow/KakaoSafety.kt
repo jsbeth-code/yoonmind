@@ -167,7 +167,7 @@ object KakaoSafety : KNGuidance_SafetyGuideDelegate, KNGuidance_LocationGuideDel
     /** 인증 답을 기다리기 시작한 시각(0 = 안 기다림). */
     private var initPendingSince = 0L
     private var retryN = 0
-    private const val RETRY_MS = 60_000L
+    private const val CONNECT_RETRY_MS = 60_000L
     private const val STALL_MS = 180_000L
     private val retryRun = Runnable { if (wanted && !running) { retryN++; connect() } }
     private val stallRun = Runnable {
@@ -193,7 +193,7 @@ object KakaoSafety : KNGuidance_SafetyGuideDelegate, KNGuidance_LocationGuideDel
     private fun fail() {
         running = false
         main.removeCallbacks(retryRun)
-        if (wanted) main.postDelayed(retryRun, RETRY_MS)
+        if (wanted) main.postDelayed(retryRun, CONNECT_RETRY_MS)
     }
 
     /**
