@@ -176,6 +176,20 @@ object Prefs {
     /** 테슬라 목적지 자동 확인 방식(기본: 움직일 때만). */
     fun teslaPoll(ctx: Context) = TeslaPoll.byName(sp(ctx).getString("teslaPoll", null))
     fun setTeslaPoll(ctx: Context, v: TeslaPoll) = put(ctx) { putString("teslaPoll", v.name) }
+    /**
+     * v0.13.7 메인 화면 알약 위치. mode: "big"(폴더 펼침) / "small"(접음·일반 폰).
+     * 값은 화면 안 남는 공간에 대한 비율(0~1, 왼쪽·위 = 0). last = 마지막에 옮긴 자리, fixed = 시작 위치로 고정한 자리.
+     */
+    private fun pillGet(ctx: Context, key: String): Pair<Float, Float>? {
+        val x = sp(ctx).getFloat("${key}X", -1f); val y = sp(ctx).getFloat("${key}Y", -1f)
+        return if (x < 0f || y < 0f) null else x to y
+    }
+    fun pillLast(ctx: Context, mode: String) = pillGet(ctx, "pillLast_$mode")
+    fun setPillLast(ctx: Context, mode: String, x: Float, y: Float) = put(ctx) { putFloat("pillLast_${mode}X", x); putFloat("pillLast_${mode}Y", y) }
+    fun pillFixed(ctx: Context, mode: String) = pillGet(ctx, "pillFixed_$mode")
+    fun setPillFixed(ctx: Context, mode: String, x: Float, y: Float) = put(ctx) { putFloat("pillFixed_${mode}X", x); putFloat("pillFixed_${mode}Y", y) }
+    fun clearPillFixed(ctx: Context, mode: String) = put(ctx) { remove("pillFixed_${mode}X"); remove("pillFixed_${mode}Y") }
+
     /** 카카오내비 화면 마지막 실패(앱을 다시 켜도 점검에 보이게). 성공하면 지움. */
     fun naviErr(ctx: Context) = sp(ctx).getString("naviErr", "") ?: ""
     fun setNaviErr(ctx: Context, v: String) = put(ctx) { putString("naviErr", v) }

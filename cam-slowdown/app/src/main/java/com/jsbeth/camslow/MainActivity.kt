@@ -28,6 +28,7 @@ import android.text.style.RelativeSizeSpan
 import android.transition.ChangeBounds
 import android.transition.TransitionManager
 import android.view.Gravity
+import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
 import android.view.ViewConfiguration
 import android.view.View
@@ -99,6 +100,13 @@ class MainActivity : AppCompatActivity() {
     private lateinit var stripeView: TextView
     // 아래 판
     private lateinit var sheet: LinearLayout
+    /** v0.13.7 알약: 메뉴 손잡이, T 옆 상태 점, 목적지 글 묶음, 접힌 알약 크기, 모드별 지금 자리(비율). */
+    private lateinit var handleView: View
+    private lateinit var tBadge: View
+    private lateinit var dcol: LinearLayout
+    private var pillW = 0
+    private var pillH = 0
+    private val pillCur = HashMap<String, Pair<Float, Float>?>()
     private lateinit var destRow: LinearLayout
     private lateinit var destName: TextView
     private lateinit var destSub: TextView
@@ -212,14 +220,20 @@ class MainActivity : AppCompatActivity() {
             val root = FrameLayout(this).apply { setBackgroundColor(t.bg) }
             root.addView(mapFrame, FrameLayout.LayoutParams(-1, -1))
             root.addView(cards, FrameLayout.LayoutParams(-1, -2, Gravity.TOP or Gravity.END).apply { leftMargin = dp(10); rightMargin = dp(10); topMargin = dp(10) })
-            root.addView(panel, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM or Gravity.END))
+            // v0.13.7: 판은 지도 위에 떠 있는 알약(옮길 수 있음) — 자리는 placeSheet()
+            root.addView(panel, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.START))
             panelView = panel
             setContentView(root)
+            root.addOnLayoutChangeListener { _, l, tp, r, b, ol, ot, or2, ob -> if (r - l != or2 - ol || b - tp != ob - ot) main.post { placeSheet() } }
             applyScreenLayout()
             // 카드가 덮는 높이만큼 지도 중심을 아래로
             cards.addOnLayoutChangeListener { v, _, _, _, _, _, _, _, _ -> mapPane.topInset = v.bottom }
+            mapPane.bottomInset = 0
             panel.addOnLayoutChangeListener { v, _, _, _, _, _, _, _, _ ->
-                if (!sheetOpen) { mapPane.bottomInset = v.height; if (panelH != v.height) { panelH = v.height; if (naviView != null) main.post { layoutForNavi(true) } } }
+                // 접힌 알약 크기를 기억해 두고(옮기기·메뉴 자리 계산에 씀) 바뀌면 자리를 다시 잡는다
+                if (!sheetOpen && !(sheet as FloatSheet).moving && (v.width != pillW || v.height != pillH)) {
+                    pillW = v.width; pillH = v.height; main.post { placeSheet() }
+                }
             }
         }
         render()
@@ -314,46 +328,53 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun buildPanel(): LinearLayout {
-        sheet = (if (wide) LinearLayout(this) else SwipeSheet()).apply {
+        // v0.13.7: 남색 알약(카카오내비 위 안내 막대 계열). 접히면 [T]·목적지·상태·[↻][■], 누르거나 쓸면 메뉴
+        sheet = FloatSheet().apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(14), dp(6), dp(14), dp(12))
-            background = if (wide) rounded(t.chipBg, 18f, t.line) else GradientDrawable().apply {
-                setColor(t.bg); cornerRadii = floatArrayOf(dpf(22f), dpf(22f), dpf(22f), dpf(22f), 0f, 0f, 0f, 0f)
-            }
+            setPadding(dp(5), dp(5), dp(5), dp(5))
+            background = rounded(M_BG, 24f)
             elevation = dpf(10f)
         }
-        if (!wide) {
-            // 손잡이(누르면 펼침/접힘)
-            val handle = FrameLayout(this).apply { setPadding(0, dp(4), 0, dp(8)); setOnClickListener { setSheet(!sheetOpen) } }
-            handle.addView(View(this).apply { background = rounded(t.line, 3f) }, FrameLayout.LayoutParams(dp(44), dp(5), Gravity.CENTER))
-            sheet.addView(handle, LinearLayout.LayoutParams(-1, dp(20)))
+        // 손잡이(메뉴가 열렸을 때만, 누르면 닫힘)
+        handleView = FrameLayout(this).apply {
+            setPadding(0, dp(2), 0, dp(6)); setOnClickListener { setSheet(false) }
+            addView(View(this@MainActivity).apply { background = rounded(M_LINE, 3f) }, FrameLayout.LayoutParams(dp(44), dp(5), Gravity.CENTER))
         }
+        sheet.addView(handleView, LinearLayout.LayoutParams(-1, dp(16)))
         // 목적지 줄
-        destRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(2), 0, dp(8)) }
-        val tIcon = tv(22f, 0xFFE31937.toInt(), font = jua).apply { text = "T"; gravity = Gravity.CENTER; background = rounded(0xFF17171A.toInt(), 10f) }
-        destRow.addView(tIcon, LinearLayout.LayoutParams(dp(40), dp(40)))
-        val dcol = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(12), 0, dp(8), 0) }
-        destName = tv(17f, t.fg, font = jua).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }
-        destSub = tv(12.5f, t.muted).apply { setPadding(0, dp(3), 0, 0); maxLines = 1; ellipsize = TextUtils.TruncateAt.END }
+        destRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        val tBox = FrameLayout(this)
+        val tIcon = tv(20f, 0xFFE31937.toInt(), font = jua).apply {
+            text = "T"; gravity = Gravity.CENTER
+            background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(0xFF17171A.toInt()) }
+        }
+        tBox.addView(tIcon, FrameLayout.LayoutParams(dp(38), dp(38)))
+        // 짧은 알약(접은 화면·일반 폰)에서 상태: 초록 정상, 노랑 카카오 끊김, 빨강 커맨더 없음
+        tBadge = View(this).apply { background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(0xFF2E9D62.toInt()); setStroke(dp(2), M_BG) } }
+        tBox.addView(tBadge, FrameLayout.LayoutParams(dp(13), dp(13), Gravity.TOP or Gravity.END))
+        destRow.addView(tBox, LinearLayout.LayoutParams(dp(38), dp(38)))
+        dcol = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(9), 0, dp(4), 0) }
+        destName = tv(16f, M_FG, font = jua).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }
+        destSub = tv(11.5f, M_MUTED).apply { setPadding(0, dp(2), 0, 0); maxLines = 1; ellipsize = TextUtils.TruncateAt.END }
         dcol.addView(destName); dcol.addView(destSub)
-        destRow.addView(dcol, LinearLayout.LayoutParams(0, -2, 1f))
-        destEta = tv(13f, t.muted).apply { gravity = Gravity.END }
+        destRow.addView(dcol, LinearLayout.LayoutParams(-2, -2))
+        // 도착 시각·남은 시간은 카카오 아래 줄에 있으니 안 보인다(v0.13.7)
+        destEta = tv(13f, M_MUTED).apply { visibility = View.GONE }
         destRow.addView(destEta)
         // 목적지 지금 확인(테슬라 내비에 찍은 직후 2분을 기다리지 않게)
-        destCheck = tv(13f, t.fg, font = jua).apply {
-            // v0.12.8: 자주 써서 접힌 줄에도 — 작은 동그라미 ↻
-            text = "↻"; textSize = 19f; gravity = Gravity.CENTER
-            background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(t.chipBg); setStroke(dp(1), t.chipLine) }
+        destCheck = tv(18f, M_FG, font = jua).apply {
+            text = "↻"; gravity = Gravity.CENTER
+            background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(M_BTN) }
             setOnClickListener { checkDestNow() }
         }
-        destRow.addView(destCheck, LinearLayout.LayoutParams(dp(40), dp(40)).apply { leftMargin = dp(8) })
-        // v0.12.1: 접힌 판은 한 줄 — 목적지·상태 점·도착 시각·[끄기]
+        destRow.addView(destCheck, LinearLayout.LayoutParams(dp(38), dp(38)).apply { leftMargin = dp(6) })
         smallToggle = tv(15f, Color.WHITE, font = jua).apply {
-            setPadding(dp(16), dp(10), dp(16), dp(10)); background = rounded(t.toggleOff, 14f)
+            gravity = Gravity.CENTER
+            background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(M_RED) }
             setOnClickListener { toggleDrive() }
         }
-        destRow.addView(smallToggle, LinearLayout.LayoutParams(-2, -2).apply { leftMargin = dp(8) })
-        destRow.setOnClickListener { if (!wide) setSheet(!sheetOpen) }
+        destRow.addView(smallToggle, LinearLayout.LayoutParams(dp(38), dp(38)).apply { leftMargin = dp(6) })
+        destRow.setOnClickListener { setSheet(!sheetOpen) }
         sheet.addView(destRow)
 
         // 접힘 줄: "Mad Max → 컴포트 ▴" + 작은 끄기
@@ -375,38 +396,38 @@ class MainActivity : AppCompatActivity() {
         // 펼침 내용
         expanded = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         val prof = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(6), 0, dp(2)) }
-        usualChip = chip { pickProfile(usual = true) }
-        slowChip = chip { pickProfile(usual = false) }
+        usualChip = chip { pickProfile(usual = true) }.apply { setTextColor(M_FG); (background as GradientDrawable).setColor(M_ITEM) }
+        slowChip = chip { pickProfile(usual = false) }.apply { setTextColor(M_FG); (background as GradientDrawable).setColor(M_ITEM) }
         prof.addView(usualChip, LinearLayout.LayoutParams(0, -2, 1f))
-        prof.addView(tv(20f, t.muted).apply { text = "→"; setPadding(dp(8), 0, dp(8), 0) })
+        prof.addView(tv(20f, M_MUTED).apply { text = "→"; setPadding(dp(8), 0, dp(8), 0) })
         prof.addView(slowChip, LinearLayout.LayoutParams(0, -2, 1f))
         expanded.addView(prof)
         releaseBtn = bigButton(t.bandProblem) { DriveService.send(this, DriveService.ACTION_RELEASE) }
         expanded.addView(releaseBtn, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
         toggleBtn = bigButton(t.toggleOn) { toggleDrive() }
         expanded.addView(toggleBtn, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
-        nowView = tv(12f, t.muted).apply { setPadding(dp(2), dp(6), dp(2), dp(2)) }
+        nowView = tv(12f, M_MUTED).apply { setPadding(dp(2), dp(6), dp(2), dp(2)) }
         expanded.addView(nowView)
 
         // 점검·기록: 평소엔 한 줄로 접어 두고 누르면 펼친다
-        fun foldBox(): LinearLayout = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; background = rounded(t.chipBg, 12f, t.chipLine) }
-        val headStyle: TextView.() -> Unit = { textSize = 13f; setTextColor(t.fg); setPadding(dp(12), dp(10), dp(12), dp(10)); maxLines = 1; ellipsize = TextUtils.TruncateAt.END }
+        fun foldBox(): LinearLayout = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; background = rounded(M_ITEM, 12f) }
+        val headStyle: TextView.() -> Unit = { textSize = 13f; setTextColor(M_FG); setPadding(dp(12), dp(10), dp(12), dp(10)); maxLines = 1; ellipsize = TextUtils.TruncateAt.END }
         val checkBox = foldBox()
         checkHead = TextView(this).apply { headStyle(); setOnClickListener { checkExpanded = !checkExpanded; render() } }
-        checkView = TextView(this).apply { textSize = 12.5f; setTextColor(t.fg); setPadding(dp(12), 0, dp(12), dp(10)); setLineSpacing(0f, 1.25f) }
+        checkView = TextView(this).apply { textSize = 12.5f; setTextColor(M_FG); setPadding(dp(12), 0, dp(12), dp(10)); setLineSpacing(0f, 1.25f) }
         checkBox.addView(checkHead); checkBox.addView(checkView)
         expanded.addView(checkBox, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
         val logBox = foldBox()
         logHead = TextView(this).apply { headStyle(); setOnClickListener { logExpanded = !logExpanded; render() } }
-        logView = TextView(this).apply { textSize = 12f; setTextColor(t.fg); setPadding(dp(12), 0, dp(12), dp(10)) }
+        logView = TextView(this).apply { textSize = 12f; setTextColor(M_FG); setPadding(dp(12), 0, dp(12), dp(10)) }
         logBox.addView(logHead); logBox.addView(logView)
         expanded.addView(logBox, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
         // 데이터·테스트 도구(예전 ⋮ 메뉴)
         // 설정·지도 맞추기(예전엔 지도 위 떠 있는 버튼) — 아래 판을 펼쳤을 때만 보인다
         val btnRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, dp(8), 0, 0) }
-        fun smallBtn(label: String, onClick: () -> Unit) = tv(14f, t.fg, font = jua).apply {
+        fun smallBtn(label: String, onClick: () -> Unit) = tv(14f, M_FG, font = jua).apply {
             text = label; gravity = Gravity.CENTER; setPadding(dp(10), dp(11), dp(10), dp(11))
-            background = rounded(t.chipBg, 12f, t.chipLine); setOnClickListener { onClick() }
+            background = rounded(M_ITEM, 12f); setOnClickListener { onClick() }
         }
         btnRow.addView(smallBtn("⚙ 설정") { startActivity(Intent(this, SettingsActivity::class.java)) }, LinearLayout.LayoutParams(0, -2, 1f).apply { rightMargin = dp(8) })
         btnRow.addView(smallBtn("◎ 지도 내 위치로") { recenterMap() },
@@ -414,7 +435,7 @@ class MainActivity : AppCompatActivity() {
         expanded.addView(btnRow)
         // v0.13.4: 카카오 화면이 멈추거나(간이 지도로 바뀜) 이상할 때 바로 다시 붙인다
         expanded.addView(smallBtn("↻ 카카오 화면 다시 붙이기") { reattachNavi() }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
-        val tools = tv(13f, t.muted).apply { text = "데이터·테스트 도구 ⋮"; setPadding(dp(4), dp(12), dp(4), dp(4)) }
+        val tools = tv(13f, M_MUTED).apply { text = "데이터·테스트 도구 ⋮"; setPadding(dp(4), dp(12), dp(4), dp(4)) }
         tools.setOnClickListener { showTools(it) }
         expanded.addView(tools)
         if (wide) sheet.addView(expanded) else {
@@ -427,7 +448,7 @@ class MainActivity : AppCompatActivity() {
             }
             sv.addView(expanded)
             sheet.addView(sv)
-            (sheet as SwipeSheet).scroller = sv
+            (sheet as FloatSheet).scroller = sv
         }
         return sheet
     }
@@ -445,116 +466,197 @@ class MainActivity : AppCompatActivity() {
         (sheet.parent as? ViewGroup)?.let { TransitionManager.beginDelayedTransition(it, ChangeBounds().setDuration(160)) }
         sheetOpen = open
         render()
+        placeSheet()
     }
 
     /**
-     * 손가락을 따라 움직이는 아래 판(v0.10.15). 위로 끌면 펼친 판이 아래에서 따라 올라오고, 아래로 끌면 따라 내려간다.
-     * 놓을 때 30% 넘게 끌었거나 그 방향으로 튕기면 끝까지, 아니면 제자리로 돌아간다.
-     * 펼친 높이로 바꾼 뒤 translationY로 아래로 밀어 두고 손가락만큼 줄인다(판은 화면 아래에 붙어 있음).
-     * 펼친 상태에서 안쪽 목록이 스크롤돼 있으면(맨 위가 아니면) 목록 스크롤이 먼저.
+     * v0.13.7 떠 있는 알약. 누르거나 위·아래로 쓸면 메뉴가 열리고(열렸을 때 쓸면 닫힘),
+     * 길게 눌러 끌면 옮긴다(놓은 자리를 화면 종류별로 기억). 옮긴 뒤 손을 떼지 않고 1.5초 더 누르고 있으면 시작 위치로 고정할지 묻는다.
      */
-    private inner class SwipeSheet : LinearLayout(this@MainActivity) {
+    private inner class FloatSheet : LinearLayout(this@MainActivity) {
         var scroller: View? = null
+        var moving = false
+            private set
         private val slop = ViewConfiguration.get(this@MainActivity).scaledTouchSlop
-        private val flingV = dpf(400f) // px/s
-        private var downX = 0f; private var downY = 0f; private var inScroller = false
-        private var dragging = false; private var opening = false
-        /** 펼친 높이 − 접힌 높이. 펼치며 끌 때는 레이아웃이 끝나야 안다(0 = 아직 모름). */
-        private var delta = 0f
-        private var lastDy = 0f
-        /** 접으며 끌기 시작할 때의 위치(접히는 애니메이션 도중에 다시 잡으면 그 자리부터). */
-        private var dragBase = 0f
-        private var lastY = 0f; private var lastT = 0L; private var vy = 0f
-        private var closedH = 0
-        private var resetOnLayout = false
+        private val longMs = ViewConfiguration.getLongPressTimeout().toLong()
+        private var downX = 0f; private var downY = 0f
+        private var startL = 0; private var startT = 0
+        private var anchorX = 0f; private var anchorY = 0f
+        private var dragged = false; private var swiped = false; private var moved = false
+        private var inScroller = false
+        private val longPress = Runnable {
+            if (sheetOpen) return@Runnable
+            val lp = layoutParams as? FrameLayout.LayoutParams ?: return@Runnable
+            moving = true; dragged = false
+            startL = lp.leftMargin; startT = lp.topMargin
+            performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+            animate().scaleX(1.08f).scaleY(1.08f).setDuration(90).start()
+            parent?.requestDisallowInterceptTouchEvent(true)
+        }
+        private val holdAsk = Runnable { if (moving && dragged) { endMove(); askPillFix() } }
 
-        init {
-            addOnLayoutChangeListener { _, _, top, _, bottom, _, oTop, _, oBottom ->
-                val h = bottom - top
-                if (!sheetOpen) closedH = h
-                if (dragging && opening && delta == 0f && sheetOpen && h > closedH && closedH > 0) {
-                    delta = (h - closedH).toFloat()
-                    translationY = (delta + lastDy).coerceIn(0f, delta)
-                }
-                if (resetOnLayout && h != oBottom - oTop) { resetOnLayout = false; translationY = 0f }
-            }
+        private fun begin(e: MotionEvent) {
+            downX = e.rawX; downY = e.rawY; anchorX = e.rawX; anchorY = e.rawY
+            moving = false; dragged = false; swiped = false; moved = false
+            inScroller = scroller?.let { sheetOpen && e.y >= it.top && e.y < it.bottom } == true
+            removeCallbacks(longPress); removeCallbacks(holdAsk)
+            if (!sheetOpen) postDelayed(longPress, longMs)
         }
 
-        private fun wantDrag(e: MotionEvent): Boolean {
+        private fun noteMove(e: MotionEvent) {
+            if (!moved && (kotlin.math.abs(e.rawX - downX) > slop || kotlin.math.abs(e.rawY - downY) > slop)) { moved = true; removeCallbacks(longPress) }
+        }
+
+        private fun vertSwipe(e: MotionEvent): Boolean {
             val dy = e.rawY - downY; val dx = e.rawX - downX
-            if (kotlin.math.abs(dy) < slop || kotlin.math.abs(dy) < kotlin.math.abs(dx) * 1.5f) return false
-            return if (dy < 0) !sheetOpen
-                else sheetOpen && !(inScroller && scroller?.canScrollVertically(-1) == true)
+            if (kotlin.math.abs(dy) < slop * 2 || kotlin.math.abs(dy) < kotlin.math.abs(dx) * 1.5f) return false
+            if (!sheetOpen) return true
+            // 열린 메뉴: 목록 안에서는 맨 위에서 아래로 쓸 때만 닫음(목록 스크롤 먼저)
+            return !inScroller || (dy > 0 && scroller?.canScrollVertically(-1) != true)
         }
 
-        private fun track(e: MotionEvent) {
-            val t = e.eventTime
-            if (t > lastT) vy = vy * 0.3f + 0.7f * (e.rawY - lastY) * 1000f / (t - lastT)
-            lastY = e.rawY; lastT = t
-        }
-
-        private fun startDrag() {
-            animate().cancel()
-            dragging = true
-            opening = !sheetOpen
-            lastDy = 0f
-            if (opening) {
-                delta = 0f
-                sheetOpen = true
-                render() // 펼친 높이로 — 레이아웃이 끝나면 delta만큼 아래로 밀어 둔다(접힌 모습 그대로 시작)
-            } else {
-                delta = (height - closedH).toFloat().coerceAtLeast(0f)
-                dragBase = translationY.coerceIn(0f, delta)
+        private fun moveTo(e: MotionEvent) {
+            val dx = e.rawX - downX; val dy = e.rawY - downY
+            if (!dragged && (kotlin.math.abs(dx) > slop || kotlin.math.abs(dy) > slop)) dragged = true
+            if (!dragged) return
+            clampPill(startL + dx.toInt(), startT + dy.toInt())?.let { (l, t) -> setPillMargins(l, t) }
+            // 손가락이 거의 멈춘 채 1.5초 → 고정할지 묻기
+            if (kotlin.math.abs(e.rawX - anchorX) > slop || kotlin.math.abs(e.rawY - anchorY) > slop) {
+                anchorX = e.rawX; anchorY = e.rawY
+                removeCallbacks(holdAsk); postDelayed(holdAsk, 1_500)
             }
         }
 
-        private fun move(dy: Float) {
-            lastDy = dy
-            if (delta <= 0f) return
-            translationY = if (opening) (delta + dy).coerceIn(0f, delta) else (dragBase + dy).coerceIn(0f, delta)
-        }
-
-        private fun finish() {
-            dragging = false
-            if (delta <= 0f) { translationY = 0f; return }
-            val open = when {
-                vy < -flingV -> true
-                vy > flingV -> false
-                else -> translationY < delta * (if (opening) 0.7f else 0.3f)
-            }
-            val dur = 160L
-            if (open) animate().translationY(0f).setDuration(dur).start()
-            else animate().translationY(delta).setDuration(dur).withEndAction {
-                resetOnLayout = true
-                sheetOpen = false
-                render()
-                post { if (resetOnLayout) { resetOnLayout = false; translationY = 0f } }
-            }.start()
+        private fun endMove() {
+            removeCallbacks(holdAsk)
+            animate().scaleX(1f).scaleY(1f).setDuration(90).start()
+            if (moving && dragged) savePillFromMargins()
+            moving = false; dragged = false
         }
 
         override fun onInterceptTouchEvent(e: MotionEvent): Boolean {
             when (e.actionMasked) {
-                MotionEvent.ACTION_DOWN -> {
-                    downX = e.rawX; downY = e.rawY; dragging = false
-                    lastY = e.rawY; lastT = e.eventTime; vy = 0f
-                    inScroller = scroller?.let { e.y >= it.top && e.y < it.bottom } == true
+                MotionEvent.ACTION_DOWN -> begin(e)
+                MotionEvent.ACTION_MOVE -> {
+                    if (moving) return true
+                    noteMove(e)
+                    if (!swiped && vertSwipe(e)) { swiped = true; removeCallbacks(longPress); setSheet(!sheetOpen); return true }
                 }
-                MotionEvent.ACTION_MOVE -> { track(e); if (wantDrag(e)) { startDrag(); move(e.rawY - downY); return true } }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    removeCallbacks(longPress)
+                    if (moving) { endMove(); return true } // 길게 누른 뒤엔 버튼(■ 등)이 눌리지 않게
+                }
             }
             return false
         }
 
         override fun onTouchEvent(e: MotionEvent): Boolean {
             when (e.actionMasked) {
+                MotionEvent.ACTION_DOWN -> begin(e)
                 MotionEvent.ACTION_MOVE -> {
-                    track(e)
-                    if (!dragging && wantDrag(e)) startDrag()
-                    if (dragging) move(e.rawY - downY)
+                    if (moving) moveTo(e)
+                    else if (!swiped) {
+                        noteMove(e)
+                        if (vertSwipe(e)) { swiped = true; removeCallbacks(longPress); setSheet(!sheetOpen) }
+                    }
                 }
-                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> if (dragging) finish()
+                MotionEvent.ACTION_UP -> {
+                    removeCallbacks(longPress)
+                    if (moving) endMove()
+                    else if (!swiped && !moved && !sheetOpen) setSheet(true) // 알약 빈 곳을 누르면 메뉴
+                }
+                MotionEvent.ACTION_CANCEL -> { removeCallbacks(longPress); if (moving) endMove() }
             }
             return true
         }
+    }
+
+    // ---- v0.13.7 알약 자리
+    private fun pillMode() = if (bigScreen) "big" else "small"
+    private fun pillModeName() = if (bigScreen) "펼친 화면" else "접은 화면·일반 폰"
+
+    /** 지금 쓰는 자리(비율). 앱을 켤 때 고정한 자리가 있으면 그것, 없으면 마지막에 옮긴 자리. null = 기본(오른쪽 아래). */
+    private fun pillFrac(): Pair<Float, Float>? {
+        val m = pillMode()
+        if (!pillCur.containsKey(m)) pillCur[m] = Prefs.pillFixed(this, m) ?: Prefs.pillLast(this, m)
+        return pillCur[m]
+    }
+
+    /** 접힌 알약 왼쪽 위가 갈 수 있는 범위 [minL, maxL, minT, maxT]. 카카오 화면이면 아래 줄(도착 시간 줄) 위까지만. */
+    private fun pillBounds(): IntArray? {
+        val pv = panelView ?: return null
+        val root = pv.parent as? View ?: return null
+        if (root.width == 0 || root.height == 0 || pillW == 0 || pillH == 0) return null
+        val m = dp(8)
+        val bottom = root.height - (if (naviView != null) dp(KAKAO_BAR_DP) else 0) - m
+        return intArrayOf(m, maxOf(m, root.width - m - pillW), m, maxOf(m, bottom - pillH))
+    }
+
+    private fun clampPill(l: Int, t: Int): Pair<Int, Int>? {
+        val b = pillBounds() ?: return null
+        return l.coerceIn(b[0], b[1]) to t.coerceIn(b[2], b[3])
+    }
+
+    /** 접힌 알약 자리(px). 기본: 오른쪽 아래 — 접은 화면·일반 폰은 카카오 주유 버튼 위. */
+    private fun pillLT(): Pair<Int, Int>? {
+        val b = pillBounds() ?: return null
+        val f = pillFrac()
+        return if (f == null) b[1] to (b[3] - if (bigScreen) 0 else dp(66)).coerceAtLeast(b[2])
+        else (b[0] + f.first * (b[1] - b[0])).toInt() to (b[2] + f.second * (b[3] - b[2])).toInt()
+    }
+
+    private fun setPillMargins(l: Int, t: Int) {
+        val pv = panelView ?: return
+        val lp = pv.layoutParams as? FrameLayout.LayoutParams ?: return
+        if (lp.gravity == (Gravity.TOP or Gravity.START) && lp.width == -2 && lp.leftMargin == l && lp.topMargin == t && lp.rightMargin == 0 && lp.bottomMargin == 0) return
+        lp.gravity = Gravity.TOP or Gravity.START; lp.width = -2
+        lp.leftMargin = l; lp.topMargin = t; lp.rightMargin = 0; lp.bottomMargin = 0
+        pv.layoutParams = lp
+    }
+
+    private fun savePillFromMargins() {
+        val pv = panelView ?: return
+        val lp = pv.layoutParams as? FrameLayout.LayoutParams ?: return
+        val b = pillBounds() ?: return
+        val fx = if (b[1] > b[0]) (lp.leftMargin - b[0]).toFloat() / (b[1] - b[0]) else 1f
+        val fy = if (b[3] > b[2]) (lp.topMargin - b[2]).toFloat() / (b[3] - b[2]) else 1f
+        val m = pillMode()
+        pillCur[m] = fx.coerceIn(0f, 1f) to fy.coerceIn(0f, 1f)
+        Prefs.setPillLast(this, m, fx.coerceIn(0f, 1f), fy.coerceIn(0f, 1f))
+    }
+
+    private fun askPillFix() {
+        val m = pillMode(); val f = pillCur[m] ?: return
+        AlertDialog.Builder(this)
+            .setTitle("알약 시작 위치")
+            .setMessage("이 자리를 시작 위치로 고정할까요? (${pillModeName()})\n고정하면 다른 데로 옮겨 써도 앱을 다시 켜면 이 자리에서 시작합니다. 설정에서 풀 수 있습니다.")
+            .setPositiveButton("고정") { _, _ -> Prefs.setPillFixed(this, m, f.first, f.second); Toast.makeText(this, "시작 위치로 고정했습니다", Toast.LENGTH_SHORT).show() }
+            .setNegativeButton("아니요", null).show()
+    }
+
+    /**
+     * 알약·메뉴 자리. 접힘: 저장한 자리. 열림: 알약이 있는 쪽에서 펼친다(아래쪽이면 위로, 위쪽이면 아래로).
+     * 펼친 화면은 메뉴 폭 약 40%(알약이 있는 좌우), 접은 화면·일반 폰은 거의 화면 폭.
+     */
+    private fun placeSheet() {
+        val pv = panelView ?: return
+        val root = pv.parent as? View ?: return
+        val lp = pv.layoutParams as? FrameLayout.LayoutParams ?: return
+        val (l, t) = pillLT() ?: return
+        if (!sheetOpen) { setPillMargins(l, t); return }
+        val w = root.width; val h = root.height; val m = dp(8)
+        val cw = if (bigScreen) (w * 0.4f).toInt().coerceIn(minOf(dp(340), w - 2 * m), w - 2 * m) else w - 2 * m
+        var g: Int; var lm = 0; var rm = 0; var tm = 0; var bm = 0
+        when {
+            !bigScreen -> { g = Gravity.START; lm = m }
+            l + pillW / 2 > w / 2 -> { g = Gravity.END; rm = maxOf(m, w - (l + pillW)) }
+            else -> { g = Gravity.START; lm = l }
+        }
+        val area = h - (if (naviView != null) dp(KAKAO_BAR_DP) else 0)
+        if (t + pillH / 2 > area / 2) { g = g or Gravity.BOTTOM; bm = h - (t + pillH) } else { g = g or Gravity.TOP; tm = t }
+        if (lp.gravity == g && lp.width == cw && lp.leftMargin == lm && lp.rightMargin == rm && lp.topMargin == tm && lp.bottomMargin == bm) return
+        lp.gravity = g; lp.width = cw; lp.leftMargin = lm; lp.rightMargin = rm; lp.topMargin = tm; lp.bottomMargin = bm
+        pv.layoutParams = lp
     }
 
     /** 접힌 판의 "평소 → 카메라 앞" 칩: 판을 펼치지 않고 작은 창에서 두 프로필을 바꾼다. */
@@ -614,11 +716,13 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun chipText(v: TextView, label: String, value: String, highlight: Boolean) {
+        // v0.13.7: 알약 메뉴 안의 칩은 남색 계열
+        val inMenu = (::usualChip.isInitialized && v === usualChip) || (::slowChip.isInitialized && v === slowChip)
         v.text = SpannableStringBuilder().apply {
-            append(label); setSpan(RelativeSizeSpan(0.62f), 0, label.length, 0); setSpan(ForegroundColorSpan(t.muted), 0, label.length, 0)
+            append(label); setSpan(RelativeSizeSpan(0.62f), 0, label.length, 0); setSpan(ForegroundColorSpan(if (inMenu) M_MUTED else t.muted), 0, label.length, 0)
             append("\n").append("$value ▾")
         }
-        (v.background as GradientDrawable).setStroke(dp(2), if (highlight) t.bandSlow else t.chipLine)
+        (v.background as GradientDrawable).setStroke(dp(2), if (highlight) t.bandSlow else if (inMenu) M_LINE else t.chipLine)
     }
 
     /**
@@ -915,15 +1019,11 @@ class MainActivity : AppCompatActivity() {
         if (wide) return
         (mapFrame.layoutParams as? FrameLayout.LayoutParams)?.let { lp ->
             // 큰 화면은 판이 오른쪽 아래에 떠 있으니 지도는 전체 높이
-            val bm = if (on && !bigScreen) panelH else 0
-            if (lp.bottomMargin != bm) { lp.bottomMargin = bm; mapFrame.layoutParams = lp }
+            // v0.13.7: 판이 지도 위에 떠 있으니 지도는 늘 전체 높이
+            if (lp.bottomMargin != 0) { lp.bottomMargin = 0; mapFrame.layoutParams = lp }
         }
-        // v0.13.4: 큰 화면(폴더 펼침)은 판을 카카오 아래 줄(도착 시간 줄) 바로 위에 띄워 그 줄을 가리지 않는다
-        val pv = panelView ?: return
-        (pv.layoutParams as? FrameLayout.LayoutParams)?.let { lp ->
-            val bm = if (on && bigScreen) dp(KAKAO_BAR_DP) else 0
-            if (lp.bottomMargin != bm) { lp.bottomMargin = bm; pv.layoutParams = lp }
-        }
+        // 알약이 카카오 아래 줄 위에 있도록 자리를 다시 잡는다
+        placeSheet()
     }
 
     /**
@@ -934,14 +1034,11 @@ class MainActivity : AppCompatActivity() {
         if (wide) return
         bigScreen = resources.configuration.screenWidthDp >= 600
         (cardsBox.layoutParams as? FrameLayout.LayoutParams)?.let { lp -> lp.width = if (bigScreen) dp(440) else -1; cardsBox.layoutParams = lp }
-        panelView?.let { pv ->
-            (pv.layoutParams as? FrameLayout.LayoutParams)?.let { lp ->
-                lp.width = if (bigScreen) dp(resources.configuration.screenWidthDp / 2) - dp(12) else -1
-                lp.rightMargin = if (bigScreen) dp(12) else 0
-                pv.layoutParams = lp
-            }
-        }
+        // v0.13.7: 화면 종류가 바뀌면(접기·펼치기) 알약 크기를 다시 재고 그 종류의 자리로
+        pillW = 0; pillH = 0
+        sheetOpen = false
         layoutForNavi(naviView != null)
+        panelView?.requestLayout()
     }
 
     override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
@@ -1219,14 +1316,37 @@ class MainActivity : AppCompatActivity() {
 
         // ---- 아래 판: 접힘/펼침
         val open = wide || sheetOpen
-        // 접힘: 한 줄(목적지·상태·도착·끄기). 프로필 고르기·↻ 목적지 확인은 펼쳤을 때만
+        // v0.13.7 알약: 펼친 화면은 긴 알약([T] 목적지·상태 [↻][■]), 접은 화면·일반 폰은 짧은 알약([T●][↻][■]). 열면 메뉴
+        val shortPill = !open && !bigScreen
         collapsedRow.visibility = View.GONE
-        smallToggle.visibility = if (open) View.GONE else View.VISIBLE
+        smallToggle.visibility = View.VISIBLE
         destCheck.visibility = View.VISIBLE
+        destEta.visibility = View.GONE
+        handleView.visibility = if (open) View.VISIBLE else View.GONE
+        dcol.visibility = if (shortPill) View.GONE else View.VISIBLE
+        tBadge.visibility = if (shortPill) View.VISIBLE else View.GONE
+        (dcol.layoutParams as? LinearLayout.LayoutParams)?.let { lp ->
+            val w = if (open) 0 else -2; val wt = if (open) 1f else 0f
+            if (lp.width != w || lp.weight != wt) { lp.width = w; lp.weight = wt; dcol.layoutParams = lp }
+        }
+        val nameMax = if (open) Int.MAX_VALUE else dp(150)
+        if (destName.maxWidth != nameMax) { destName.maxWidth = nameMax; destSub.maxWidth = nameMax }
+        val padH = if (open) dp(12) else dp(5)
+        if (sheet.paddingLeft != padH) sheet.setPadding(padH, if (open) dp(4) else dp(5), padH, if (open) dp(12) else dp(5))
+        run {
+            val okG = 0xFF2E9D62.toInt(); val warnY = 0xFFE0A020.toInt(); val badR = 0xFFD93025.toInt()
+            val c = when {
+                !running || sim -> 0xFF8A90B0.toInt()
+                out.ble && !S3xyButton.ready -> badR
+                kakaoDown -> warnY
+                else -> okG
+            }
+            (tBadge.background as GradientDrawable).setColor(c)
+        }
         expanded.visibility = if (open) View.VISIBLE else View.GONE
         profileSummary.text = "${usual.label} → ${slow.label} ▾"
-        smallToggle.text = if (running) "■" else "▶ 켜기"
-        (smallToggle.background as GradientDrawable).setColor(if (running) t.toggleOff else t.toggleOn)
+        smallToggle.text = if (running) "■" else "▶"
+        (smallToggle.background as GradientDrawable).setColor(if (running) M_RED else t.toggleOn)
 
         chipText(usualChip, if (running && car != null && car != usual) "평소 (차: ${car.label})" else "평소", usual.label, highlight = running && car == usual)
         chipText(slowChip, "카메라 앞", slow.label, highlight = running && car != null && car == slow && slow != usual)
@@ -1235,6 +1355,7 @@ class MainActivity : AppCompatActivity() {
         releaseBtn.text = "▲ 지금 복귀 → ${out.usual.label}"
         toggleBtn.text = if (running) "■ 감시 끄기" else "▶ 감시 켜기"
         (toggleBtn.background as GradientDrawable).setColor(if (running) t.toggleOff else t.toggleOn)
+        toggleBtn.visibility = View.GONE // v0.13.7: 알약의 [■]/[▶]로 끄고 켬
         if (running && Prefs.keepScreenOn(this)) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         else window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
@@ -1375,6 +1496,14 @@ class MainActivity : AppCompatActivity() {
         private const val M_SCAN = 109
         /** 카카오내비 화면 아래 줄(도착 시간·남은 거리) 높이(dp) — 큰 화면에서 판을 이 위에 띄운다. 실제 높이를 몰라 어림값. */
         private const val KAKAO_BAR_DP = 72
+        /** v0.13.7 알약·메뉴 색(카카오내비 위 안내 막대 계열 남색). */
+        private const val M_BG = 0xFF2C304D.toInt()
+        private const val M_ITEM = 0xFF3A3F63.toInt()
+        private const val M_BTN = 0xFF3E4468.toInt()
+        private const val M_LINE = 0xFF6A7099.toInt()
+        private const val M_FG = 0xFFFFFFFF.toInt()
+        private const val M_MUTED = 0xFFCFD3E6.toInt()
+        private const val M_RED = 0xFFE5484D.toInt()
         private const val M_ROADS = 110
         private const val M_TEST_SOUND = 111
         private const val M_HELP = 112
