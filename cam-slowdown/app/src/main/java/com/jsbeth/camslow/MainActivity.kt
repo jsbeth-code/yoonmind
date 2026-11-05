@@ -62,6 +62,7 @@ class MainActivity : AppCompatActivity() {
     private var naviFailedAt = 0L
     /** 직접 다시 붙이기: 감속·구간 유지 중에도 미루지 않는다. */
     private var naviForce = false
+    private var naviDeferLogged = false
     private var naviMissingSince = 0L
     private var naviMissingSaid = false
     private lateinit var mapFrame: FrameLayout
@@ -772,7 +773,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
-        naviView?.let { KakaoSafety.detachView(it) }
+        naviView?.let {
+            KakaoSafety.detachView(it)
+            if (DriveState.running) DriveState.log("카카오 화면 뗌 — 앱 화면이 닫힘" + if (isChangingConfigurations) "(화면 다시 만듦)" else "")
+        }
         naviView = null
         routeDialog?.dismiss(); routeDialog = null
         routeChooser?.dismiss(); routeChooser = null
@@ -885,8 +889,23 @@ class MainActivity : AppCompatActivity() {
                 Prefs.setNaviErr(this, "${e.javaClass.simpleName} ${e.message ?: ""}".take(120))
             }
         } else if (!want && v != null) {
+            if (running) {
+                val why = when {
+                    sim -> "가상 주행"
+                    naviFailed -> "화면 안내 실패"
+                    !KakaoSafety.sdkReady -> "카카오 연결 끊김"
+                    else -> "이유 모름"
+                }
+                DriveState.log("카카오 화면 뗌 — $why, 간이 지도로")
+            }
             detachNavi(v)
         }
+        // 감속·구간 유지 중이라 붙이기를 미룰 때 한 번 기록(끝나면 붙임)
+        val deferNow = want && naviView == null && busy
+        if (deferNow && !naviDeferLogged) {
+            naviDeferLogged = true
+            DriveState.log("카카오 화면 붙이기 미룸 — " + (if (st?.holdKind == "구간단속") "구간 유지 중" else "감속 중") + ", 끝나면 붙임")
+        } else if (!deferNow) naviDeferLogged = false
     }
 
     /** 카카오 화면: 지도는 아래 판 위까지(카카오 아래 막대가 보이게), 카메라 카드는 아래 판 바로 위. 기존 지도: 카드는 위. */

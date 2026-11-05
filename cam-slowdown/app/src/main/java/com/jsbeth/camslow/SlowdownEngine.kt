@@ -89,6 +89,11 @@ data class EngineConfig(
     val sectionStallM: Double = 200.0,
     /** v0.13.4 구간 이탈(카카오): 앞에 보이던 "구간단속 끝"이 닿기 전에 사라진 채 이만큼(m) 달리면 복귀. 끊김(목록 없음) 동안은 안 셈. */
     val sectionEndGoneM: Double = 300.0,
+    /**
+     * v0.13.4 구간 이탈(보충, 도로망): 짝 종점도 없고 카카오 "구간 끝"도 못 본 구간에서만, 시점 때와 이름이 다른(이름 있는) 도로를
+     * 이만큼(m) 달리면 복귀. 이름 없는 길·갈림 모호·도로 못 잡음은 세지도 풀지도 않는다.
+     */
+    val sectionOtherRoadM: Double = 800.0,
     /** GPS 방향 평활화에 쓰는 최근 fix 수. 서로 이 각도(도) 안일 때만 평균한다(커브에선 그대로). */
     val smoothFixes: Int = 3,
     val smoothMaxDiffDeg: Double = 15.0,
@@ -195,7 +200,16 @@ class SlowdownEngine(
     private var axisMax = Double.NEGATIVE_INFINITY
     private var axisMaxOdo = 0.0
     private var offAxisCount = 0
-    private fun resetSectionExit() { secEndOdo = null; secEndGoneOdo = null; axisMax = Double.NEGATIVE_INFINITY; axisMaxOdo = 0.0; offAxisCount = 0 }
+    /** 구간 시점 때 도로 이름(정규화)과, 다른 이름 도로를 달린 거리. */
+    private var secRoadName: String? = null
+    private var otherRoadM = 0.0
+    private var secLastOdo = 0.0
+    private fun resetSectionExit() {
+        secEndOdo = null; secEndGoneOdo = null; axisMax = Double.NEGATIVE_INFINITY; axisMaxOdo = 0.0; offAxisCount = 0
+        secRoadName = null; otherRoadM = 0.0; secLastOdo = odo
+    }
+    /** 이름 비교용: 공백 제거, "도로"→"로"(동부간선도로 ↔ 동부간선로). */
+    private fun normRoad(s: String) = s.replace(" ", "").replace("도로", "로")
 
     /** 외부(카카오 안전 운행)가 준 앞 카메라 하나. distM은 도로를 따라 잰 거리. */
     class ExternalCam(val cam: Camera, val distM: Double)
@@ -455,6 +469,21 @@ class SlowdownEngine(
                         }
                     }
                 }
+                // v0.13.4 C(보충): 짝 종점도 없고 카카오 "끝"도 못 본 구간만 — 시점 때와 이름이 다른 도로를 sectionOtherRoadM 달리면 이탈
+                if (target != null && (t.kind == CamKind.SECTION_START || midSection) && !t.hasPartner && secEndOdo == null) {
+                    val rv = view?.takeIf { !it.ambiguous && it.roadName.isNotBlank() }
+                    if (rv != null) {
+                        val name = normRoad(rv.roadName)
+                        val base = secRoadName
+                        if (base == null) { if (odo - passedAtOdo <= 500.0) secRoadName = name }
+                        else if (name == base) otherRoadM = 0.0
+                        else {
+                            otherRoadM += odo - secLastOdo
+                            if (otherRoadM >= config.sectionOtherRoadM) drop("구간 이탈 (다른 도로: ${rv.roadName})")
+                        }
+                    }
+                }
+                secLastOdo = odo
                 if (target != null && t.kind == CamKind.SECTION_START) {
                     // 구간 방향: 짝 종점이 있으면 시점→종점, 없으면 시점을 지날 때의 진행 방향
                     val pLat = t.partnerLat; val pLon = t.partnerLon
