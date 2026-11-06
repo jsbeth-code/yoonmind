@@ -35,6 +35,11 @@ object OverlayWindow {
     private var sign: TextView? = null
     private var state: TextView? = null
     private var dot: View? = null
+    /** v0.13.8 남색 창: 목적지 이름, 카카오·커맨더 상태, 남은 시간·거리, 카메라 줄. */
+    private var dest: TextView? = null
+    private var stat: TextView? = null
+    private var remain: TextView? = null
+    private var camBox: LinearLayout? = null
     private var theme: Theme? = null
     /** 지금 떠 있는 모양: "" 알약, "L"/"R" 가장자리 탭. */
     private var builtDock = ""
@@ -63,6 +68,7 @@ object OverlayWindow {
         val r = root ?: return
         try { wm?.removeView(r) } catch (_: Exception) {}
         root = null; dist = null; line = null; speed = null; sign = null; state = null; dot = null
+        dest = null; stat = null; remain = null; camBox = null
     }
 
     private fun dp(ctx: Context, v: Int) = (v * ctx.resources.displayMetrics.density).toInt()
@@ -79,18 +85,18 @@ object OverlayWindow {
                 setPadding(dp(ctx, 3), dp(ctx, 7), dp(ctx, 3), dp(ctx, 7))
                 val r = dp(ctx, 12).toFloat()
                 background = GradientDrawable().apply {
-                    setColor(t.bg); setStroke(dp(ctx, 2), t.chipLine)
+                    setColor(BG); setStroke(dp(ctx, 2), LINE)
                     // 화면 안쪽만 둥글게
                     cornerRadii = if (dock == "R") floatArrayOf(r, r, 0f, 0f, 0f, 0f, r, r) else floatArrayOf(0f, 0f, r, r, r, r, 0f, 0f)
                 }
             } else {
-                setPadding(dp(ctx, 12), dp(ctx, 8), dp(ctx, 10), dp(ctx, 8))
-                background = GradientDrawable().apply { cornerRadius = dp(ctx, 18).toFloat(); setColor(t.bg); setStroke(dp(ctx, 2), t.chipLine) }
+                setPadding(dp(ctx, 12), dp(ctx, 10), dp(ctx, 12), dp(ctx, 10))
+                background = GradientDrawable().apply { cornerRadius = dp(ctx, 18).toFloat(); setColor(BG); setStroke(dp(ctx, 2), BG) }
             }
         }
         if (docked) {
             // 얇은 탭: 거리(두 줄) · 작은 표지 · 상태 점
-            dist = TextView(ctx).apply { textSize = 11f; typeface = jua; setTextColor(t.fg); includeFontPadding = false; gravity = Gravity.CENTER; maxLines = 2; setLineSpacing(0f, 0.95f) }
+            dist = TextView(ctx).apply { textSize = 11f; typeface = jua; setTextColor(FG); includeFontPadding = false; gravity = Gravity.CENTER; maxLines = 2; setLineSpacing(0f, 0.95f) }
             card.addView(dist)
             sign = TextView(ctx).apply {
                 textSize = 9f; typeface = jua; setTextColor(t.signFg); gravity = Gravity.CENTER; includeFontPadding = false
@@ -100,31 +106,36 @@ object OverlayWindow {
             dot = View(ctx).apply { background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(t.bandOn) } }
             card.addView(dot, LinearLayout.LayoutParams(dp(ctx, 7), dp(ctx, 7)).apply { topMargin = dp(ctx, 5) })
         } else {
-            val top = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-            val left = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
-            dist = TextView(ctx).apply { textSize = 22f; typeface = jua; setTextColor(t.fg); includeFontPadding = false }
-            line = TextView(ctx).apply { textSize = 10.5f; setTextColor(t.muted); maxLines = 1 }
-            left.addView(dist); left.addView(line)
-            top.addView(left, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-            val mid = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL; setPadding(dp(ctx, 8), 0, dp(ctx, 10), 0) }
-            speed = TextView(ctx).apply { textSize = 22f; typeface = jua; setTextColor(t.fg); includeFontPadding = false; gravity = Gravity.CENTER }
-            mid.addView(speed); mid.addView(TextView(ctx).apply { text = "km/h"; textSize = 9f; setTextColor(t.muted); gravity = Gravity.CENTER })
-            top.addView(mid)
-            sign = TextView(ctx).apply {
-                textSize = 15f; typeface = jua; setTextColor(t.signFg); gravity = Gravity.CENTER; includeFontPadding = false
-                background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(t.signBg); setStroke(dp(ctx, 5), t.sign) }
+            // v0.13.8(시안 C2): [T] 목적지 / ● 카카오 ● 커맨더 / 남은 시간·거리 / (제한) 다음 카메라·지금 속도
+            val head = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+            head.addView(TextView(ctx).apply {
+                text = "T"; textSize = 17f; typeface = jua; setTextColor(0xFFE31937.toInt()); gravity = Gravity.CENTER; includeFontPadding = false
+                background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(0xFF17171A.toInt()) }
+            }, LinearLayout.LayoutParams(dp(ctx, 34), dp(ctx, 34)))
+            val hcol = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(ctx, 9), 0, 0, 0) }
+            dest = TextView(ctx).apply { textSize = 16f; typeface = jua; setTextColor(FG); maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END; includeFontPadding = false }
+            stat = TextView(ctx).apply { textSize = 11f; setTextColor(MUTED); maxLines = 1; setPadding(0, dp(ctx, 3), 0, 0) }
+            hcol.addView(dest); hcol.addView(stat)
+            head.addView(hcol, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            card.addView(head, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+            remain = TextView(ctx).apply { textSize = 13f; setTextColor(MUTED); maxLines = 1; setPadding(0, dp(ctx, 6), 0, 0) }
+            card.addView(remain, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+            camBox = LinearLayout(ctx).apply {
+                orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(ctx, 8), dp(ctx, 5), dp(ctx, 8), dp(ctx, 5))
+                background = GradientDrawable().apply { cornerRadius = dp(ctx, 10).toFloat(); setColor(ITEM) }
             }
-            top.addView(sign, LinearLayout.LayoutParams(dp(ctx, 40), dp(ctx, 40)))
-            card.addView(top, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
-            val bottom = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(ctx, 6), 0, 0) }
-            dot = View(ctx).apply { background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(t.bandOn) } }
-            bottom.addView(dot, LinearLayout.LayoutParams(dp(ctx, 8), dp(ctx, 8)).apply { rightMargin = dp(ctx, 5) })
-            state = TextView(ctx).apply { textSize = 10.5f; setTextColor(t.fg); maxLines = 1 }
-            bottom.addView(state, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-            card.addView(bottom, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+            sign = TextView(ctx).apply {
+                textSize = 11f; typeface = jua; setTextColor(0xFF111111.toInt()); gravity = Gravity.CENTER; includeFontPadding = false
+                background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(0xFFFFFFFF.toInt()); setStroke(dp(ctx, 3), 0xFFE5484D.toInt()) }
+            }
+            camBox!!.addView(sign, LinearLayout.LayoutParams(dp(ctx, 28), dp(ctx, 28)))
+            state = TextView(ctx).apply { textSize = 12f; setTextColor(FG); maxLines = 2; setPadding(dp(ctx, 8), 0, 0, 0) }
+            camBox!!.addView(state, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            card.addView(camBox, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(ctx, 7) })
         }
 
-        val width = if (docked) dp(ctx, 30) else dp(ctx, 190)
+        val width = if (docked) dp(ctx, 30) else dp(ctx, 250)
         val params = WindowManager.LayoutParams(
             width, WindowManager.LayoutParams.WRAP_CONTENT,
             if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY else @Suppress("DEPRECATION") WindowManager.LayoutParams.TYPE_PHONE,
@@ -188,31 +199,55 @@ object OverlayWindow {
         val over = DriveState.overspeedKmh
         val blink = over != null && (SystemClock.elapsedRealtime() / 1000) % 2 == 0L
         (root?.background as? GradientDrawable)?.apply {
-            setStroke(dp(ctx, if (over != null) 4 else 2), if (over != null) 0xFFE5484D.toInt() else if (slowed) t.bandSlow else t.chipLine)
-            setColor(if (blink) 0xFFFFE3E3.toInt() else t.bg)
+            // 과속: 빨간 테두리·깜빡임, 감속 중: 파란 테두리
+            setStroke(dp(ctx, if (over != null) 4 else 2), if (over != null) 0xFFE5484D.toInt() else if (slowed) t.bandSlow else if (docked) LINE else BG)
+            setColor(if (blink) 0xFF5A2A35.toInt() else BG)
         }
-        if (st == null) {
-            dist?.text = if (docked) "GPS\n대기" else "GPS 대기"; line?.text = "위치 잡는 중"; speed?.text = "–"; sign?.text = "–"
+        val limit = st?.let { (it.target ?: next)?.limitKmh ?: (if (it.zone != null) 30 else null) }
+        sign?.text = limit?.toString() ?: "–"
+        if (docked) {
+            val d = st?.nextDistM?.toInt() ?: 0
+            dist?.text = if (st == null) "GPS\n대기" else if (next == null) "카메\n없음" else if (d >= 1000) "%.1f\nkm".format(d / 1000.0) else "$d\nm"
         } else {
-            val d = st.nextDistM?.toInt() ?: 0
-            dist?.text = if (next == null) (if (docked) "카메\n없음" else "카메라 없음")
-                else if (docked) (if (d >= 1000) "%.1f\nkm".format(d / 1000.0) else "$d\nm") else "${"%,d".format(d)} m"
-            line?.text = st.road?.takeIf { !it.startsWith("도로 미확인") }?.substringBefore(" · 지도") ?: (if (next != null) "다음 카메라" else "2km 안에 없음")
-            speed?.text = "${st.speedKmh.toInt()}"
-            val limit = (st.target ?: next)?.limitKmh ?: (if (st.zone != null) 30 else null)
-            speed?.setTextColor(if (over != null || (limit != null && st.speedKmh > limit + 5)) 0xFFE5484D.toInt() else t.fg)
-            sign?.text = limit?.toString() ?: "–"
-        }
-        state?.text = when {
-            over != null -> "⚠ 과속 +$over"
-            DriveState.simulating -> "가상 주행 중"
-            age != null && age >= 15 -> "GPS 없음 ${age}초"
-            slowed && st?.holdKind == "구간단속" -> "구간단속 유지 · ${km((st.holdRemainM ?: 0.0) - (DriveState.config?.restoreAfterM ?: 100.0))} 남음"
-            slowed && st?.holdKind == "통과" -> "통과 · ${st.holdRemainM?.toInt() ?: 0}m 뒤 복귀"
-            slowed -> "▼ ${out.slow.label}로 내림"
-            sinceUp < 10_000 -> "▲ ${out.usual.label} 복귀 완료"
-            next != null -> "작동 중 · ${(st?.triggerM ?: 0.0).toInt()}m 앞에서 신호"
-            else -> "작동 중 · ${out.usual.label} 유지"
+            // 목적지·남은 시간·거리(테슬라 목적지 정보, 2분마다 갱신)
+            val dst = DriveState.teslaDest
+            dest?.text = dst?.let { TeslaDest.label(it) } ?: "목적지 없음 · 카메라만 감시"
+            remain?.text = if (dst == null) "" else android.text.SpannableStringBuilder().apply {
+                fun big(s: String) { val a = length; append(s); setSpan(android.text.style.RelativeSizeSpan(1.8f), a, length, 0); setSpan(android.text.style.ForegroundColorSpan(FG), a, length, 0); setSpan(android.text.style.StyleSpan(android.graphics.Typeface.BOLD), a, length, 0) }
+                dst.minutes?.let { big("${it.toInt()}"); append(" 분 남음   ") }
+                dst.km?.let { big(if (it >= 10) "${it.toInt()}" else "%.1f".format(it)); append(" km") }
+            }
+            remain?.visibility = if (dst == null || (dst.minutes == null && dst.km == null)) View.GONE else View.VISIBLE
+            // 카카오·커맨더 상태 점(초록 정상, 노랑 카카오 끊김, 빨강 커맨더 없음)
+            val okG = 0xFF2E9D62.toInt(); val warnY = 0xFFE0A020.toInt(); val badR = 0xFFD93025.toInt()
+            val kakaoDown = !DriveState.simulating && st != null && KakaoSafety.hasKey && !st.external && !KakaoSafety.switching
+            val k = if (kakaoDown) "카카오 끊김" to warnY else (if (KakaoSafety.following) "카카오 경로" else "카카오") to okG
+            val c = when { !out.ble -> "음성만" to MUTED; S3xyButton.ready -> "커맨더" to okG; else -> "커맨더 없음" to badR }
+            stat?.text = android.text.SpannableStringBuilder().apply {
+                for ((i, p) in listOf(k, c).withIndex()) {
+                    if (i > 0) append("   ")
+                    val a = length; append("● "); setSpan(android.text.style.ForegroundColorSpan(p.second), a, a + 1, 0)
+                    val b = length; append(p.first); if (p.second == warnY || p.second == badR) setSpan(android.text.style.ForegroundColorSpan(p.second), b, length, 0)
+                }
+            }
+            // 카메라 줄: 평소엔 다음 카메라 거리·지금 속도, 과속·GPS 없음·감속·구간 유지 때는 그 상태
+            val spd = st?.speedKmh?.toInt()
+            val camLine = when {
+                st == null -> "GPS 대기 · 위치 잡는 중"
+                next == null -> "2km 안에 카메라 없음 · 지금 $spd km/h"
+                else -> "다음 카메라 ${km(st.nextDistM ?: 0.0)} · 지금 $spd km/h"
+            }
+            state?.text = when {
+                over != null -> "⚠ 과속 +$over · 지금 $spd km/h"
+                DriveState.simulating -> "가상 주행 중"
+                age != null && age >= 15 -> "GPS 없음 ${age}초"
+                slowed && st?.holdKind == "구간단속" -> "구간단속 유지 · ${km((st.holdRemainM ?: 0.0) - (DriveState.config?.restoreAfterM ?: 100.0))} 남음"
+                slowed && st?.holdKind == "통과" -> "통과 · ${st.holdRemainM?.toInt() ?: 0}m 뒤 복귀"
+                slowed -> "▼ ${out.slow.label}로 내림 · $camLine"
+                sinceUp < 10_000 -> "▲ ${out.usual.label} 복귀 완료"
+                else -> camLine
+            }
+            state?.setTextColor(if (over != null) 0xFFFF8A8A.toInt() else FG)
         }
         (dot?.background as? GradientDrawable)?.setColor(when {
             age != null && age >= 15 -> t.bandProblem
@@ -220,6 +255,13 @@ object OverlayWindow {
             else -> t.bandOn
         })
     }
+
+    /** v0.13.8 남색(메인 화면 알약과 같은 색). */
+    private const val BG = 0xFF2C304D.toInt()
+    private const val ITEM = 0xFF3A3F63.toInt()
+    private const val LINE = 0xFF6A7099.toInt()
+    private const val FG = 0xFFFFFFFF.toInt()
+    private const val MUTED = 0xFFCFD3E6.toInt()
 
     private fun km(m: Double) = if (m >= 950) "%.1fkm".format(m / 1000.0) else "${m.coerceAtLeast(0.0).toInt()}m"
 }

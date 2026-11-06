@@ -231,6 +231,8 @@ class MainActivity : AppCompatActivity() {
             mapPane.bottomInset = 0
             panel.addOnLayoutChangeListener { v, _, _, _, _, _, _, _, _ ->
                 // 접힌 알약 크기를 기억해 두고(옮기기·메뉴 자리 계산에 씀) 바뀌면 자리를 다시 잡는다
+                // 폭이 0으로 재어졌으면(화면 밖에 걸림) 왼쪽 위로 되돌려 다시 잰다
+                if (!sheetOpen && v.width == 0) { main.post { setPillMargins(0, 0) }; return@addOnLayoutChangeListener }
                 if (!sheetOpen && !(sheet as FloatSheet).moving && (v.width != pillW || v.height != pillH)) {
                     pillW = v.width; pillH = v.height; main.post { placeSheet() }
                 }
@@ -597,11 +599,14 @@ class MainActivity : AppCompatActivity() {
         return l.coerceIn(b[0], b[1]) to t.coerceIn(b[2], b[3])
     }
 
-    /** 접힌 알약 자리(px). 기본: 오른쪽 아래 — 접은 화면·일반 폰은 카카오 주유 버튼 위. */
+    /**
+     * 접힌 알약 자리(px). 기본(v0.13.8): 카카오 주유 버튼 바로 왼쪽, 같은 높이.
+     * 주유 버튼은 실차 화면에서 약 42dp, 오른쪽 끝·아래 줄에서 약 10dp 떨어져 있다(어림값).
+     */
     private fun pillLT(): Pair<Int, Int>? {
         val b = pillBounds() ?: return null
         val f = pillFrac()
-        return if (f == null) b[1] to (b[3] - if (bigScreen) 0 else dp(66)).coerceAtLeast(b[2])
+        return if (f == null) (b[1] - dp(52)).coerceAtLeast(b[0]) to b[3]
         else (b[0] + f.first * (b[1] - b[0])).toInt() to (b[2] + f.second * (b[3] - b[2])).toInt()
     }
 
@@ -1035,8 +1040,10 @@ class MainActivity : AppCompatActivity() {
         bigScreen = resources.configuration.screenWidthDp >= 600
         (cardsBox.layoutParams as? FrameLayout.LayoutParams)?.let { lp -> lp.width = if (bigScreen) dp(440) else -1; cardsBox.layoutParams = lp }
         // v0.13.7: 화면 종류가 바뀌면(접기·펼치기) 알약 크기를 다시 재고 그 종류의 자리로
+        // v0.13.8: 넓은 화면의 자리(여백)가 남아 좁은 화면 밖에 걸리면 알약 폭이 0으로 재어져 안 보이던 것 — 먼저 왼쪽 위로 되돌린다
         pillW = 0; pillH = 0
         sheetOpen = false
+        setPillMargins(0, 0)
         layoutForNavi(naviView != null)
         panelView?.requestLayout()
     }
@@ -1317,7 +1324,8 @@ class MainActivity : AppCompatActivity() {
         // ---- 아래 판: 접힘/펼침
         val open = wide || sheetOpen
         // v0.13.7 알약: 펼친 화면은 긴 알약([T] 목적지·상태 [↻][■]), 접은 화면·일반 폰은 짧은 알약([T●][↻][■]). 열면 메뉴
-        val shortPill = !open && !bigScreen
+        // v0.13.8: 펼친 화면도 짧은 알약(왼쪽 길안내를 가리지 않게)
+        val shortPill = !open
         collapsedRow.visibility = View.GONE
         smallToggle.visibility = View.VISIBLE
         destCheck.visibility = View.VISIBLE
@@ -1495,7 +1503,7 @@ class MainActivity : AppCompatActivity() {
         private const val M_PAIR = 108
         private const val M_SCAN = 109
         /** 카카오내비 화면 아래 줄(도착 시간·남은 거리) 높이(dp) — 큰 화면에서 판을 이 위에 띄운다. 실제 높이를 몰라 어림값. */
-        private const val KAKAO_BAR_DP = 72
+        private const val KAKAO_BAR_DP = 80
         /** v0.13.7 알약·메뉴 색(카카오내비 위 안내 막대 계열 남색). */
         private const val M_BG = 0xFF2C304D.toInt()
         private const val M_ITEM = 0xFF3A3F63.toInt()
