@@ -189,6 +189,10 @@ object Prefs {
     fun pillFixed(ctx: Context, mode: String) = pillGet(ctx, "pillFixed_$mode")
     fun setPillFixed(ctx: Context, mode: String, x: Float, y: Float) = put(ctx) { putFloat("pillFixed_${mode}X", x); putFloat("pillFixed_${mode}Y", y) }
     fun clearPillFixed(ctx: Context, mode: String) = put(ctx) { remove("pillFixed_${mode}X"); remove("pillFixed_${mode}Y") }
+    /** v0.13.9 카메라 알림 카드 자리(옮기면 바로 고정). mode 같은 뜻, 값은 지도 안 남는 공간 비율. */
+    fun camCardPos(ctx: Context, mode: String) = pillGet(ctx, "camCard_$mode")
+    fun setCamCardPos(ctx: Context, mode: String, x: Float, y: Float) = put(ctx) { putFloat("camCard_${mode}X", x); putFloat("camCard_${mode}Y", y) }
+    fun clearCamCardPos(ctx: Context) = put(ctx) { for (m in listOf("big", "small")) { remove("camCard_${m}X"); remove("camCard_${m}Y") } }
 
     /** 카카오내비 화면 마지막 실패(앱을 다시 켜도 점검에 보이게). 성공하면 지움. */
     fun naviErr(ctx: Context) = sp(ctx).getString("naviErr", "") ?: ""

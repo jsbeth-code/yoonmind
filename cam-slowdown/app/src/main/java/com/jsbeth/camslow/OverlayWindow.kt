@@ -130,7 +130,7 @@ object OverlayWindow {
                 background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(0xFFFFFFFF.toInt()); setStroke(dp(ctx, 3), 0xFFE5484D.toInt()) }
             }
             camBox!!.addView(sign, LinearLayout.LayoutParams(dp(ctx, 28), dp(ctx, 28)))
-            state = TextView(ctx).apply { textSize = 12f; setTextColor(FG); maxLines = 2; setPadding(dp(ctx, 8), 0, 0, 0) }
+            state = TextView(ctx).apply { textSize = 13f; setTextColor(FG); maxLines = 2; setPadding(dp(ctx, 8), 0, 0, 0); setLineSpacing(0f, 1.15f) }
             camBox!!.addView(state, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
             card.addView(camBox, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(ctx, 7) })
         }
@@ -232,18 +232,19 @@ object OverlayWindow {
             }
             // 카메라 줄: 평소엔 다음 카메라 거리·지금 속도, 과속·GPS 없음·감속·구간 유지 때는 그 상태
             val spd = st?.speedKmh?.toInt()
+            // v0.13.9: 두 줄 — 다음 카메라 / 현재 속도
             val camLine = when {
-                st == null -> "GPS 대기 · 위치 잡는 중"
-                next == null -> "2km 안에 카메라 없음 · 지금 $spd km/h"
-                else -> "다음 카메라 ${km(st.nextDistM ?: 0.0)} · 지금 $spd km/h"
+                st == null -> "GPS 대기\n위치 잡는 중"
+                next == null -> "2km 안에 카메라 없음\n현재 속도 $spd km/h"
+                else -> "다음 카메라 ${km(st.nextDistM ?: 0.0)}\n현재 속도 $spd km/h"
             }
             state?.text = when {
-                over != null -> "⚠ 과속 +$over · 지금 $spd km/h"
+                over != null -> "⚠ 과속 +$over\n현재 속도 $spd km/h"
                 DriveState.simulating -> "가상 주행 중"
                 age != null && age >= 15 -> "GPS 없음 ${age}초"
                 slowed && st?.holdKind == "구간단속" -> "구간단속 유지 · ${km((st.holdRemainM ?: 0.0) - (DriveState.config?.restoreAfterM ?: 100.0))} 남음"
                 slowed && st?.holdKind == "통과" -> "통과 · ${st.holdRemainM?.toInt() ?: 0}m 뒤 복귀"
-                slowed -> "▼ ${out.slow.label}로 내림 · $camLine"
+                slowed -> "▼ ${out.slow.label}로 내림\n" + camLine.substringBefore("\n")
                 sinceUp < 10_000 -> "▲ ${out.usual.label} 복귀 완료"
                 else -> camLine
             }

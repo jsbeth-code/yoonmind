@@ -104,6 +104,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var handleView: View
     private lateinit var tBadge: View
     private lateinit var dcol: LinearLayout
+    private lateinit var statusRow: LinearLayout
     private var pillW = 0
     private var pillH = 0
     private val pillCur = HashMap<String, Pair<Float, Float>?>()
@@ -207,6 +208,10 @@ class MainActivity : AppCompatActivity() {
         pill = buildPill()
         // v0.13: 오른쪽 가운데 — 카카오 회전 안내·교차로 그림(위), 속도·제한 표지(왼쪽), 차로 안내·아래 막대(아래)를 피함
         mapFrame.addView(pill, FrameLayout.LayoutParams(-2, -2, Gravity.CENTER_VERTICAL or Gravity.END).apply { rightMargin = dp(10); topMargin = dp(40) })
+        // v0.13.9: 카메라 알림 카드는 길게 눌러 끌어 옮기고, 놓으면 그 자리로 고정(화면 종류별)
+        pill.setOnTouchListener(CamCardDrag())
+        pill.addOnLayoutChangeListener { _, l, tp, r, b, ol, ot, or2, ob -> if (r - l != or2 - ol || b - tp != ob - ot) main.post { placeCamCard() } }
+        mapFrame.addOnLayoutChangeListener { _, l, tp, r, b, ol, ot, or2, ob -> if (r - l != or2 - ol || b - tp != ob - ot) main.post { placeCamCard() } }
         if (wide) {
             val right = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(12), dp(12), dp(12), dp(12)) }
             right.addView(cards)
@@ -357,9 +362,9 @@ class MainActivity : AppCompatActivity() {
         destRow.addView(tBox, LinearLayout.LayoutParams(dp(38), dp(38)))
         dcol = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(9), 0, dp(4), 0) }
         destName = tv(16f, M_FG, font = jua).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }
-        destSub = tv(11.5f, M_MUTED).apply { setPadding(0, dp(2), 0, 0); maxLines = 1; ellipsize = TextUtils.TruncateAt.END }
-        dcol.addView(destName); dcol.addView(destSub)
-        destRow.addView(dcol, LinearLayout.LayoutParams(-2, -2))
+        destSub = tv(11.5f, M_MUTED).apply { maxLines = 2; ellipsize = TextUtils.TruncateAt.END; setLineSpacing(0f, 1.15f) }
+        dcol.addView(destName)
+        destRow.addView(dcol, LinearLayout.LayoutParams(0, -2, 1f))
         // 도착 시각·남은 시간은 카카오 아래 줄에 있으니 안 보인다(v0.13.7)
         destEta = tv(13f, M_MUTED).apply { visibility = View.GONE }
         destRow.addView(destEta)
@@ -375,9 +380,15 @@ class MainActivity : AppCompatActivity() {
             background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(M_RED) }
             setOnClickListener { toggleDrive() }
         }
-        destRow.addView(smallToggle, LinearLayout.LayoutParams(dp(38), dp(38)).apply { leftMargin = dp(6) })
         destRow.setOnClickListener { setSheet(!sheetOpen) }
         sheet.addView(destRow)
+        // v0.13.9 두 번째 줄: ● 카카오 ● 커맨더 + [■]
+        statusRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(dp(2), dp(6), 0, 0) }
+        (destSub.parent as? ViewGroup)?.removeView(destSub)
+        statusRow.addView(destSub, LinearLayout.LayoutParams(0, -2, 1f))
+        statusRow.addView(smallToggle, LinearLayout.LayoutParams(dp(34), dp(34)).apply { leftMargin = dp(6) })
+        statusRow.setOnClickListener { setSheet(!sheetOpen) }
+        sheet.addView(statusRow)
 
         // 접힘 줄: "Mad Max → 컴포트 ▴" + 작은 끄기
         collapsedRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
@@ -435,6 +446,8 @@ class MainActivity : AppCompatActivity() {
         btnRow.addView(smallBtn("◎ 지도 내 위치로") { recenterMap() },
             LinearLayout.LayoutParams(0, -2, 1f))
         expanded.addView(btnRow)
+        // v0.13.9: ↻ 목적지 다시 확인은 메뉴 맨 위(알약에서는 뺌)
+        expanded.addView(smallBtn("↻ 테슬라 목적지 다시 확인") { checkDestNow() }, 0, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(4) })
         // v0.13.4: 카카오 화면이 멈추거나(간이 지도로 바뀜) 이상할 때 바로 다시 붙인다
         expanded.addView(smallBtn("↻ 카카오 화면 다시 붙이기") { reattachNavi() }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
         val tools = tv(13f, M_MUTED).apply { text = "데이터·테스트 도구 ⋮"; setPadding(dp(4), dp(12), dp(4), dp(4)) }
@@ -573,6 +586,72 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    // ---- v0.13.9 카메라 알림 카드 자리
+    /** 저장한 자리(지도 안 남는 공간 비율)가 있으면 그 자리, 없으면 처음 자리(오른쪽 가운데). */
+    private fun placeCamCard() {
+        val lp = pill.layoutParams as? FrameLayout.LayoutParams ?: return
+        val f = Prefs.camCardPos(this, pillMode())
+        var g = Gravity.CENTER_VERTICAL or Gravity.END; var l = 0; var tm = dp(40); var rm = dp(10)
+        if (f != null) {
+            if (mapFrame.width == 0 || pill.width == 0) return
+            g = Gravity.TOP or Gravity.START; rm = 0
+            l = (f.first * (mapFrame.width - pill.width).coerceAtLeast(0)).toInt()
+            tm = (f.second * (mapFrame.height - pill.height).coerceAtLeast(0)).toInt()
+        }
+        if (lp.gravity == g && lp.leftMargin == l && lp.topMargin == tm && lp.rightMargin == rm) return
+        lp.gravity = g; lp.leftMargin = l; lp.topMargin = tm; lp.rightMargin = rm; lp.bottomMargin = 0
+        pill.layoutParams = lp
+    }
+
+    private inner class CamCardDrag : View.OnTouchListener {
+        private val slop = ViewConfiguration.get(this@MainActivity).scaledTouchSlop
+        private var downX = 0f; private var downY = 0f; private var startL = 0; private var startT = 0
+        private var dragging = false
+        private var target: View? = null
+        private val longPress = Runnable {
+            val v = target ?: return@Runnable
+            val lp = v.layoutParams as? FrameLayout.LayoutParams ?: return@Runnable
+            dragging = true
+            startL = v.left; startT = v.top
+            lp.gravity = Gravity.TOP or Gravity.START; lp.leftMargin = startL; lp.topMargin = startT; lp.rightMargin = 0; lp.bottomMargin = 0
+            v.layoutParams = lp
+            v.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+            v.animate().scaleX(1.05f).scaleY(1.05f).setDuration(90).start()
+            v.parent?.requestDisallowInterceptTouchEvent(true)
+        }
+
+        override fun onTouch(v: View, e: MotionEvent): Boolean {
+            when (e.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    target = v; downX = e.rawX; downY = e.rawY; dragging = false
+                    v.removeCallbacks(longPress); v.postDelayed(longPress, ViewConfiguration.getLongPressTimeout().toLong())
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    val dx = e.rawX - downX; val dy = e.rawY - downY
+                    if (dragging) {
+                        val lp = v.layoutParams as FrameLayout.LayoutParams
+                        lp.leftMargin = (startL + dx.toInt()).coerceIn(0, (mapFrame.width - v.width).coerceAtLeast(0))
+                        lp.topMargin = (startT + dy.toInt()).coerceIn(0, (mapFrame.height - v.height).coerceAtLeast(0))
+                        v.layoutParams = lp
+                    } else if (kotlin.math.abs(dx) > slop || kotlin.math.abs(dy) > slop) v.removeCallbacks(longPress)
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    v.removeCallbacks(longPress)
+                    if (dragging) {
+                        dragging = false
+                        v.animate().scaleX(1f).scaleY(1f).setDuration(90).start()
+                        val lp = v.layoutParams as FrameLayout.LayoutParams
+                        val fw = (mapFrame.width - v.width).coerceAtLeast(1); val fh = (mapFrame.height - v.height).coerceAtLeast(1)
+                        // 놓으면 바로 고정(다음에도 이 자리)
+                        Prefs.setCamCardPos(this@MainActivity, pillMode(), (lp.leftMargin.toFloat() / fw).coerceIn(0f, 1f), (lp.topMargin.toFloat() / fh).coerceIn(0f, 1f))
+                        Toast.makeText(this@MainActivity, "카메라 카드 자리를 고정했습니다", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+            return true
+        }
+    }
+
     // ---- v0.13.7 알약 자리
     private fun pillMode() = if (bigScreen) "big" else "small"
     private fun pillModeName() = if (bigScreen) "펼친 화면" else "접은 화면·일반 폰"
@@ -606,15 +685,23 @@ class MainActivity : AppCompatActivity() {
     private fun pillLT(): Pair<Int, Int>? {
         val b = pillBounds() ?: return null
         val f = pillFrac()
-        return if (f == null) (b[1] - dp(52)).coerceAtLeast(b[0]) to b[3]
+        // v0.13.9: 펼친 화면은 주유 버튼 왼쪽(아래 맞춤), 접은 화면·일반 폰은 주유 버튼 바로 위(오른쪽 맞춤)
+        return if (f == null) {
+            if (bigScreen) (b[1] - dp(52)).coerceAtLeast(b[0]) to b[3]
+            else (b[1] - dp(2)).coerceAtLeast(b[0]) to (b[3] - dp(52)).coerceAtLeast(b[2])
+        }
         else (b[0] + f.first * (b[1] - b[0])).toInt() to (b[2] + f.second * (b[3] - b[2])).toInt()
     }
+
+    /** v0.13.9 접힌 카드 폭: 펼친 화면 약 156dp(한 줄씩), 접은 화면·일반 폰 약 124dp(두 줄씩). */
+    private fun pillCardW() = if (bigScreen) dp(156) else dp(124)
 
     private fun setPillMargins(l: Int, t: Int) {
         val pv = panelView ?: return
         val lp = pv.layoutParams as? FrameLayout.LayoutParams ?: return
-        if (lp.gravity == (Gravity.TOP or Gravity.START) && lp.width == -2 && lp.leftMargin == l && lp.topMargin == t && lp.rightMargin == 0 && lp.bottomMargin == 0) return
-        lp.gravity = Gravity.TOP or Gravity.START; lp.width = -2
+        val w = pillCardW()
+        if (lp.gravity == (Gravity.TOP or Gravity.START) && lp.width == w && lp.leftMargin == l && lp.topMargin == t && lp.rightMargin == 0 && lp.bottomMargin == 0) return
+        lp.gravity = Gravity.TOP or Gravity.START; lp.width = w
         lp.leftMargin = l; lp.topMargin = t; lp.rightMargin = 0; lp.bottomMargin = 0
         pv.layoutParams = lp
     }
@@ -1044,6 +1131,7 @@ class MainActivity : AppCompatActivity() {
         pillW = 0; pillH = 0
         sheetOpen = false
         setPillMargins(0, 0)
+        if (::pill.isInitialized) placeCamCard()
         layoutForNavi(naviView != null)
         panelView?.requestLayout()
     }
@@ -1312,9 +1400,10 @@ class MainActivity : AppCompatActivity() {
             val okG = 0xFF2E9D62.toInt(); val warnY = 0xFFE0A020.toInt(); val badR = 0xFFD93025.toInt()
             val kakaoState = when { kakaoDown -> "카카오 끊김" to warnY; following -> "카카오 경로" to okG; else -> "카카오" to okG }
             val cmdState = when { !out.ble -> "음성만" to t.muted; S3xyButton.ready -> "커맨더" to okG; else -> "커맨더 없음" to badR }
+            val sep = if (!(wide || sheetOpen) && !bigScreen) "\n" else "   "
             destSub.text = SpannableStringBuilder().apply {
                 for ((i, st2) in listOf(kakaoState, cmdState).withIndex()) {
-                    if (i > 0) append("   ")
+                    if (i > 0) append(sep)
                     val a = length; append("● "); setSpan(ForegroundColorSpan(st2.second), a, a + 1, 0)
                     val b = length; append(st2.first); if (st2.second == badR || st2.second == warnY) setSpan(ForegroundColorSpan(st2.second), b, length, 0)
                 }
@@ -1326,21 +1415,20 @@ class MainActivity : AppCompatActivity() {
         // v0.13.7 알약: 펼친 화면은 긴 알약([T] 목적지·상태 [↻][■]), 접은 화면·일반 폰은 짧은 알약([T●][↻][■]). 열면 메뉴
         // v0.13.8: 펼친 화면도 짧은 알약(왼쪽 길안내를 가리지 않게)
         val shortPill = !open
+        // v0.13.9 카드: 위 [T] 목적지 / 아래 ● 카카오 ● 커맨더 [■]. 접은 화면·일반 폰은 좁고 두 줄씩(정사각형에 가깝게)
+        val narrow = !open && !bigScreen
         collapsedRow.visibility = View.GONE
         smallToggle.visibility = View.VISIBLE
-        destCheck.visibility = View.VISIBLE
+        destCheck.visibility = View.GONE
         destEta.visibility = View.GONE
         handleView.visibility = if (open) View.VISIBLE else View.GONE
-        dcol.visibility = if (shortPill) View.GONE else View.VISIBLE
-        tBadge.visibility = if (shortPill) View.VISIBLE else View.GONE
-        (dcol.layoutParams as? LinearLayout.LayoutParams)?.let { lp ->
-            val w = if (open) 0 else -2; val wt = if (open) 1f else 0f
-            if (lp.width != w || lp.weight != wt) { lp.width = w; lp.weight = wt; dcol.layoutParams = lp }
-        }
-        val nameMax = if (open) Int.MAX_VALUE else dp(150)
-        if (destName.maxWidth != nameMax) { destName.maxWidth = nameMax; destSub.maxWidth = nameMax }
-        val padH = if (open) dp(12) else dp(5)
-        if (sheet.paddingLeft != padH) sheet.setPadding(padH, if (open) dp(4) else dp(5), padH, if (open) dp(12) else dp(5))
+        dcol.visibility = View.VISIBLE
+        tBadge.visibility = View.GONE
+        destName.maxLines = if (narrow) 2 else 1
+        destName.textSize = if (narrow) 15f else 16f
+        if (!open && dest == null) destName.text = "목적지 없음"
+        val padH = if (open) dp(12) else dp(10)
+        if (sheet.paddingLeft != padH) sheet.setPadding(padH, if (open) dp(4) else dp(10), padH, if (open) dp(12) else dp(10))
         run {
             val okG = 0xFF2E9D62.toInt(); val warnY = 0xFFE0A020.toInt(); val badR = 0xFFD93025.toInt()
             val c = when {

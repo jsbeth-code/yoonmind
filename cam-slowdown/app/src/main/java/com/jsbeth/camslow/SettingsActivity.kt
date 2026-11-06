@@ -143,6 +143,8 @@ class SettingsActivity : Activity() {
             ui.button("펼친 화면 고정 풀기") { Prefs.clearPillFixed(this, "big"); pillText() },
             ui.button("접은 화면 고정 풀기") { Prefs.clearPillFixed(this, "small"); pillText() },
         )
+        ui.row(ui.button("카메라 카드 위치 처음대로") { Prefs.clearCamCardPos(this); Toast.makeText(this, "카메라 카드를 처음 자리로 돌렸습니다", Toast.LENGTH_SHORT).show() })
+        ui.hint("카메라 알림 카드(카메라 앞에서만 뜨는 카드)도 길게 눌러 끌어 옮길 수 있고, 놓으면 그 자리로 고정됩니다(펼친·접은 화면 따로).")
         ui.hint("알약을 길게 눌러 끌어 옮기고, 손을 떼지 않은 채 1.5초 더 누르고 있으면 그 자리를 시작 위치로 고정할지 묻습니다. 고정하면 다른 데로 옮겨 써도 앱을 다시 켜면 고정한 자리에서, 고정을 풀면 마지막에 옮긴 자리에서 시작합니다.")
 
         // 8 어린이보호구역
