@@ -131,21 +131,12 @@ class SettingsActivity : Activity() {
         ui.switchRow("다른 앱 위에 알약 창", "감시 중 다른 앱을 쓰면 거리·속도·제한속도를 작은 창으로. 끌어서 옮기고, 옆으로 밀면 가장자리 탭으로, 탭하면 앱 열기", Prefs.overlayOn(this)) { Prefs.setOverlayOn(this, it); refreshStatus() }
         overlayStatus = ui.text("", 13f)
         ui.row(ui.button("'다른 앱 위에 표시' 권한 요청") { OverlayWindow.requestPermission(this) })
-        // v0.13.7 메인 화면 알약 시작 위치
-        ui.text("메인 화면 알약 시작 위치", 15f, bold = true)
-        val pillStatus = ui.text("", 13f)
-        fun pillText() {
-            fun one(mode: String, name: String) = name + ": " + if (Prefs.pillFixed(this, mode) != null) "고정한 자리에서 시작" else "마지막에 옮긴 자리에서 시작"
-            pillStatus.text = one("big", "펼친 화면") + "\n" + one("small", "접은 화면·일반 폰")
-        }
-        pillText()
-        ui.row(
-            ui.button("펼친 화면 고정 풀기") { Prefs.clearPillFixed(this, "big"); pillText() },
-            ui.button("접은 화면 고정 풀기") { Prefs.clearPillFixed(this, "small"); pillText() },
-        )
+        // v0.14.0 메인 화면 카드: 옮긴 자리에서 다음에도 시작(고정 질문 없음)
+        ui.text("메인 화면 카드 위치", 15f, bold = true)
+        ui.row(ui.button("카드 처음 자리로") { Prefs.clearPillLast(this); Toast.makeText(this, "앱을 다시 열면 카카오 위 파란 줄 오른쪽에서 시작합니다", Toast.LENGTH_LONG).show() })
+        ui.hint("카드(목적지·카카오·커맨더)는 길게 눌러 끌어 옮기면 그 자리를 기억해 다음에도 거기서 시작합니다(펼친·접은 화면 따로).")
         ui.row(ui.button("카메라 카드 위치 처음대로") { Prefs.clearCamCardPos(this); Toast.makeText(this, "카메라 카드를 처음 자리로 돌렸습니다", Toast.LENGTH_SHORT).show() })
         ui.hint("카메라 알림 카드(카메라 앞에서만 뜨는 카드)도 길게 눌러 끌어 옮길 수 있고, 놓으면 그 자리로 고정됩니다(펼친·접은 화면 따로).")
-        ui.hint("알약을 길게 눌러 끌어 옮기고, 손을 떼지 않은 채 1.5초 더 누르고 있으면 그 자리를 시작 위치로 고정할지 묻습니다. 고정하면 다른 데로 옮겨 써도 앱을 다시 켜면 고정한 자리에서, 고정을 풀면 마지막에 옮긴 자리에서 시작합니다.")
 
         // 8 어린이보호구역
         ui.question(8, "어린이보호구역에서 감속")

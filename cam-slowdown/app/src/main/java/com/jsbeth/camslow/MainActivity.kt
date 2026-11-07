@@ -103,6 +103,7 @@ class MainActivity : AppCompatActivity() {
     /** v0.13.7 알약: 메뉴 손잡이, T 옆 상태 점, 목적지 글 묶음, 접힌 알약 크기, 모드별 지금 자리(비율). */
     private lateinit var handleView: View
     private lateinit var tBadge: View
+    private lateinit var tBoxView: FrameLayout
     private lateinit var dcol: LinearLayout
     private lateinit var statusRow: LinearLayout
     private var pillW = 0
@@ -316,7 +317,7 @@ class MainActivity : AppCompatActivity() {
         row.addView(pillSign, LinearLayout.LayoutParams(dp(38), dp(38)).apply { rightMargin = dp(8) })
         val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         pillDist = tv(22f, Color.WHITE, font = jua)
-        pillSub = tv(12f, Color.WHITE).apply { maxLines = 2; ellipsize = TextUtils.TruncateAt.END; maxWidth = dp(190) }
+        pillSub = tv(12f, Color.WHITE).apply { maxLines = 3; ellipsize = TextUtils.TruncateAt.END; maxWidth = dp(210) }
         col.addView(pillDist); col.addView(pillSub)
         row.addView(col)
         return row
@@ -350,12 +351,12 @@ class MainActivity : AppCompatActivity() {
         sheet.addView(handleView, LinearLayout.LayoutParams(-1, dp(16)))
         // 목적지 줄
         destRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        val tBox = FrameLayout(this)
+        val tBox = FrameLayout(this); tBoxView = tBox
         val tIcon = tv(20f, 0xFFE31937.toInt(), font = jua).apply {
             text = "T"; gravity = Gravity.CENTER
             background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(0xFF17171A.toInt()) }
         }
-        tBox.addView(tIcon, FrameLayout.LayoutParams(dp(38), dp(38)))
+        tBox.addView(tIcon, FrameLayout.LayoutParams(-1, -1))
         // 짧은 알약(접은 화면·일반 폰)에서 상태: 초록 정상, 노랑 카카오 끊김, 빨강 커맨더 없음
         tBadge = View(this).apply { background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(0xFF2E9D62.toInt()); setStroke(dp(2), M_BG) } }
         tBox.addView(tBadge, FrameLayout.LayoutParams(dp(13), dp(13), Gravity.TOP or Gravity.END))
@@ -538,7 +539,6 @@ class MainActivity : AppCompatActivity() {
             // 손가락이 거의 멈춘 채 1.5초 → 고정할지 묻기
             if (kotlin.math.abs(e.rawX - anchorX) > slop || kotlin.math.abs(e.rawY - anchorY) > slop) {
                 anchorX = e.rawX; anchorY = e.rawY
-                removeCallbacks(holdAsk); postDelayed(holdAsk, 1_500)
             }
         }
 
@@ -659,7 +659,8 @@ class MainActivity : AppCompatActivity() {
     /** 지금 쓰는 자리(비율). 앱을 켤 때 고정한 자리가 있으면 그것, 없으면 마지막에 옮긴 자리. null = 기본(오른쪽 아래). */
     private fun pillFrac(): Pair<Float, Float>? {
         val m = pillMode()
-        if (!pillCur.containsKey(m)) pillCur[m] = Prefs.pillFixed(this, m) ?: Prefs.pillLast(this, m)
+        // v0.14.0: 고정 없이 마지막에 옮긴 자리에서 시작
+        if (!pillCur.containsKey(m)) pillCur[m] = Prefs.pillLast(this, m)
         return pillCur[m]
     }
 
@@ -685,16 +686,15 @@ class MainActivity : AppCompatActivity() {
     private fun pillLT(): Pair<Int, Int>? {
         val b = pillBounds() ?: return null
         val f = pillFrac()
-        // v0.13.9: 펼친 화면은 주유 버튼 왼쪽(아래 맞춤), 접은 화면·일반 폰은 주유 버튼 바로 위(오른쪽 맞춤)
+        // v0.14.0: 처음 자리는 카카오 위 파란 줄 오른쪽(줄 안 세로 가운데쯤)
         return if (f == null) {
-            if (bigScreen) (b[1] - dp(52)).coerceAtLeast(b[0]) to b[3]
-            else (b[1] - dp(2)).coerceAtLeast(b[0]) to (b[3] - dp(52)).coerceAtLeast(b[2])
+            b[1] to ((dp(KAKAO_TOP_DP) - pillH) / 2).coerceIn(b[2], b[3])
         }
         else (b[0] + f.first * (b[1] - b[0])).toInt() to (b[2] + f.second * (b[3] - b[2])).toInt()
     }
 
     /** v0.13.9 접힌 카드 폭: 펼친 화면 약 156dp(한 줄씩), 접은 화면·일반 폰 약 124dp(두 줄씩). */
-    private fun pillCardW() = if (bigScreen) dp(156) else dp(124)
+    private fun pillCardW() = if (bigScreen) dp(156) else dp(94) // v0.14.0: 접은 화면 약 75%
 
     private fun setPillMargins(l: Int, t: Int) {
         val pv = panelView ?: return
@@ -1069,7 +1069,8 @@ class MainActivity : AppCompatActivity() {
                 val nv = KNNaviView(this)
                 nv.useDarkMode = t.night
                 nv.useJcImg = true      // 교차로 확대 그림
-                nv.sndVolume = 1f
+                // v0.14.0: 카카오 화면 효과음(반복 삐)이 시끄러워 끔. 길안내 음성은 우리가 직접 틀고, 직접 재생이 실패해 카카오에 맡길 때만 켠다
+                nv.sndVolume = if (KakaoSafety.voiceFailed) 1f else 0f
                 mapFrame.addView(nv, FrameLayout.LayoutParams(-1, -1))
                 pill.bringToFront()
                 naviView = nv
@@ -1356,7 +1357,8 @@ class MainActivity : AppCompatActivity() {
             val sub = when {
                 prog != null && progKind == S3xyButton.Press.SINGLE -> "▼ ${out.slow.label}로 내리는 중 · ${prog.first}/${prog.second}"
                 prog != null && progKind == S3xyButton.Press.DOUBLE -> "▲ ${out.usual.label}으로 복귀 중"
-                camJob || gpsLost -> bottomView.text.toString()
+                // v0.14.0: "Mad Max → 스탠다드"는 한 줄로 묶어 그 앞에서 줄 바꿈
+                camJob || gpsLost -> bottomView.text.toString().replace(" · ${out.usual.label} → ", "\n${out.usual.label} → ")
                 else -> ""
             }
             pillSub.text = listOf(sub, if (kakaoDown) "⚠ 카카오 끊김 · 내장 판단" else "").filter { it.isNotEmpty() }.joinToString("\n")
@@ -1425,10 +1427,21 @@ class MainActivity : AppCompatActivity() {
         dcol.visibility = View.VISIBLE
         tBadge.visibility = View.GONE
         destName.maxLines = if (narrow) 2 else 1
-        destName.textSize = if (narrow) 15f else 16f
         if (!open && dest == null) destName.text = "목적지 없음"
-        val padH = if (open) dp(12) else dp(10)
-        if (sheet.paddingLeft != padH) sheet.setPadding(padH, if (open) dp(4) else dp(10), padH, if (open) dp(12) else dp(10))
+        val padH = if (open) dp(12) else if (narrow) dp(7) else dp(10)
+        if (sheet.paddingLeft != padH) sheet.setPadding(padH, if (open) dp(4) else padH, padH, if (open) dp(12) else padH)
+        // v0.14.0: 접은 화면 카드는 약 75% — 아이콘·버튼·글자도 작게
+        val icon = if (narrow) dp(28) else dp(38)
+        (tBoxView.layoutParams as? LinearLayout.LayoutParams)?.let { if (it.width != icon) { it.width = icon; it.height = icon; tBoxView.layoutParams = it } }
+        val stop = if (narrow) dp(28) else dp(34)
+        (smallToggle.layoutParams as? LinearLayout.LayoutParams)?.let { if (it.width != stop) { it.width = stop; it.height = stop; smallToggle.layoutParams = it } }
+        smallToggle.textSize = if (narrow) 12f else 15f
+        destName.textSize = if (narrow) 13f else 16f
+        destSub.textSize = if (narrow) 10f else 11.5f
+        // v0.14.0 색(C4): 카카오 위 파란 줄 위면 반투명 검정·그림자 없음, 지도 위면 조금 더 진하게, 메뉴는 짙은 회색
+        val inBanner = !open && naviView != null && (panelView?.layoutParams as? FrameLayout.LayoutParams)?.let { it.topMargin + pillH <= dp(KAKAO_TOP_DP) } == true
+        (sheet.background as? GradientDrawable)?.setColor(if (open) MENU_BG else if (inBanner) C4_BANNER else C4_MAP)
+        sheet.elevation = if (inBanner) 0f else dpf(10f)
         run {
             val okG = 0xFF2E9D62.toInt(); val warnY = 0xFFE0A020.toInt(); val badR = 0xFFD93025.toInt()
             val c = when {
@@ -1594,9 +1607,15 @@ class MainActivity : AppCompatActivity() {
         private const val KAKAO_BAR_DP = 80
         /** v0.13.7 알약·메뉴 색(카카오내비 위 안내 막대 계열 남색). */
         private const val M_BG = 0xFF2C304D.toInt()
-        private const val M_ITEM = 0xFF3A3F63.toInt()
-        private const val M_BTN = 0xFF3E4468.toInt()
-        private const val M_LINE = 0xFF6A7099.toInt()
+        /** v0.14.0 카드 색(C4): 카카오 위 파란 줄 위에서는 반투명 검정, 지도 위로 옮기면 조금 더 진하게. 메뉴는 거의 불투명한 짙은 회색. */
+        private const val C4_BANNER = 0x61000000
+        private const val C4_MAP = 0x99000000.toInt()
+        private const val MENU_BG = 0xF5121620.toInt()
+        /** 카카오 위 파란 줄 높이(dp, 실차 사진에서 잰 어림값). 카드 아래가 이 안이면 "파란 줄 위". */
+        private const val KAKAO_TOP_DP = 112
+        private const val M_ITEM = 0x1FFFFFFF
+        private const val M_BTN = 0x29FFFFFF
+        private const val M_LINE = 0x73FFFFFF
         private const val M_FG = 0xFFFFFFFF.toInt()
         private const val M_MUTED = 0xFFCFD3E6.toInt()
         private const val M_RED = 0xFFE5484D.toInt()

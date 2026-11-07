@@ -664,7 +664,8 @@ object KakaoSafety : KNGuidance_SafetyGuideDelegate, KNGuidance_LocationGuideDel
         return try { v.shouldPlayVoiceGuide(guidance, voiceGuide, strings) } catch (e: Throwable) { true }
     }
     private var voiceNoted = false
-    @Volatile private var voiceFailed = false
+    @Volatile var voiceFailed = false
+        private set
     private var voiceFileSeq = 0
     /** 우리 소리 경로(설정 7의 채널). DriveService가 넣는다. */
     @Volatile var voiceUsage = android.media.AudioAttributes.USAGE_ALARM

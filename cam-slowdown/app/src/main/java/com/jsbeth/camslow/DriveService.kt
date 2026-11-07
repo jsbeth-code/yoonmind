@@ -315,7 +315,8 @@ class Outputs(ctx: Context, private val logInit: Boolean = false) {
         DriveState.carProfile = s.slow
         DriveState.lastDownAt = SystemClock.elapsedRealtime()
         // v0.13.3: 카메라·제한속도·보호구역 안내는 카카오가 한다 — 우리는 "감속합니다"만(늘)
-        announce(ToneGenerator.TONE_PROP_BEEP2, 300, "감속합니다", "down")
+        // v0.14.0: 앞의 삐 소리 없앰(카카오 음성과 겹침) — 말만
+        announce(ToneGenerator.TONE_PROP_BEEP2, 0, "감속합니다", "down")
         if (!s.ble) return
         // 실제로 나간 클릭 수만큼만 내려갔다고 본다(커맨더가 끊겨 못 보냈는데 복귀에서 올리면 평소보다 빨라진다)
         val extra = (s.downPresses - (s.usual.ordinal - s.slow.ordinal)).coerceAtLeast(0)
@@ -354,7 +355,7 @@ class Outputs(ctx: Context, private val logInit: Boolean = false) {
         val s = settings
         if (!s.autoRestore && !force) {
             DriveState.log("△ 카메라 통과 ($reason) — 자동 복귀 꺼짐, 휠로 직접 올리세요")
-            announce(ToneGenerator.TONE_PROP_ACK, 200, "카메라 통과. 직접 복귀하세요", "up")
+            announce(ToneGenerator.TONE_PROP_ACK, 0, "카메라 통과. 직접 복귀하세요", "up")
             return
         }
         // 올릴 단수 = 평소 프로필 − 차가 실제로 있다고 보는 프로필. 앞의 클릭이 아직 나가는 중이면 끝난 뒤(같은 작업 순서) 계산한다.
@@ -362,7 +363,7 @@ class Outputs(ctx: Context, private val logInit: Boolean = false) {
         DriveState.log("▲ 복귀 → ${s.usual.label} ($reason)")
         DriveState.carProfile = s.usual
         DriveState.lastUpAt = SystemClock.elapsedRealtime()
-        announce(ToneGenerator.TONE_PROP_ACK, 200, "복귀합니다", "up")
+        announce(ToneGenerator.TONE_PROP_ACK, 0, "복귀합니다", "up")
         if (!s.ble) { if (carNow != null) carNow = s.usual; return }
         var base = s.slow
         // 평소 프로필이 맨 위(Mad Max)면 복귀에도 여분 클릭을 더한다 — 맨 위에선 추가 클릭이 무시되므로 안전하고,

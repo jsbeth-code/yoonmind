@@ -186,6 +186,7 @@ object Prefs {
     }
     fun pillLast(ctx: Context, mode: String) = pillGet(ctx, "pillLast_$mode")
     fun setPillLast(ctx: Context, mode: String, x: Float, y: Float) = put(ctx) { putFloat("pillLast_${mode}X", x); putFloat("pillLast_${mode}Y", y) }
+    fun clearPillLast(ctx: Context) = put(ctx) { for (m in listOf("big", "small")) { remove("pillLast_${m}X"); remove("pillLast_${m}Y"); remove("pillFixed_${m}X"); remove("pillFixed_${m}Y") } }
     fun pillFixed(ctx: Context, mode: String) = pillGet(ctx, "pillFixed_$mode")
     fun setPillFixed(ctx: Context, mode: String, x: Float, y: Float) = put(ctx) { putFloat("pillFixed_${mode}X", x); putFloat("pillFixed_${mode}Y", y) }
     fun clearPillFixed(ctx: Context, mode: String) = put(ctx) { remove("pillFixed_${mode}X"); remove("pillFixed_${mode}Y") }
