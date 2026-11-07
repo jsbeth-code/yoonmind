@@ -629,13 +629,14 @@ class SlowdownEngineTest {
     }
 
     @Test fun external_sectionEndVanishesBeforeReached_releasesAsExit() {
-        // v0.13.4 B: 구간 시작(1 km) 뒤 카카오가 "구간 끝"(4 km)을 보여 주다가 3 km에서 안 보임(다른 길로 빠짐) → 300 m 뒤 "구간 이탈" 복귀
+        // v0.13.4 B: 구간 시작(1 km) 뒤 카카오가 "구간 끝"(4 km)을 보여 주다가 3 km에서 안 보임(다른 길로 빠짐) → "구간 이탈" 복귀
+        // v0.14.1: 그 뒤 카카오 목록이 비어 있기만 하면(앞에 카메라 없음) 두 배 거리(600 m)
         val start = cam(0.0, 1000.0, 80, kind = CamKind.SECTION_START, code = "KAKAO")
         val end = cam(0.0, 4000.0, 80, kind = CamKind.SECTION_END, code = "KAKAO")
         val ev = driveNorthExternal(emptyList(), listOf(start, end), 90.0, 0.0, 6000.0, shown = { c, n -> c !== end || n < 3000.0 })
         val up = ev.first { it.first is EngineEvent.Up }
         assertEquals("구간 이탈", (up.first as EngineEvent.Up).reason)
-        assertTrue("이탈 복귀 위치 ${up.second}", up.second in 3250.0..3400.0)
+        assertTrue("이탈 복귀 위치 ${up.second}", up.second in 3550.0..3700.0)
     }
 
     @Test fun external_sectionEndHiddenWhileKakaoLost_keepsHold() {
@@ -665,7 +666,8 @@ class SlowdownEngineTest {
             east += v
         }
         assertEquals("구간 이탈", up!!.first.reason)
-        assertTrue("이탈 복귀 동쪽 ${up!!.second}", up!!.second in 300.0..600.0)
+        // v0.14.1: 종점에서도 100 m 넘게 멀어져야(직각으로 빠지면 약 1 km 뒤)
+        assertTrue("이탈 복귀 동쪽 ${up!!.second}", up!!.second in 950.0..1300.0)
     }
 
     @Test fun sectionWithPartner_curvedRoadInside_keepsHold() {
@@ -697,7 +699,7 @@ class SlowdownEngineTest {
         override fun servesHeading(cam: Camera, courseDeg: Double): Boolean? = null
     }
 
-    private fun driveKakaoSection(roads: RoadMap, toN: Double, endShown: Boolean = false): List<Pair<EngineEvent, Double>> {
+    private fun driveKakaoSection(roads: RoadMap, toN: Double, endShown: Boolean = false, kakaoOffAfter: Double = Double.MAX_VALUE): List<Pair<EngineEvent, Double>> {
         val start = cam(0.0, 1000.0, 80, kind = CamKind.SECTION_START, code = "KAKAO")
         val end = cam(0.0, 9000.0, 80, kind = CamKind.SECTION_END, code = "KAKAO")
         val e = SlowdownEngine(CameraIndex(emptyList()), EngineConfig(), roads = roads)
@@ -706,7 +708,7 @@ class SlowdownEngineTest {
         var n = 0.0
         while (n <= toN) {
             val (la, lo) = at(0.0, n)
-            e.external = listOfNotNull(start.takeIf { n <= 1000.0 }, end.takeIf { endShown && n in 2000.0..2500.0 }).map { c ->
+            e.external = if (n > kakaoOffAfter) null else listOfNotNull(start.takeIf { n <= 1000.0 }, end.takeIf { endShown && n in 2000.0..2500.0 }).map { c ->
                 SlowdownEngine.ExternalCam(c, (c.lat - lat0) * mPerDegLat - n)
             }
             e.update(Fix(la, lo, v, 0.0)).forEach { out += it to n }
@@ -716,8 +718,8 @@ class SlowdownEngineTest {
     }
 
     @Test fun kakaoSectionWithoutEnd_otherNamedRoad_releasesAfter800m() {
-        // v0.13.4 C: 짝도 "끝"도 없는 카카오 구간, 북 3 km부터 다른 이름 도로 → 800 m 뒤 복귀
-        val ev = driveKakaoSection(namedRoad { if (it < 3000.0) "동부간선도로" else "중랑천로" }, 6000.0)
+        // v0.13.4 C: 짝도 "끝"도 없는 카카오 구간, 카카오가 끊긴 뒤(2 km~) 북 3 km부터 다른 이름 도로 → 800 m 뒤 복귀
+        val ev = driveKakaoSection(namedRoad { if (it < 3000.0) "동부간선도로" else "중랑천로" }, 6000.0, kakaoOffAfter = 2000.0)
         val up = ev.first { it.first is EngineEvent.Up }
         assertTrue((up.first as EngineEvent.Up).reason.startsWith("구간 이탈"))
         assertTrue("다른 도로 복귀 ${up.second}", up.second in 3780.0..3900.0)
@@ -730,11 +732,35 @@ class SlowdownEngineTest {
     }
 
     @Test fun kakaoSectionEndSeen_roadNameRuleOff() {
-        // 카카오가 "끝"을 한 번 보여 줬으면 도로 이름 규칙은 안 쓴다(그때는 "끝"이 사라졌는지로 판단)
+        // 카카오가 "끝"을 한 번 보여 줬으면 도로 이름 규칙은 안 쓴다(그때는 "끝"이 사라졌는지로 판단).
+        // v0.14.1: 시점 때와 같은 이름 도로(~3 km)에서는 끝이 안 보여도 세지 않고, 다른 길에서 빈 목록이면 600 m
         val ev = driveKakaoSection(namedRoad { if (it < 3000.0) "동부간선도로" else "중랑천로" }, 6000.0, endShown = true)
         val up = ev.first { it.first is EngineEvent.Up }
         assertEquals("구간 이탈", (up.first as EngineEvent.Up).reason)
-        assertTrue("끝 사라진 뒤 300 m ${up.second}", up.second in 2750.0..2900.0)
+        assertTrue("끝 사라진 뒤 ${up.second}", up.second in 3550.0..3700.0)
+    }
+
+    @Test fun kakaoConnected_otherNamedRoad_noRoadNameRule() {
+        // v0.14.1: 카카오가 연결돼 있으면 도로 이름 규칙(C)은 쓰지 않는다
+        val ev = driveKakaoSection(namedRoad { if (it < 3000.0) "동부간선도로" else "중랑천로" }, 6000.0)
+        assertTrue(ev.none { it.first is EngineEvent.Up })
+    }
+
+    @Test fun kakaoEndGone_slowInRestArea_keepsHold() {
+        // v0.14.1: "끝"이 사라져도 제한의 60% 아래(쉼터·정체)로 달리는 동안은 세지 않는다
+        val start = cam(0.0, 1000.0, 80, kind = CamKind.SECTION_START, code = "KAKAO")
+        val end = cam(0.0, 4000.0, 80, kind = CamKind.SECTION_END, code = "KAKAO")
+        val e = SlowdownEngine(CameraIndex(emptyList()), EngineConfig())
+        var n = 0.0
+        val ups = ArrayList<EngineEvent>()
+        while (n <= 3500.0) {
+            val kmh = if (n < 2600.0) 90.0 else 30.0
+            val (la, lo) = at(0.0, n)
+            e.external = listOfNotNull(start.takeIf { n <= 1000.0 }, end.takeIf { n in 2000.0..2500.0 }).map { c -> SlowdownEngine.ExternalCam(c, (c.lat - lat0) * mPerDegLat - n) }
+            ups += e.update(Fix(la, lo, kmh / 3.6, 0.0)).filterIsInstance<EngineEvent.Up>()
+            n += kmh / 3.6
+        }
+        assertTrue("쉼터에서 복귀 없음 $ups", ups.isEmpty())
     }
 
     @Test fun sourceSwitchWhileSlowed_keepsTargetNoEarlyUp() {

@@ -210,7 +210,7 @@ class MainActivity : AppCompatActivity() {
         // v0.13: 오른쪽 가운데 — 카카오 회전 안내·교차로 그림(위), 속도·제한 표지(왼쪽), 차로 안내·아래 막대(아래)를 피함
         mapFrame.addView(pill, FrameLayout.LayoutParams(-2, -2, Gravity.CENTER_VERTICAL or Gravity.END).apply { rightMargin = dp(10); topMargin = dp(40) })
         // v0.13.9: 카메라 알림 카드는 길게 눌러 끌어 옮기고, 놓으면 그 자리로 고정(화면 종류별)
-        pill.setOnTouchListener(CamCardDrag())
+        pill.setOnTouchListener(camDrag)
         pill.addOnLayoutChangeListener { _, l, tp, r, b, ol, ot, or2, ob -> if (r - l != or2 - ol || b - tp != ob - ot) main.post { placeCamCard() } }
         mapFrame.addOnLayoutChangeListener { _, l, tp, r, b, ol, ot, or2, ob -> if (r - l != or2 - ol || b - tp != ob - ot) main.post { placeCamCard() } }
         if (wide) {
@@ -589,24 +589,31 @@ class MainActivity : AppCompatActivity() {
     // ---- v0.13.9 카메라 알림 카드 자리
     /** 저장한 자리(지도 안 남는 공간 비율)가 있으면 그 자리, 없으면 처음 자리(오른쪽 가운데). */
     private fun placeCamCard() {
+        // v0.14.1(점검 반영): 끄는 중에는 다시 배치하지 않는다(글이 바뀌어 크기가 변해도 손가락 자리 유지)
+        if (camDrag.dragging) return
         val lp = pill.layoutParams as? FrameLayout.LayoutParams ?: return
         val f = Prefs.camCardPos(this, pillMode())
         var g = Gravity.CENTER_VERTICAL or Gravity.END; var l = 0; var tm = dp(40); var rm = dp(10)
         if (f != null) {
             if (mapFrame.width == 0 || pill.width == 0) return
-            g = Gravity.TOP or Gravity.START; rm = 0
-            l = (f.first * (mapFrame.width - pill.width).coerceAtLeast(0)).toInt()
+            val freeW = (mapFrame.width - pill.width).coerceAtLeast(0)
             tm = (f.second * (mapFrame.height - pill.height).coerceAtLeast(0)).toInt()
+            // 오른쪽 반에 두었으면 오른쪽 기준(글이 길어지면 왼쪽으로 늘어나게, 잘리지 않게)
+            if (f.first > 0.5f) { g = Gravity.TOP or Gravity.END; rm = ((1f - f.first) * freeW).toInt(); l = 0 }
+            else { g = Gravity.TOP or Gravity.START; rm = 0; l = (f.first * freeW).toInt() }
         }
         if (lp.gravity == g && lp.leftMargin == l && lp.topMargin == tm && lp.rightMargin == rm) return
         lp.gravity = g; lp.leftMargin = l; lp.topMargin = tm; lp.rightMargin = rm; lp.bottomMargin = 0
         pill.layoutParams = lp
     }
 
+    private val camDrag by lazy { CamCardDrag() }
+
     private inner class CamCardDrag : View.OnTouchListener {
         private val slop = ViewConfiguration.get(this@MainActivity).scaledTouchSlop
         private var downX = 0f; private var downY = 0f; private var startL = 0; private var startT = 0
-        private var dragging = false
+        var dragging = false
+            private set
         private var target: View? = null
         private val longPress = Runnable {
             val v = target ?: return@Runnable

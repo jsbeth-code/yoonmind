@@ -172,9 +172,10 @@ object KakaoSafety : KNGuidance_SafetyGuideDelegate, KNGuidance_LocationGuideDel
     private val retryRun = Runnable { if (wanted && !running) { retryN++; connect() } }
     private val stallRun = Runnable {
         if (!wanted || initPendingSince == 0L) return@Runnable
-        log("카카오 응답 없음 ${(System.currentTimeMillis() - initPendingSince) / 1000}초 — 새로 요청")
-        initSeq++; initPendingSince = 0L; running = false
-        retryN++; connect()
+        // v0.14.1: 옛 요청이 아직 떠 있을 수 있어 바로 겹쳐 요청하지 않고 1분 뒤 다시(늦게 온 성공은 받는다)
+        log("카카오 응답 없음 ${(System.currentTimeMillis() - initPendingSince) / 1000}초 — 1분 뒤 새로 요청")
+        initSeq++; initPendingSince = 0L
+        fail()
     }
 
     /** 주행 감시 시작 때. 메인 스레드에서 부른다. */
@@ -701,7 +702,11 @@ object KakaoSafety : KNGuidance_SafetyGuideDelegate, KNGuidance_LocationGuideDel
             lastVoiceAt = System.currentTimeMillis()
             true
         } catch (e: Throwable) {
-            if (!voiceFailed) { voiceFailed = true; log("카카오 음성 직접 재생 실패: ${e.javaClass.simpleName} ${e.message ?: ""} — 다음부터 카카오에 맡김") }
+            if (!voiceFailed) {
+                voiceFailed = true; log("카카오 음성 직접 재생 실패: ${e.javaClass.simpleName} ${e.message ?: ""} — 다음부터 카카오에 맡김(카카오 화면 소리 켬)")
+                // v0.14.1: 카카오 화면 소리를 꺼 두었으니(경고음) 맡기는 순간 다시 켠다 — 안 그러면 길안내 음성이 안 나온다
+                main.post { runCatching { naviView?.sndVolume = 1f } }
+            }
             voiceQueue.clear()
             false
         }

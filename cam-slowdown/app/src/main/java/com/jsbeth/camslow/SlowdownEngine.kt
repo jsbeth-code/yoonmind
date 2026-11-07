@@ -196,6 +196,14 @@ class SlowdownEngine(
     private var secEndOdo: Double? = null
     /** 그 "끝"이 닿기 전에 안 보이기 시작한 누적 거리. */
     private var secEndGoneOdo: Double? = null
+    /** v0.14.1: "끝"이 사라진 뒤 실제로 센 거리(쉼터·저속·같은 도로 동안은 안 셈)와, 그동안 카카오 목록이 비지 않았던 적이 있는지. */
+    private var secGoneM = 0.0
+    private var secGoneSawList = false
+    /** v0.14.1: 짝 종점까지 가장 가까웠던 거리(A 규칙: 종점에서도 멀어질 때만 이탈). */
+    private var partnerMinDist = Double.MAX_VALUE
+    /** v0.14.1: 마지막 구간단속 제한속도와 "구간 이탈"로 푼 위치 — 끝이 다시 보이면(제한 없는 끝이어도) 다시 내리기 위해. */
+    private var lastSectionLimit = 0
+    private var sectionExitOdo = Double.NEGATIVE_INFINITY
     /** 구간 방향(시점→짝 종점)으로 가장 멀리 간 거리와 그때의 누적 거리, 직선 이탈 연속 횟수. */
     private var axisMax = Double.NEGATIVE_INFINITY
     private var axisMaxOdo = 0.0
@@ -205,7 +213,8 @@ class SlowdownEngine(
     private var otherRoadM = 0.0
     private var secLastOdo = 0.0
     private fun resetSectionExit() {
-        secEndOdo = null; secEndGoneOdo = null; axisMax = Double.NEGATIVE_INFINITY; axisMaxOdo = 0.0; offAxisCount = 0
+        secEndOdo = null; secEndGoneOdo = null; secGoneM = 0.0; secGoneSawList = false; partnerMinDist = Double.MAX_VALUE
+        axisMax = Double.NEGATIVE_INFINITY; axisMaxOdo = 0.0; offAxisCount = 0
         secRoadName = null; otherRoadM = 0.0; secLastOdo = odo
     }
     /** 이름 비교용: 공백 제거, "도로"→"로"(동부간선도로 ↔ 동부간선로). */
@@ -389,7 +398,10 @@ class SlowdownEngine(
         var camDown: Rel? = null
         var camUpReason: String? = null
         var holdEvent: EngineEvent.Hold? = null
-        fun drop(reason: String) { target = null; passedHoldUntilOdo = null; passCourse = null; reverseCount = 0; lostCount = 0; midSection = false; resetSectionExit(); camUpReason = reason }
+        fun drop(reason: String) {
+            if (reason.startsWith("구간 이탈")) sectionExitOdo = odo
+            target = null; passedHoldUntilOdo = null; passCourse = null; reverseCount = 0; lostCount = 0; midSection = false; resetSectionExit(); camUpReason = reason
+        }
 
         val t = target
         if (t == null) {
@@ -401,9 +413,12 @@ class SlowdownEngine(
             } else if (ext != null && !fix.estimated) {
                 // 구간단속 중간 진입: 앞의 첫 구간 표시가 "끝"이면(시작을 못 봤으면) 이미 구간 안이다 → 바로 내리고 끝까지 유지
                 val sec = ahead.firstOrNull { it.cam.kind == CamKind.SECTION_START || it.cam.kind == CamKind.SECTION_END }
-                if (sec != null && sec.cam.kind == CamKind.SECTION_END && sec.cam != suppressed && sec.cam.limitKmh > 0 && passesFilter(sec.cam) &&
-                    (seen[sec.cam] ?: 0) >= config.confirmFixes && !(config.skipIfBelowLimit && speedKmh <= sec.cam.limitKmh)
+                // v0.14.1: 카카오가 끝에 제한속도를 안 줘도 방금(3 km 안) "구간 이탈"로 푼 구간이면 그 제한으로 다시 내린다(쉼터에서 나온 경우 등)
+                val secLim = sec?.let { if (it.cam.limitKmh > 0) it.cam.limitKmh else if (odo - sectionExitOdo <= 3_000.0) lastSectionLimit else 0 } ?: 0
+                if (sec != null && sec.cam.kind == CamKind.SECTION_END && sec.cam != suppressed && secLim > 0 && passesFilter(sec.cam) &&
+                    (seen[sec.cam] ?: 0) >= config.confirmFixes && !(config.skipIfBelowLimit && speedKmh <= secLim)
                 ) {
+                    lastSectionLimit = secLim
                     target = sec.cam; midSection = true; reverseCount = 0; lostCount = 0; resetSectionExit()
                     secEndOdo = odo + sec.along
                     targetRoadLat = sec.roadLat; targetRoadLon = sec.roadLon
@@ -441,7 +456,7 @@ class SlowdownEngine(
                     reverseCount = 0
                     lostCount = 0
                     resetSectionExit()
-                    if (section) holdEvent = EngineEvent.Hold(t, config.restoreAfterM + extra, t.sectionLenM > 0)
+                    if (section) { holdEvent = EngineEvent.Hold(t, config.restoreAfterM + extra, t.sectionLenM > 0); if (t.limitKmh > 0) lastSectionLimit = t.limitKmh }
                 } else {
                     val lostNow = along <= -300 || (entry == null && (attachedNow || !isAhead(gAlong, gCross, t, tracking = true)))
                     if (lostNow) {
@@ -453,29 +468,41 @@ class SlowdownEngine(
                 // 카카오: 구간 유지 중 "구간 끝"이 앞에 보이면 그 거리로 복귀 지점을 맞춘다(길이 데이터·10 km 상한보다 정확)
                 // v0.13.4 B: 보이던 "구간 끝"이 닿기 전(150 m 넘게 남았을 때) 사라진 채 sectionEndGoneM 달리면 구간을 빠져나간 것.
                 // 카카오 끊김(ext == null) 동안은 세지 않는다(다시 보이면 처음부터).
+                // v0.14.1(점검 반영): 빈 목록만 왔으면 두 배 거리, 제한속도의 60% 아래(쉼터·정체)거나 시점 때와 같은 이름 도로 위면 세지 않는다.
+                val startRoad = view?.takeIf { !it.ambiguous && it.roadName.isNotBlank() }?.let { normRoad(it.roadName) }
+                if (secRoadName == null && startRoad != null && odo - passedAtOdo <= 500.0) secRoadName = startRoad
+                val step = (odo - secLastOdo).coerceAtLeast(0.0)
                 if (t.kind == CamKind.SECTION_START || midSection) {
-                    if (ext == null) secEndGoneOdo = null
+                    if (ext == null) { secGoneM = 0.0; secGoneSawList = false }
                     else {
                         val end = ahead.firstOrNull { it.cam.kind == CamKind.SECTION_END }
                         if (end != null) {
                             passedHoldUntilOdo = odo + end.along + config.restoreAfterM
-                            secEndOdo = odo + end.along; secEndGoneOdo = null
+                            secEndOdo = odo + end.along; secGoneM = 0.0; secGoneSawList = false
                         } else {
                             val endAt = secEndOdo
                             if (endAt != null && endAt - odo > 150.0) {
-                                val gone = secEndGoneOdo ?: odo.also { secEndGoneOdo = it }
-                                if (odo - gone >= config.sectionEndGoneM) drop("구간 이탈")
-                            } else secEndGoneOdo = null
+                                val lim = if (t.limitKmh > 0) t.limitKmh else lastSectionLimit
+                                val slowNow = lim > 0 && speedKmh < lim * 0.6
+                                val sameRoad = startRoad != null && startRoad == secRoadName
+                                if (!slowNow && !sameRoad) {
+                                    secGoneM += step
+                                    if (ext.isNotEmpty()) secGoneSawList = true
+                                    val need = if (secGoneSawList) config.sectionEndGoneM else config.sectionEndGoneM * 2
+                                    if (secGoneM >= need) drop("구간 이탈")
+                                }
+                            } else { secGoneM = 0.0; secGoneSawList = false }
                         }
                     }
                 }
                 // v0.13.4 C(보충): 짝 종점도 없고 카카오 "끝"도 못 본 구간만 — 시점 때와 이름이 다른 도로를 sectionOtherRoadM 달리면 이탈
-                if (target != null && (t.kind == CamKind.SECTION_START || midSection) && !t.hasPartner && secEndOdo == null) {
+                // v0.14.1: 카카오가 연결돼 있으면 쓰지 않는다(맵매칭 오판으로 구간 안에서 풀릴 위험)
+                if (target != null && ext == null && (t.kind == CamKind.SECTION_START || midSection) && !t.hasPartner && secEndOdo == null) {
                     val rv = view?.takeIf { !it.ambiguous && it.roadName.isNotBlank() }
                     if (rv != null) {
                         val name = normRoad(rv.roadName)
                         val base = secRoadName
-                        if (base == null) { if (odo - passedAtOdo <= 500.0) secRoadName = name }
+                        if (base == null) Unit
                         else if (name == base) otherRoadM = 0.0
                         else {
                             otherRoadM += odo - secLastOdo
@@ -499,7 +526,10 @@ class SlowdownEngine(
                         // v0.13.4 A: 시점→종점 선에서 멀리 벗어났고 구간 방향으로 더 나아가지 않음 = 구간을 빠져나감
                         if (target != null) {
                             if (p > axisMax) { axisMax = p; axisMaxOdo = odo }
-                            if (abs(x) > config.sectionOffAxisM && odo - axisMaxOdo >= config.sectionStallM) {
+                            // v0.14.1: 헤어핀처럼 크게 휘는 구간은 종점과는 가까워지거나 비슷 — 종점에서도 멀어질 때만
+                            val dEnd = Geo.distance(fix.lat, fix.lon, pLat, pLon)
+                            partnerMinDist = min(partnerMinDist, dEnd)
+                            if (abs(x) > config.sectionOffAxisM && odo - axisMaxOdo >= config.sectionStallM && dEnd - partnerMinDist >= 100.0) {
                                 if (++offAxisCount >= config.lostFixes) drop("구간 이탈")
                             } else offAxisCount = 0
                         }
