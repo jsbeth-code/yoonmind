@@ -1405,17 +1405,26 @@ class MainActivity : AppCompatActivity() {
         }
 
         // 감시 중: 목적지 아래 줄은 상태 점(● 카카오 ● 커맨더) — 초록 정상, 노랑·빨강 문제
+        // v0.14.2: 접힌 카드 — 펼친 화면은 "● 카카오 경로" / "● 커맨더" 두 줄(점과 글자가 떨어지지 않게),
+        //          접은 화면·일반 폰은 글자 없이 점 두 개(왼쪽 카카오, 오른쪽 커맨더). 메뉴를 열면 한 줄.
+        val closedCard = !(wide || sheetOpen)
+        val dotsOnly = closedCard && !bigScreen
         if (running && !sim) {
             val okG = 0xFF2E9D62.toInt(); val warnY = 0xFFE0A020.toInt(); val badR = 0xFFD93025.toInt()
             val kakaoState = when { kakaoDown -> "카카오 끊김" to warnY; following -> "카카오 경로" to okG; else -> "카카오" to okG }
             val cmdState = when { !out.ble -> "음성만" to t.muted; S3xyButton.ready -> "커맨더" to okG; else -> "커맨더 없음" to badR }
-            val sep = if (!(wide || sheetOpen) && !bigScreen) "\n" else "   "
             destSub.text = SpannableStringBuilder().apply {
                 for ((i, st2) in listOf(kakaoState, cmdState).withIndex()) {
-                    if (i > 0) append(sep)
-                    val a = length; append("● "); setSpan(ForegroundColorSpan(st2.second), a, a + 1, 0)
-                    val b = length; append(st2.first); if (st2.second == badR || st2.second == warnY) setSpan(ForegroundColorSpan(st2.second), b, length, 0)
+                    if (i > 0) append(if (dotsOnly) "  " else if (closedCard) "\n" else "   ")
+                    val a = length; append(if (dotsOnly) "●" else "●\u00A0"); setSpan(ForegroundColorSpan(st2.second), a, a + 1, 0)
+                    if (dotsOnly) { setSpan(RelativeSizeSpan(1.5f), a, a + 1, 0); continue }
+                    val b = length; append(st2.first.replace(" ", "\u00A0")); if (st2.second == badR || st2.second == warnY) setSpan(ForegroundColorSpan(st2.second), b, length, 0)
                 }
+            }
+        } else if (dotsOnly) {
+            // 감시 꺼짐·가상 주행: 회색 점 두 개
+            destSub.text = SpannableStringBuilder().apply {
+                append("●  ●"); setSpan(ForegroundColorSpan(0xFF8A90B0.toInt()), 0, length, 0); setSpan(RelativeSizeSpan(1.5f), 0, length, 0)
             }
         }
 
