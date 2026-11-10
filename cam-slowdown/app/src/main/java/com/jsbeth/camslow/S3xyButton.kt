@@ -143,7 +143,6 @@ object S3xyButton {
         override fun onStartFailure(errorCode: Int) { advertising = false; log("ENH_BTN 광고 실패 code=$errorCode") }
     }
 
-    @Synchronized
     /** v0.14.3: 버튼(GATT 서버·광고)을 새로 켠 시각(elapsedRealtime). 0 = 꺼짐. 새로 켠 뒤 커맨더가 안 오면 빨리 다시 등록 안내. */
     @Volatile var startedAt = 0L
         private set
@@ -160,6 +159,7 @@ object S3xyButton {
         }.onFailure { log("커맨더 본딩 확인($reason) 실패: ${it.javaClass.simpleName}") }
     }
 
+    @Synchronized
     fun start(context: Context, logger: (String) -> Unit, renameAdapter: Boolean): Boolean {
         log = logger
         if (server != null) { logBond("감시 시작 · 버튼 유지 중"); return true }
