@@ -223,7 +223,26 @@ class MainActivity : AppCompatActivity() {
             row.addView(ScrollView(this).apply { addView(right) }, LinearLayout.LayoutParams(0, -1, 1f))
             setContentView(row)
         } else {
-            val root = FrameLayout(this).apply { setBackgroundColor(t.bg) }
+            // v0.14.3: 메뉴가 열려 있을 때 지도(메뉴 밖) 아무 데나 누르면 접는다 — 그 터치는 지도에 넘기지 않는다
+            val root = object : FrameLayout(this) {
+                private var eating = false
+                override fun onInterceptTouchEvent(e: MotionEvent): Boolean {
+                    if (e.actionMasked == MotionEvent.ACTION_DOWN) {
+                        eating = false
+                        val pv = panelView
+                        if (sheetOpen && pv != null) {
+                            val r = android.graphics.Rect(); pv.getHitRect(r)
+                            if (!r.contains(e.x.toInt(), e.y.toInt())) { eating = true; setSheet(false); return true }
+                        }
+                    }
+                    return eating
+                }
+                override fun onTouchEvent(e: MotionEvent): Boolean {
+                    val was = eating
+                    if (e.actionMasked == MotionEvent.ACTION_UP || e.actionMasked == MotionEvent.ACTION_CANCEL) eating = false
+                    return was
+                }
+            }.apply { setBackgroundColor(t.bg) }
             root.addView(mapFrame, FrameLayout.LayoutParams(-1, -1))
             root.addView(cards, FrameLayout.LayoutParams(-1, -2, Gravity.TOP or Gravity.END).apply { leftMargin = dp(10); rightMargin = dp(10); topMargin = dp(10) })
             // v0.13.7: 판은 지도 위에 떠 있는 알약(옮길 수 있음) — 자리는 placeSheet()

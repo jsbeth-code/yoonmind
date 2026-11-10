@@ -144,9 +144,25 @@ object S3xyButton {
     }
 
     @Synchronized
+    /** v0.14.3: 버튼(GATT 서버·광고)을 새로 켠 시각(elapsedRealtime). 0 = 꺼짐. 새로 켠 뒤 커맨더가 안 오면 빨리 다시 등록 안내. */
+    @Volatile var startedAt = 0L
+        private set
+
+    /** v0.14.3 조사: 폰에 커맨더 본딩(정식 페어링)이 남아 있는지 기록. 버튼을 새로 켤 때, 감시 시작 때, 커맨더가 1분 넘게 안 올 때. */
+    fun logBond(reason: String) {
+        val adapter = app?.getSystemService(BluetoothManager::class.java)?.adapter ?: return
+        runCatching {
+            val known = subscribedAddrs()
+            val bondedNow = adapter.bondedDevices.orEmpty().filter { it.address in known }.map { it.address }
+            log("커맨더 본딩 확인($reason): 저장된 커맨더 ${known.size}개, 폰에 본딩 남음 ${bondedNow.size}개" +
+                (if (known.isNotEmpty()) " (${known.joinToString { a -> a + if (a in bondedNow) " 본딩" else " 없음" }})" else "") +
+                (if (startedAt > 0L) " · 버튼 켠 지 ${(SystemClock.elapsedRealtime() - startedAt) / 60_000}분" else ""))
+        }.onFailure { log("커맨더 본딩 확인($reason) 실패: ${it.javaClass.simpleName}") }
+    }
+
     fun start(context: Context, logger: (String) -> Unit, renameAdapter: Boolean): Boolean {
         log = logger
-        if (server != null) return true
+        if (server != null) { logBond("감시 시작 · 버튼 유지 중"); return true }
         val ctx = context.applicationContext
         app = ctx
         val manager = ctx.getSystemService(BluetoothManager::class.java)
@@ -180,12 +196,8 @@ object S3xyButton {
                 try { ctx.registerReceiver(bondReceiver, IntentFilter(BluetoothDevice.ACTION_BOND_STATE_CHANGED)); bondReceiverOn = true } catch (_: Exception) {}
             }
             // v0.13.3 조사: 앱을 다시 켜면 커맨더가 안 붙는 원인 확인용 — 폰 쪽에 커맨더 본딩(정식 페어링)이 남아 있는지 기록
-            runCatching {
-                val known = subscribedAddrs()
-                val bondedNow = adapter.bondedDevices.orEmpty().filter { it.address in known }.map { it.address }
-                log("커맨더 본딩 확인: 저장된 커맨더 ${known.size}개, 폰에 본딩 남음 ${bondedNow.size}개" +
-                    (if (known.isNotEmpty()) " (${known.joinToString { a -> a + if (a in bondedNow) " 본딩" else " 없음" }})" else ""))
-            }
+            startedAt = SystemClock.elapsedRealtime()
+            logBond("버튼 새로 켬")
             startAdvertising(adapter)
             return true
         } catch (e: SecurityException) {
@@ -208,6 +220,7 @@ object S3xyButton {
 
     @Synchronized
     fun stop() {
+        startedAt = 0L
         pairingMode = false
         try {
             app?.getSystemService(BluetoothManager::class.java)?.adapter?.let { a ->

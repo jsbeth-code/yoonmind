@@ -495,13 +495,16 @@ class DriveService : Service(), LocationListener {
             outputs.say("커맨더가 아직 연결되지 않았습니다")
         }
         // 광고를 다시 켜고도 2분 넘게 아무것도 안 오면 화면에 다시 등록 안내(한 번)
-        if (cmdWarned && S3xyButton.idle && !cmdHelpShown && now - cmdLostAt >= 3 * CMD_WARN_MS) {
+        // v0.14.3: 버튼을 새로 켠 뒤(재부팅·업데이트·앱 새로 시작, 10분 안)면 1분 만에 — 이때는 다시 추가해야 붙는 일이 많다
+        val freshButton = S3xyButton.startedAt > 0L && now - S3xyButton.startedAt <= 10 * 60_000L
+        if (cmdWarned && S3xyButton.idle && !cmdHelpShown && now - cmdLostAt >= (if (freshButton) CMD_WARN_MS else 3 * CMD_WARN_MS)) {
             cmdHelpShown = true; DriveState.cmdHelpAt = System.currentTimeMillis(); DriveState.changed()
         }
         if (!cmdWarned && now - cmdLostAt >= CMD_WARN_MS) {
             cmdWarned = true; cmdWarnAt = now
             DriveState.log("⚠ 커맨더가 1분 넘게 연결되지 않음 (${S3xyButton.status}) — 감속 신호가 나가지 않습니다. 계속되면 [페어링하기] 후 enhauto에서 버튼 다시 추가")
             outputs.say("커맨더가 연결되지 않았습니다. 감속 신호가 나가지 않습니다")
+            S3xyButton.logBond("커맨더 1분 넘게 안 옴")
         }
     }
     /** 테슬라 목적지: 마지막으로 카카오에 적용한 것과 오류 기록(같은 오류는 한 번만). */

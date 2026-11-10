@@ -658,6 +658,9 @@ object KakaoSafety : KNGuidance_SafetyGuideDelegate, KNGuidance_LocationGuideDel
     override fun shouldPlayVoiceGuide(guidance: KNGuidance, voiceGuide: KNGuide_Voice, strings: MutableList<ByteArray>): Boolean {
         // v0.11.7: 카카오가 직접 내면 소리가 안 나와서(실차) 음성 데이터를 우리 소리 경로(알람 채널 등)로 직접 튼다
         val data = runCatching { voiceGuide.data }.getOrNull()?.takeIf { it.isNotEmpty() }?.map { it.copyOf() }
+        // v0.14.3 조사: 안내 종류별로 끌 수 있는지 보려고 음성에 붙은 정보를 기록(동작은 그대로)
+        val info = describeVoice(voiceGuide)
+        main.post { log("카카오 음성 정보: $info") }
         if (!voiceNoted) { voiceNoted = true; main.post { log("카카오 음성 첫 안내: 조각 ${data?.size ?: 0}개 · 화면 ${if (naviView != null) "있음" else "없음"}") } }
         // 직접 재생은 메인 스레드에서 차례로. 한 번 실패한 형식이면 그 뒤로는 카카오에 맡긴다.
         if (data != null && !voiceFailed && app != null) { main.post { playVoice(data) }; return false }
@@ -665,6 +668,24 @@ object KakaoSafety : KNGuidance_SafetyGuideDelegate, KNGuidance_LocationGuideDel
         return try { v.shouldPlayVoiceGuide(guidance, voiceGuide, strings) } catch (e: Throwable) { true }
     }
     private var voiceNoted = false
+    /** 음성 안내 객체의 값들을 글로(get·is 메서드 이름=값). 음성 데이터는 크기만. */
+    private fun describeVoice(v: Any): String = runCatching {
+        val parts = v.javaClass.methods
+            .filter { it.parameterTypes.isEmpty() && (it.name.startsWith("get") || it.name.startsWith("is")) && it.declaringClass != Any::class.java && it.name != "getClass" }
+            .sortedBy { it.name }
+            .map { m ->
+                val r = runCatching { m.invoke(v) }.getOrNull()
+                val txt = when (r) {
+                    null -> "null"
+                    is ByteArray -> "[${r.size}B]"
+                    is Collection<*> -> "[${r.size}개]"
+                    is Array<*> -> "[${r.size}개]"
+                    else -> r.toString().take(60)
+                }
+                m.name.removePrefix("get") + "=" + txt
+            }
+        (v.javaClass.simpleName + " " + parts.joinToString(", ")).take(500)
+    }.getOrElse { "읽기 실패 ${it.javaClass.simpleName}" }
     @Volatile var voiceFailed = false
         private set
     private var voiceFileSeq = 0
