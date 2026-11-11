@@ -12,9 +12,10 @@ import android.bluetooth.BluetoothGattService
 import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothProfile
 import android.bluetooth.BluetoothStatusCodes
-import android.bluetooth.le.AdvertiseCallback
+import android.bluetooth.le.AdvertisingSet
+import android.bluetooth.le.AdvertisingSetCallback
+import android.bluetooth.le.AdvertisingSetParameters
 import android.bluetooth.le.AdvertiseData
-import android.bluetooth.le.AdvertiseSettings
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -106,8 +107,27 @@ object S3xyButton {
         private set
     private var connectAt = 0L
     private val quickDrops = ArrayList<Long>()
-    /** 주행과 무관하게 페어링을 위해 켜 둔 상태. 서비스가 끝나도 끄지 않는다. */
+    /** 주행과 무관하게 페어링을 위해 켜 둔 상태. 서비스가 끝나도 끄지 않는다.
+     *  v0.14.4: 커맨더가 붙으면(감시 중) 또는 10분 지나면 저절로 끝난다 — 예전엔 안 끝나서 감시를 껐다 켜도 버튼이 안 지워졌다. */
     @Volatile var pairingMode = false
+        private set
+    private val pairingTimeout = Runnable {
+        if (!pairingMode) return@Runnable
+        pairingMode = false
+        log("페어링 모드 자동 끝(10분)")
+        // 감시 중이 아니고 버튼 유지도 아니면 끈다(유지 설정이면 같은 주소를 지키려고 남긴다)
+        val keep = app?.let { Prefs.bleOn(it) && Prefs.keepButton(it) } == true
+        if (server != null && !DriveState.running && !keep) stop()
+    }
+    fun beginPairing() {
+        pairingMode = true
+        main.removeCallbacks(pairingTimeout); main.postDelayed(pairingTimeout, 10 * 60_000L)
+    }
+    private fun endPairing(reason: String) {
+        if (!pairingMode || !DriveState.running) return
+        pairingMode = false; main.removeCallbacks(pairingTimeout)
+        log("페어링 모드 끝($reason)")
+    }
     /** 보내는 중인 누름 묶음의 진행: (보낸 수, 전체). 다 보내면 null. 화면이 "클릭 2/3"을 보여 주는 데 쓴다. */
     @Volatile var progress: Pair<Int, Int>? = null
     @Volatile var progressKind: Press? = null
@@ -118,12 +138,11 @@ object S3xyButton {
     /** 아무 기기도 접속해 있지 않은지(커맨더가 아예 안 찾아옴). */
     val idle: Boolean get() = server != null && device == null
 
-    /** 버튼 광고를 껐다 켠다(GATT 서버는 그대로) — 커맨더가 폰을 못 알아보고 안 찾아올 때 다시 알리기. */
+    /** 커맨더가 안 올 때 광고를 다시 켠다. v0.14.4: 광고를 새로 만들지 않고 같은 광고를 다시 켠다(새로 만들면 폰 주소가 바뀌어 커맨더가 못 알아보는 것으로 추정). */
     fun readvertise() {
-        val a = app?.getSystemService(BluetoothManager::class.java)?.adapter ?: return
         if (server == null || device != null) return
-        try { a.bluetoothLeAdvertiser?.stopAdvertising(advCb) } catch (_: Exception) {}
-        main.postDelayed({ if (server != null && device == null) { startAdvertising(a); log("커맨더가 안 와서 버튼 광고를 다시 켬") } }, 1_500)
+        log("커맨더가 안 와서 같은 광고를 다시 켬(주소 유지)")
+        reEnableAdvertising()
     }
     val status: String
         get() = when {
@@ -138,10 +157,56 @@ object S3xyButton {
     /** 클릭 times번을 보내는 데 걸리는 시간(초). 감속 거리 계산에 더한다. */
     fun pressSeconds(times: Int, gapMs: Long): Double = times * (gapMs + 60) / 1000.0
 
-    private val advCb = object : AdvertiseCallback() {
-        override fun onStartSuccess(settingsInEffect: AdvertiseSettings?) { advertising = true; log("ENH_BTN 광고 시작 — 커맨더에서 [Add S3XY Button]") }
-        override fun onStartFailure(errorCode: Int) { advertising = false; log("ENH_BTN 광고 실패 code=$errorCode") }
+    /** v0.14.4: 광고는 광고 묶음(AdvertisingSet) 하나로 켜고, 끊긴 뒤·커맨더가 안 올 때는 그 묶음을 다시 켠다(새로 만들지 않음). */
+    @Volatile private var advSet: AdvertisingSet? = null
+    /** 진단: 버튼을 켠 뒤 광고를 새로 만든 횟수·같은 광고를 다시 켠 횟수. */
+    @Volatile private var advCreated = 0
+    @Volatile private var advReEnabled = 0
+    private val advCb = object : AdvertisingSetCallback() {
+        override fun onAdvertisingSetStarted(set: AdvertisingSet?, txPower: Int, status: Int) {
+            if (status == AdvertisingSetCallback.ADVERTISE_SUCCESS && set != null) {
+                advSet = set; advertising = true; advCreated++
+                log("ENH_BTN 광고 시작(새 광고 ${advCreated}번째) — 커맨더에서 [Add S3XY Button]")
+            } else { advSet = null; advertising = false; log("ENH_BTN 광고 실패 code=$status") }
+        }
+        override fun onAdvertisingEnabled(set: AdvertisingSet?, enable: Boolean, status: Int) {
+            if (!enable) return
+            if (status == AdvertisingSetCallback.ADVERTISE_SUCCESS) advertising = true
+            else log("같은 광고 다시 켜기 결과 code=$status")
+        }
+        override fun onAdvertisingSetStopped(set: AdvertisingSet?) { if (set == advSet) { advSet = null; advertising = false } }
     }
+
+    /** 같은 광고 묶음을 다시 켠다. 묶음이 없으면 새로 만든다(이때는 주소가 바뀔 수 있음 — 기록에 남김). */
+    private fun reEnableAdvertising() {
+        val a = app?.getSystemService(BluetoothManager::class.java)?.adapter ?: return
+        if (server == null) return
+        val set = advSet
+        if (set != null) {
+            try { set.enableAdvertising(true, 0, 0); advReEnabled++; return } catch (e: Exception) { log("같은 광고 다시 켜기 오류: ${e.message} — 새로 만듦") }
+        }
+        log("광고 묶음이 없어 새로 만듦(폰 주소가 바뀔 수 있음)")
+        startAdvertising(a)
+    }
+
+    /** 진단: 폰 블루투스 켜짐/꺼짐, 저장된 커맨더와의 블루투스 링크 연결/끊김. 동작은 바꾸지 않고 기록만. */
+    private val diagReceiver = object : BroadcastReceiver() {
+        override fun onReceive(c: Context, i: Intent) {
+            when (i.action) {
+                BluetoothAdapter.ACTION_STATE_CHANGED -> when (i.getIntExtra(BluetoothAdapter.EXTRA_STATE, -1)) {
+                    BluetoothAdapter.STATE_OFF -> { advertising = false; advSet = null; log("⚠ 폰 블루투스 꺼짐 — 버튼(광고·GATT)이 같이 꺼졌을 수 있음") }
+                    BluetoothAdapter.STATE_ON -> log("폰 블루투스 켜짐")
+                }
+                BluetoothDevice.ACTION_ACL_CONNECTED, BluetoothDevice.ACTION_ACL_DISCONNECTED -> {
+                    val dev: BluetoothDevice = (if (Build.VERSION.SDK_INT >= 33) i.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE, BluetoothDevice::class.java)
+                        else @Suppress("DEPRECATION") i.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE)) ?: return
+                    if (dev.address !in subscribedAddrs()) return
+                    log("커맨더 블루투스 링크 " + (if (i.action == BluetoothDevice.ACTION_ACL_CONNECTED) "연결" else "끊김") + " ${dev.address}")
+                }
+            }
+        }
+    }
+    private var diagReceiverOn = false
 
     /** v0.14.3: 버튼(GATT 서버·광고)을 새로 켠 시각(elapsedRealtime). 0 = 꺼짐. 새로 켠 뒤 커맨더가 안 오면 빨리 다시 등록 안내. */
     @Volatile var startedAt = 0L
@@ -155,7 +220,10 @@ object S3xyButton {
             val bondedNow = adapter.bondedDevices.orEmpty().filter { it.address in known }.map { it.address }
             log("커맨더 본딩 확인($reason): 저장된 커맨더 ${known.size}개, 폰에 본딩 남음 ${bondedNow.size}개" +
                 (if (known.isNotEmpty()) " (${known.joinToString { a -> a + if (a in bondedNow) " 본딩" else " 없음" }})" else "") +
-                (if (startedAt > 0L) " · 버튼 켠 지 ${(SystemClock.elapsedRealtime() - startedAt) / 60_000}분" else ""))
+                (if (startedAt > 0L) " · 버튼 켠 지 ${(SystemClock.elapsedRealtime() - startedAt) / 60_000}분" else "") +
+                " · 블루투스 ${if (adapter.isEnabled) "켜짐" else "꺼짐"}, 이름 ${adapter.name}, " +
+                (if (advertising) "광고 중" else "광고 안 됨") + "(새 광고 ${advCreated}번·다시 켬 ${advReEnabled}번)" +
+                ", 페어링 모드 ${if (pairingMode) "켬" else "끔"}, 유지 설정 ${if (app?.let { Prefs.keepButton(it) } == true) "켬" else "끔"}")
         }.onFailure { log("커맨더 본딩 확인($reason) 실패: ${it.javaClass.simpleName}") }
     }
 
@@ -195,6 +263,17 @@ object S3xyButton {
             if (!bondReceiverOn) {
                 try { ctx.registerReceiver(bondReceiver, IntentFilter(BluetoothDevice.ACTION_BOND_STATE_CHANGED)); bondReceiverOn = true } catch (_: Exception) {}
             }
+            if (!diagReceiverOn) {
+                try {
+                    ctx.registerReceiver(diagReceiver, IntentFilter().apply {
+                        addAction(BluetoothAdapter.ACTION_STATE_CHANGED)
+                        addAction(BluetoothDevice.ACTION_ACL_CONNECTED)
+                        addAction(BluetoothDevice.ACTION_ACL_DISCONNECTED)
+                    })
+                    diagReceiverOn = true
+                } catch (_: Exception) {}
+            }
+            advCreated = 0; advReEnabled = 0
             // v0.13.3 조사: 앱을 다시 켜면 커맨더가 안 붙는 원인 확인용 — 폰 쪽에 커맨더 본딩(정식 페어링)이 남아 있는지 기록
             startedAt = SystemClock.elapsedRealtime()
             logBond("버튼 새로 켬")
@@ -207,31 +286,37 @@ object S3xyButton {
 
     private fun startAdvertising(adapter: BluetoothAdapter) {
         val adv = adapter.bluetoothLeAdvertiser ?: run { log("이 폰은 BLE 광고를 지원하지 않음"); return }
-        val settings = AdvertiseSettings.Builder()
-            .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_LOW_LATENCY)
-            .setTxPowerLevel(AdvertiseSettings.ADVERTISE_TX_POWER_HIGH)
+        val params = AdvertisingSetParameters.Builder()
+            .setLegacyMode(true)
             .setConnectable(true)
-            .setTimeout(0)
+            .setScannable(true)
+            .setInterval(AdvertisingSetParameters.INTERVAL_LOW)
+            .setTxPowerLevel(AdvertisingSetParameters.TX_POWER_HIGH)
             .build()
         val data = AdvertiseData.Builder().setIncludeDeviceName(true).build()
         val scanResp = AdvertiseData.Builder().addServiceUuid(ParcelUuid(SERVICE_UUID)).build()
-        try { adv.startAdvertising(settings, data, scanResp, advCb) } catch (e: Exception) { log("광고 시작 오류: ${e.message}") }
+        // 남아 있는 광고 묶음이 있으면 먼저 정리(두 개가 겹치지 않게)
+        try { adv.stopAdvertisingSet(advCb) } catch (_: Exception) {}
+        advSet = null
+        try { adv.startAdvertisingSet(params, data, scanResp, null, null, advCb) } catch (e: Exception) { log("광고 시작 오류: ${e.message}") }
     }
 
     @Synchronized
     fun stop() {
         startedAt = 0L
         pairingMode = false
+        main.removeCallbacks(pairingTimeout)
         try {
             app?.getSystemService(BluetoothManager::class.java)?.adapter?.let { a ->
-                a.bluetoothLeAdvertiser?.stopAdvertising(advCb)
+                a.bluetoothLeAdvertiser?.stopAdvertisingSet(advCb)
                 if (renamed) { previousName?.let { a.setName(it) }; renamed = false }
             }
         } catch (_: Exception) {}
-        advertising = false
+        advertising = false; advSet = null
         try { server?.close() } catch (_: Exception) {}
         server = null; notifyChar = null; device = null; subscribed = false; provisional = false
         if (bondReceiverOn) { try { app?.unregisterReceiver(bondReceiver) } catch (_: Exception) {}; bondReceiverOn = false }
+        if (diagReceiverOn) { try { app?.unregisterReceiver(diagReceiver) } catch (_: Exception) {}; diagReceiverOn = false }
         log("ENH_BTN 끔")
     }
 
@@ -240,6 +325,7 @@ object S3xyButton {
         if (device?.address != dev.address) return
         if (provisional) { provisional = false; saveSubscribed(dev.address, true); log("커맨더 확인됨 — 저장") }
         repairNeeded = false; quickDrops.clear()
+        endPairing("커맨더 확인됨")
     }
 
     private fun bondName(state: Int) = when (state) {
@@ -270,6 +356,7 @@ object S3xyButton {
                 subscribed = bonded && (dev.address in known || provisional)
                 log("BLE 접속 ${dev.address} (본딩 ${bondName(dev.bondState)})" +
                     when { subscribed && !provisional -> " — 커맨더, 이전 구독 유지, 버튼 준비"; provisional -> " — 커맨더로 가정(확인 전)"; else -> "" })
+                if (subscribed && !provisional) endPairing("커맨더 붙음")
                 // 실제 버튼(ESP32 예제도)은 접속하자마자 버튼 쪽에서 보안(본딩)을 요청한다. 커맨더는 이걸 기다리다 몇 초 뒤 끊는다.
                 // 그래서 본딩이 안 돼 있으면 폰이 먼저 본딩을 요청한다 → 폰에 페어링 요청 창(승인).
                 // 단, 엉뚱한 기기에 페어링 창이 뜨지 않도록 [페어링하기]를 눌렀거나 아직 커맨더가 하나도 없을 때만.
@@ -297,10 +384,8 @@ object S3xyButton {
                         log("⚠ 커맨더가 붙자마자 끊기기를 반복 — 페어링 키가 어긋난 듯. enhauto에서 버튼 삭제 후 [페어링하기]로 다시 추가")
                     }
                 }
-                // 접속 중엔 광고가 멈추는 폰이 있어 껐다가 다시 켠다
-                app?.getSystemService(BluetoothManager::class.java)?.adapter?.let { a ->
-                    if (server != null) { try { a.bluetoothLeAdvertiser?.stopAdvertising(advCb) } catch (_: Exception) {}; startAdvertising(a) }
-                }
+                // 접속 중엔 광고가 멈추므로 다시 켠다. v0.14.4: 새로 만들지 않고 같은 광고를 다시 켠다(주소 유지 — 추정)
+                if (server != null) reEnableAdvertising()
             }
         }
 
@@ -337,7 +422,7 @@ object S3xyButton {
                 subscribed = value.isNotEmpty() && (value[0].toInt() and 1) != 0
                 saveSubscribed(dev.address, subscribed)
                 log(if (subscribed) "알림 구독됨 — 버튼 준비" else "알림 구독 해제")
-                if (subscribed) { repairNeeded = false; quickDrops.clear() }
+                if (subscribed) { repairNeeded = false; quickDrops.clear(); endPairing("알림 구독됨") }
             }
             if (responseNeeded) server?.sendResponse(dev, requestId, BluetoothGatt.GATT_SUCCESS, offset, value)
         }

@@ -286,7 +286,7 @@ class SettingsActivity : Activity() {
         if (S3xyButton.running && S3xyButton.pairingMode) { S3xyButton.stop(); refreshStatus(); return }
         if (S3xyButton.running) { Toast.makeText(this, "이미 광고 중", Toast.LENGTH_SHORT).show(); return }
         val ok = S3xyButton.start(this, { DriveState.log(it) }, Prefs.renameAdapter(this))
-        S3xyButton.pairingMode = ok
+        if (ok) S3xyButton.beginPairing()
         Toast.makeText(this, if (ok) "ENH_BTN 광고 중 — enhauto 앱에서 Add S3XY Button" else "시작 실패 — 블루투스를 확인하세요", Toast.LENGTH_LONG).show()
         refreshStatus()
     }

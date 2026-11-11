@@ -484,7 +484,7 @@ class DriveService : Service(), LocationListener {
             cmdLostAt = 0L; cmdWarned = false; return
         }
         if (cmdLostAt == 0L) { cmdLostAt = now; return }
-        // 1분·4분·…(3분마다) 아무것도 안 붙어 있으면 버튼 광고를 다시 켜서 커맨더가 다시 찾게
+        // 1분·4분·…(3분마다) 아무것도 안 붙어 있으면 같은 광고를 다시 켠다(v0.14.4: 새로 만들지 않음 — 주소 유지)
         if (S3xyButton.idle && now - cmdLostAt >= CMD_WARN_MS && now - lastReadvertise >= 180_000L) {
             lastReadvertise = now; S3xyButton.readvertise()
         }
@@ -1043,6 +1043,7 @@ class DriveService : Service(), LocationListener {
         DriveState.carProfile = null
         OverlayWindow.hide()
         if (S3xyButton.running && !S3xyButton.pairingMode && !keepButton()) S3xyButton.stop()
+        else if (S3xyButton.running) DriveState.log("커맨더 버튼 남김(" + (if (S3xyButton.pairingMode) "페어링 모드" else "유지 설정") + ")")
         DriveState.log("주행 감시 정지")
         if (!wasSlowed && !quiet) outputs.say("감시를 끕니다")
         DriveState.changed()

@@ -918,7 +918,7 @@ class MainActivity : AppCompatActivity() {
             .setMessage("앱을 다시 켜면 폰 블루투스 주소가 바뀌어 커맨더가 폰을 못 알아볼 때가 있습니다.\n\n" +
                 "차를 세운 뒤:\n1. 아래 [페어링 모드 켜기]\n2. enhauto 앱 → Buttons → Add S3XY Button\n3. 폰에 뜨는 페어링 요청 [승인]\n4. (필요하면) 버튼 기능: 클릭 = 크루징 속도 내림, 더블클릭 = 올림\n\n" +
                 "설정 ⑥ \"감시를 꺼도 커맨더 버튼 유지\"를 켜 두면 이런 일이 줄어듭니다.")
-            .setPositiveButton("페어링 모드 켜기") { _, _ -> S3xyButton.pairingMode = true; DriveState.log("페어링 모드 켬 — enhauto에서 Add S3XY Button"); render() }
+            .setPositiveButton("페어링 모드 켜기") { _, _ -> S3xyButton.beginPairing(); DriveState.log("페어링 모드 켬 — enhauto에서 Add S3XY Button"); render() }
             .setNegativeButton("닫기", null)
             .show()
     }
@@ -927,7 +927,7 @@ class MainActivity : AppCompatActivity() {
         if (S3xyButton.running && S3xyButton.pairingMode) { S3xyButton.stop(); render(); return }
         if (S3xyButton.running) { Toast.makeText(this, "주행 감시가 켜 둔 상태입니다 — 이미 광고 중", Toast.LENGTH_SHORT).show(); return }
         val ok = S3xyButton.start(this, { DriveState.log(it) }, Prefs.renameAdapter(this))
-        S3xyButton.pairingMode = ok
+        if (ok) S3xyButton.beginPairing()
         Toast.makeText(this, if (ok) "ENH_BTN 광고 중 — 커맨더 앱에서 Add S3XY Button" else "시작 실패 — 기록을 보세요", Toast.LENGTH_LONG).show()
         render()
     }
