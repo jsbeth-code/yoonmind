@@ -1,0 +1,55 @@
+name: cam-slowdown board firmware
+
+on:
+  push:
+    paths:
+      - "cam-slowdown-board/**"
+      - ".github/workflows/cam-slowdown-board.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: cam-slowdown-board
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: pio-${{ hashFiles('cam-slowdown-board/platformio.ini') }}
+      - name: Install PlatformIO
+        run: pip install platformio esptool==4.8.1
+      - name: Build
+        run: pio run
+      - name: Merge into one file (flash at 0x0)
+        run: |
+          B=.pio/build/esp32dev
+          esptool.py --chip esp32 merge_bin -o cam-slowdown-board.bin \
+            0x1000 $B/bootloader.bin \
+            0x8000 $B/partitions.bin \
+            0xe000 ~/.platformio/packages/framework-arduinoespressif32/tools/partitions/boot_app0.bin \
+            0x10000 $B/firmware.bin
+          ls -l cam-slowdown-board.bin
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cam-slowdown-board-bin
+          path: cam-slowdown-board/cam-slowdown-board.bin
+      - name: Publish to release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: cam-slowdown-board-latest
+          name: FSD 감속 버튼 보드 프로그램 (최신 빌드)
+          prerelease: true
+          files: cam-slowdown-board/cam-slowdown-board.bin
+          body: |
+            ESP32 보드(ESP32-WROOM-32 / DEVKIT V1)용. 넣는 법은 cam-slowdown-board/README.md.
+            Espressif 웹 도구에서 Flash Address 0x0 에 cam-slowdown-board.bin 하나만 넣으면 된다.
+            브랜치 ${{ github.ref_name }} / 커밋 ${{ github.sha }}
