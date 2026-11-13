@@ -59,6 +59,8 @@ static Preferences prefs;
 static volatile esp_gatt_if_t gattsIf = ESP_GATT_IF_NONE;
 
 // 접속 표(커맨더와 폰이 함께 붙는다). 블루투스 작업에서 바꾸고 loop에서 읽는다.
+struct PhoneCmd { uint16_t conn; uint8_t len; uint8_t b[20]; };
+
 struct Conn {
   bool used;
   uint16_t id;
@@ -71,6 +73,10 @@ struct Conn {
   bool restore;     // 암호화되면 저장된 구독을 살림
   int8_t pendingSub;  // 암호화 전에 온 구독 쓰기(-1 없음)
   bool kicked;
+  bool windowAtConnect;  // 접속할 때 페어링 창이 열려 있었음(새 페어링을 받아도 됨)
+  bool authOk;      // 보안 완료(AUTH_CMPL)를 받아들임 — 폰 명령은 이 뒤에만 처리
+  bool hasPend;     // 보안 완료 전에 온 폰 명령(하나 보관)
+  PhoneCmd pend;
   uint8_t encRetries;  // 암호화 다시 요청한 횟수(동시 접속 때 보안 요청이 겹쳐 빠지는 경우)
   unsigned long at;
 };
@@ -85,7 +91,6 @@ static volatile unsigned long pairWindowUntil = 0;
 // 콜백(블루투스 작업)에서 바로 보내지 않고 loop에서 처리한다.
 struct Reply { uint16_t conn; uint8_t len; uint8_t b[4]; };
 static QueueHandle_t replies;
-struct PhoneCmd { uint16_t conn; uint8_t len; uint8_t b[20]; };
 static QueueHandle_t phoneCmds;
 static QueueHandle_t kickQ;   // 끊을 접속 id
 static int knownBonds = 0;    // 받아들인 페어링 수 — 창 밖에서 늘면 낯선 기기의 새 페어링이라 지운다
@@ -222,6 +227,7 @@ class ServerCb : public BLEServerCallbacks {
       c = Conn{};
       c.used = true; c.id = p->connect.conn_id; memcpy(c.addr, p->connect.remote_bda, 6);
       c.subscribed = false; c.restore = restore; c.pendingSub = -1; c.at = millis();
+      c.windowAtConnect = pairWindowOpen();
       break;
     }
     portEXIT_CRITICAL(&connMux);
@@ -316,7 +322,7 @@ class PhoneCmdCb : public BLECharacteristicCallbacks {
     // 폰 서비스에 써 온 접속은 커맨더가 아니다
     portENTER_CRITICAL(&connMux);
     Conn* cc = findConn(m.conn);
-    if (cc) { cc->phone = true; cc->subscribed = false; cc->encrypted = true; }  // 명령 특성도 암호화 필요
+    if (cc) { cc->phone = true; cc->subscribed = false; }
     portEXIT_CRITICAL(&connMux);
     connChanged = true;
     xQueueSend(phoneCmds, &m, 0);
@@ -338,7 +344,12 @@ class SecCb : public BLESecurityCallbacks {
     // 보드가 접속마다 먼저 보안 요청을 보내므로 스택은 낯선 기기와도 Just Works 페어링을 끝낸다(위 onSecurityRequest를 안 거침).
     // 페어링 수가 늘었는데 창이 닫혀 있으면 그 새 페어링을 지우고 끊는다.
     int nb = bondCount();
-    if (nb > knownBonds && !wasKnown(cmpl.bd_addr) && !pairWindowOpen()) {
+    // 창 판정은 접속할 때 기준(토큰을 주며 창을 닫은 뒤 보안 완료가 와도 방금 페어링한 폰을 지우지 않게 — 실차 2026-11-13)
+    bool windowOk = pairWindowOpen();
+    portENTER_CRITICAL(&connMux);
+    for (int i = 0; i < MAX_CONN; i++) if (conns[i].used && !conns[i].authOk && conns[i].windowAtConnect) windowOk = true;
+    portEXIT_CRITICAL(&connMux);
+    if (nb > knownBonds && !wasKnown(cmpl.bd_addr) && !windowOk) {
       esp_ble_remove_bond_device(cmpl.bd_addr);
       uint16_t kid = 0xFFFF;
       portENTER_CRITICAL(&connMux);
@@ -355,7 +366,7 @@ class SecCb : public BLESecurityCallbacks {
     Conn* c = nullptr;
     for (int i = 0; i < MAX_CONN; i++) if (conns[i].used && !conns[i].encrypted && memcmp(conns[i].addr, cmpl.bd_addr, 6) == 0) c = &conns[i];
     if (!c) for (int i = 0; i < MAX_CONN; i++) if (conns[i].used && !conns[i].encrypted && (!c || conns[i].at > c->at)) c = &conns[i];
-    if (c) { id = c->id; markEncrypted(c, &pending, &restored); }
+    if (c) { id = c->id; c->authOk = true; markEncrypted(c, &pending, &restored); }
     portEXIT_CRITICAL(&connMux);
     afterEncrypted(pending, restored);
     logf("암호화 됨 %s id=%d (페어링 %d개)%s", addrStr(cmpl.bd_addr).c_str(), id, bondCount(),
@@ -396,7 +407,9 @@ static void sendStateToPhones() {
 
 static void handlePhone(const PhoneCmd& m) {
   Conn* c = findConn(m.conn);
-  if (!c) return;
+  if (!c || c->kicked) return;
+  // 보안 완료(창 밖 새 페어링이면 지우고 끊음) 전엔 처리하지 않고 보관한다 — 낯선 기기가 지워지기 전에 명령을 넣지 못하게
+  if (!c->authOk) { c->pend = m; c->hasPend = true; logf("폰 명령 %02X 보관 id=%d — 보안 완료 기다림", m.b[0], m.conn); return; }
   uint8_t op = m.b[0];
   if (op == 0x01 && m.len == 17) {
     bool ok = hasToken && memcmp(token, m.b + 1, 16) == 0;
@@ -413,14 +426,13 @@ static void handlePhone(const PhoneCmd& m) {
       logf("같은 폰의 페어링 요청 다시 옴 id=%d — 같은 토큰 다시 보냄", m.conn);
       return;
     }
-    // 명령 특성은 암호화가 필요하고, 새 기기 페어링(본딩)은 창 안에서만 남는다(창 밖 새 페어링은 지우고 끊음).
-    // 그러니 여기까지 온 접속은 창에서 페어링해 둔 기기다 — 토큰 요청은 창과 무관하게 받는다.
-    // (실차 2026-11-13: 창을 연 직후에도 "보드가 거절"이 반복됨 — 원인 미확인. 창 시간에 기대지 않게 바꿈)
+    // 여기까지 온 접속은 보안 완료를 받아들인 기기다(창 밖 새 페어링은 그 전에 지우고 끊음) = 창에서 페어링해 둔 기기.
+    // 그러니 토큰 요청은 창과 무관하게 받는다. 창은 토큰을 줘도 닫지 않는다(1분 지나면 닫힘).
+    // (실차 2026-11-13: 토큰을 주며 창을 닫은 직후 보안 완료가 와서 방금 페어링한 폰을 "창 밖 새 페어링"으로 지웠다 — Fable 점검, 가능성 높음)
     logf("폰 페어링 요청 id=%d (페어링 창 %s)", m.conn, pairWindowOpen() ? "열림" : "닫힘");
     for (int i = 0; i < 16; i += 4) { uint32_t x = esp_random(); memcpy(token + i, &x, 4); }
     prefs.putBytes("tok", token, 16);
     hasToken = true;
-    pairWindowUntil = 0;
     // 이전에 인증된 다른 폰은 더 이상 못 쓴다
     for (int i = 0; i < MAX_CONN; i++) if (conns[i].used && conns[i].id != m.conn) conns[i].authed = false;
     c->authed = true;
@@ -536,6 +548,10 @@ void loop() {
   // 폰 명령
   PhoneCmd m;
   while (xQueueReceive(phoneCmds, &m, 0) == pdTRUE) handlePhone(m);
+  for (int i = 0; i < MAX_CONN; i++) {
+    Conn& c = conns[i];
+    if (c.used && c.hasPend && c.authOk && !c.kicked) { c.hasPend = false; PhoneCmd pm = c.pend; handlePhone(pm); }
+  }
 
   // 커맨더 상태가 바뀌면 폰에 알린다
   static uint8_t lastState = 255;
