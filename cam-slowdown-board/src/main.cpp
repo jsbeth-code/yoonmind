@@ -322,7 +322,11 @@ class PhoneCmdCb : public BLECharacteristicCallbacks {
     // 폰 서비스에 써 온 접속은 커맨더가 아니다
     portENTER_CRITICAL(&connMux);
     Conn* cc = findConn(m.conn);
-    if (cc) { cc->phone = true; cc->subscribed = false; }
+    if (cc) {
+      cc->phone = true; cc->subscribed = false;
+      // 이미 페어링돼 있던 주소면(지울 대상이 아님) 보안 완료 이벤트가 빠져도 명령 특성 쓰기(암호화 필수)로 충분하다 — 시동 직후 동시 접속 경합 대비
+      if (!cc->authOk && wasKnown(cc->addr)) { cc->authOk = true; cc->encrypted = true; }
+    }
     portEXIT_CRITICAL(&connMux);
     connChanged = true;
     xQueueSend(phoneCmds, &m, 0);
@@ -345,9 +349,13 @@ class SecCb : public BLESecurityCallbacks {
     // 페어링 수가 늘었는데 창이 닫혀 있으면 그 새 페어링을 지우고 끊는다.
     int nb = bondCount();
     // 창 판정은 접속할 때 기준(토큰을 주며 창을 닫은 뒤 보안 완료가 와도 방금 페어링한 폰을 지우지 않게 — 실차 2026-11-13)
+    // 주소가 같은 접속이 있으면 그 접속의 기준만, 없으면(주소가 바뀌는 기기) 보안 완료 전인 접속 중 하나라도
     bool windowOk = pairWindowOpen();
     portENTER_CRITICAL(&connMux);
-    for (int i = 0; i < MAX_CONN; i++) if (conns[i].used && !conns[i].authOk && conns[i].windowAtConnect) windowOk = true;
+    int match = -1;
+    for (int i = 0; i < MAX_CONN; i++) if (conns[i].used && !conns[i].authOk && memcmp(conns[i].addr, cmpl.bd_addr, 6) == 0) match = i;
+    if (match >= 0) { if (conns[match].windowAtConnect) windowOk = true; }
+    else for (int i = 0; i < MAX_CONN; i++) if (conns[i].used && !conns[i].authOk && conns[i].windowAtConnect) windowOk = true;
     portEXIT_CRITICAL(&connMux);
     if (nb > knownBonds && !wasKnown(cmpl.bd_addr) && !windowOk) {
       esp_ble_remove_bond_device(cmpl.bd_addr);
