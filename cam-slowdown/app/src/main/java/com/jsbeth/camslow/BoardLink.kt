@@ -94,8 +94,8 @@ object BoardLink {
         }
     }
 
-    /** 보드가 쓰기를 거절한 GATT 상태(쓰기 금지·인증·권한·암호화 부족) — 명령이 보드에 안 들어감. */
-    private val REJECTED = setOf(3, 5, 8, 15)
+    /** 보드가 쓰기를 거절한 GATT 상태(쓰기 금지·인증·암호화 부족) — 명령이 보드에 안 들어감. */
+    private val REJECTED = setOf(3, 5, 15)
 
     // ---- 누름 ----
     private val pressDone = Semaphore(0)
@@ -120,7 +120,7 @@ object BoardLink {
         val w = writeCmd(byteArrayOf(0x10, k.toByte(), n.toByte(), (gap and 0xFF).toByte(), (gap shr 8).toByte(), seq.toByte()))
         if (w != 0) {
             onPressProgress = null
-            // 복귀는 보드가 분명히 안 받은 경우(폰에서 못 보냄 -1, 보드가 쓰기 거절 3·5·8·15)만 0으로 센다.
+            // 복귀는 보드가 분명히 안 받은 경우(폰에서 못 보냄 -1, 보드가 쓰기 거절 3·5·15)만 0으로 센다.
             // 그 밖(응답 없음, 133 같은 끊김 오류)은 보드가 받아 끝까지 올렸을 수 있으니 나간 것으로 본다(차를 더 빠르게 보는 쪽).
             if (kind == S3xyButton.Press.DOUBLE && w != -1 && w !in REJECTED) { log("보드에 복귀 요청 전달 확인 못 함(${if (w == -2) "응답 없음" else "오류 $w"}) — 나간 것으로 봄"); return n }
             log("보드에 ${kind.label} 요청 못 보냄(${if (w == -2) "응답 없음" else "오류 $w"})")
@@ -189,11 +189,11 @@ object BoardLink {
     private fun connect() {
         val ctx = app ?: return
         val addr = Prefs.boardAddr(ctx)
-        if (addr.isEmpty()) { log("보드 경유: 보드 페어링이 안 됨 — 설정 ⑥ [보드 페어링]"); DriveState.changed(); return }
+        if (addr.isEmpty()) { if (!quiet) log("보드 경유: 보드 페어링이 안 됨 — 설정 ⑥ [보드 페어링]"); DriveState.changed(); return }
         val adapter = ctx.getSystemService(BluetoothManager::class.java)?.adapter
         if (adapter == null || !adapter.isEnabled) { log("블루투스가 꺼져 있음 — 10초 뒤 다시"); main.postDelayed(reconnect, 10_000); return }
         closeGatt()
-        authRejected = false; oldFirmware = false
+        if (!quiet) { authRejected = false; oldFirmware = false }
         try {
             val dev = adapter.getRemoteDevice(addr)
             gatt = dev.connectGatt(ctx, true, callback, BluetoothDevice.TRANSPORT_LE)
@@ -208,7 +208,7 @@ object BoardLink {
     /** 서비스를 찾은 뒤: 결과 알림 켜고 인사(토큰). 암호화(본딩) 전이면 쓰기가 막히므로 몇 번 다시 한다. */
     private fun setup(g: BluetoothGatt) = worker.execute {
         val svc = g.getService(SERVICE)
-        if (svc == null) { oldFirmware = true; log("보드에 폰 서비스가 없음 — 보드 프로그램이 옛 버전(1단계)"); DriveState.changed(); return@execute }
+        if (svc == null) { oldFirmware = true; if (!quiet) log("보드에 폰 서비스가 없음 — 보드 프로그램이 옛 버전(1단계)"); DriveState.changed(); return@execute }
         val cmd = svc.getCharacteristic(CMD); val evt = svc.getCharacteristic(EVT)
         if (cmd == null || evt == null) { oldFirmware = true; log("보드 서비스 모양이 다름 — 보드 프로그램 확인"); return@execute }
         cmdChar = cmd
@@ -229,15 +229,15 @@ object BoardLink {
         DriveState.changed()
         val ctx = app ?: return@execute
         val tok = hexToBytes(Prefs.boardToken(ctx))
-        if (tok == null || tok.size != 16) { authRejected = true; log("보드 토큰 없음 — 보드 BOOT 3초 후 설정 ⑥ [보드 페어링]"); DriveState.changed(); return@execute }
+        if (tok == null || tok.size != 16) { authRejected = true; if (!quiet) log("보드 토큰 없음 — 보드 BOOT 3초 후 설정 ⑥ [보드 페어링]"); DriveState.changed(); return@execute }
         for (attempt in 1..6) {
             if (gatt !== g || !active) return@execute
             val w = writeCmd(byteArrayOf(0x01) + tok)
             if (w == 0) return@execute // 결과는 알림(81)으로
-            if (!quiet || attempt == 6) log("보드 인사 실패(${w}) — 암호화 기다렸다 다시 ${attempt}/6")
+            if (!quiet) log("보드 인사 실패(${w}) — 암호화 기다렸다 다시 ${attempt}/6")
             Thread.sleep(5_000)
         }
-        log("⚠ 보드와 암호화가 안 됨 — 보드에서 페어링을 지웠다면 폰 블루투스 설정에서 ENH_BTN '기기 삭제' 후 보드 BOOT 3초 → [보드 페어링]. 1분마다 다시 시도")
+        if (!quiet) log("⚠ 보드와 암호화가 안 됨 — 보드에서 페어링을 지웠다면 폰 블루투스 설정에서 ENH_BTN '기기 삭제' 후 보드 BOOT 3초 → [보드 페어링]. 1분마다 다시 시도")
     }
 
     private fun handleEvt(v: ByteArray) {

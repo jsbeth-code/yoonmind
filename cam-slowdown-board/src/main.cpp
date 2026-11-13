@@ -18,7 +18,7 @@
 //
 // 보드 조작:
 //  - BOOT 짧게(1초 미만) = 클릭(감속 시험), 1~3초 = 더블클릭(복귀 시험)
-//  - BOOT 3초 넘게 누름 = 페어링 창 1분(파란 불 두 번씩 깜빡). 새 기기(커맨더·폰)는 이때만 페어링된다.
+//  - BOOT 3초 넘게 누름 = 페어링 창 1분(파란 불 두 번씩 깜빡). 새 기기(커맨더·폰)는 이때만 페어링된다(창 밖 새 페어링은 지우고 끊음).
 //    커맨더는 엔하우토 Add S3XY Button, 폰은 앱 설정 ⑥ [보드 페어링]
 //  - BOOT 10초 넘게 누름 = 저장된 페어링 모두 지우고 다시 시작(커맨더·폰 모두)
 //  - 암호화(페어링된 키) 안 된 접속은 커맨더로 보지 않고 30초 뒤 끊는다
@@ -71,6 +71,7 @@ struct Conn {
   bool restore;     // 암호화되면 저장된 구독을 살림
   int8_t pendingSub;  // 암호화 전에 온 구독 쓰기(-1 없음)
   bool kicked;
+  uint8_t encRetries;  // 암호화 다시 요청한 횟수(동시 접속 때 보안 요청이 겹쳐 빠지는 경우)
   unsigned long at;
 };
 static const int MAX_CONN = 4;
@@ -86,7 +87,8 @@ struct Reply { uint16_t conn; uint8_t len; uint8_t b[4]; };
 static QueueHandle_t replies;
 struct PhoneCmd { uint16_t conn; uint8_t len; uint8_t b[20]; };
 static QueueHandle_t phoneCmds;
-static volatile int disconnectConn = -1;
+static QueueHandle_t kickQ;   // 끊을 접속 id
+static int knownBonds = 0;    // 받아들인 페어링 수 — 창 밖에서 늘면 낯선 기기의 새 페어링이라 지운다
 static volatile bool connChanged = false;
 
 static void logf(const char* fmt, ...) {
@@ -152,6 +154,7 @@ static void eraseBonds() {
       free(list);
     }
   }
+  knownBonds = 0;
   prefs.putBool("sub", false);
   prefs.remove("tok");
   hasToken = false;
@@ -167,6 +170,21 @@ static void startAdv() {
 static bool sendTo(uint16_t conn, BLECharacteristic* ch, const uint8_t* b, size_t n) {
   if (gattsIf == ESP_GATT_IF_NONE || !ch) return false;
   return esp_ble_gatts_send_indicate(gattsIf, conn, ch->getHandle(), n, (uint8_t*)b, false) == ESP_OK;
+}
+
+/** 접속이 암호화됐다고 표시(connMux 안에서 부른다). 커맨더면 미뤄 둔 구독·저장된 구독을 적용. 결과: pending(-1/0/1), restored. */
+static void markEncrypted(Conn* c, int* pending, bool* restored) {
+  if (c->encrypted) return;
+  c->encrypted = true;
+  if (c->phone) return;
+  if (c->pendingSub >= 0) { *pending = c->pendingSub; c->subscribed = *pending == 1; c->confirmed = true; c->pendingSub = -1; }
+  else if (c->restore) { c->subscribed = true; *restored = true; }
+}
+
+static void afterEncrypted(int pending, bool restored) {
+  if (pending >= 0) prefs.putBool("sub", pending == 1);
+  if (restored) cccd->setNotifications(true);
+  connChanged = true;
 }
 
 class ServerCb : public BLEServerCallbacks {
@@ -242,8 +260,11 @@ class IdCb : public BLECharacteristicCallbacks {
     uint16_t conn = p->write.conn_id;
     portENTER_CRITICAL(&connMux);
     Conn* cc = findConn(conn);
-    if (cc && !cc->phone && cc->encrypted) cc->confirmed = true;
+    int pend = -1; bool rest = false;
+    // 이 특성은 암호화가 필요하다 — 쓰기가 왔다는 것 자체가 암호화된 접속이라는 증거(보안 완료 이벤트가 빠진 경우 대비)
+    if (cc && !cc->phone) { markEncrypted(cc, &pend, &rest); cc->confirmed = true; }
     portEXIT_CRITICAL(&connMux);
+    if (pend >= 0 || rest) afterEncrypted(pend, rest);
     String hex;
     for (size_t i = 0; i < v.size(); i++) { char h[4]; snprintf(h, sizeof(h), "%02X ", (uint8_t)v[i]); hex += h; }
     logf("커맨더 명령 %s(id=%d)", hex.c_str(), conn);
@@ -256,7 +277,7 @@ class IdCb : public BLECharacteristicCallbacks {
     } else if (v.size() == 1 && b0 == 0xA1) {
       logf("커맨더가 연결 해제(페어링 삭제) 요청");
       prefs.putBool("sub", false);
-      disconnectConn = conn;
+      xQueueSend(kickQ, &conn, 0);
     } else if (v.size() == 4 && b0 == 0xA4) {
       r.len = 4; r.b[0] = 0xA4; r.b[1] = 0x00; r.b[2] = (uint8_t)v[1]; r.b[3] = (uint8_t)v[2];
       xQueueSend(replies, &r, 0);
@@ -274,8 +295,9 @@ class PhoneCmdCb : public BLECharacteristicCallbacks {
     // 폰 서비스에 써 온 접속은 커맨더가 아니다
     portENTER_CRITICAL(&connMux);
     Conn* cc = findConn(m.conn);
-    if (cc) { cc->phone = true; cc->subscribed = false; }
+    if (cc) { cc->phone = true; cc->subscribed = false; cc->encrypted = true; }  // 명령 특성도 암호화 필요
     portEXIT_CRITICAL(&connMux);
+    connChanged = true;
     xQueueSend(phoneCmds, &m, 0);
   }
 };
@@ -292,23 +314,29 @@ class SecCb : public BLESecurityCallbacks {
   }
   void onAuthenticationComplete(esp_ble_auth_cmpl_t cmpl) override {
     if (!cmpl.success) { logf("페어링·암호화 실패 %s reason=0x%02X", addrStr(cmpl.bd_addr).c_str(), cmpl.fail_reason); return; }
+    // 보드가 접속마다 먼저 보안 요청을 보내므로 스택은 낯선 기기와도 Just Works 페어링을 끝낸다(위 onSecurityRequest를 안 거침).
+    // 페어링 수가 늘었는데 창이 닫혀 있으면 그 새 페어링을 지우고 끊는다.
+    int nb = bondCount();
+    if (nb > knownBonds && !pairWindowOpen()) {
+      esp_ble_remove_bond_device(cmpl.bd_addr);
+      uint16_t kid = 0xFFFF;
+      portENTER_CRITICAL(&connMux);
+      for (int i = 0; i < MAX_CONN; i++) if (conns[i].used && !conns[i].encrypted && memcmp(conns[i].addr, cmpl.bd_addr, 6) == 0) { conns[i].kicked = true; kid = conns[i].id; }
+      portEXIT_CRITICAL(&connMux);
+      if (kid != 0xFFFF) xQueueSend(kickQ, &kid, 0);
+      logf("페어링 창 밖의 새 기기 %s — 페어링 지우고 끊음(등록하려면 BOOT 3초 먼저)", addrStr(cmpl.bd_addr).c_str());
+      return;
+    }
+    knownBonds = nb;
     // 어느 접속인지: 주소가 같은 접속, 없으면(주소가 바뀌는 기기) 아직 암호화 안 된 가장 최근 접속
     int pending = -1; bool restored = false; uint16_t id = 0;
     portENTER_CRITICAL(&connMux);
     Conn* c = nullptr;
     for (int i = 0; i < MAX_CONN; i++) if (conns[i].used && !conns[i].encrypted && memcmp(conns[i].addr, cmpl.bd_addr, 6) == 0) c = &conns[i];
     if (!c) for (int i = 0; i < MAX_CONN; i++) if (conns[i].used && !conns[i].encrypted && (!c || conns[i].at > c->at)) c = &conns[i];
-    if (c) {
-      c->encrypted = true; id = c->id;
-      if (!c->phone) {
-        if (c->pendingSub >= 0) { pending = c->pendingSub; c->subscribed = pending == 1; c->confirmed = true; c->pendingSub = -1; }
-        else if (c->restore) { c->subscribed = true; restored = true; }
-      }
-    }
+    if (c) { id = c->id; markEncrypted(c, &pending, &restored); }
     portEXIT_CRITICAL(&connMux);
-    if (pending >= 0) prefs.putBool("sub", pending == 1);
-    if (restored) cccd->setNotifications(true);
-    connChanged = true;
+    afterEncrypted(pending, restored);
     logf("암호화 됨 %s id=%d (페어링 %d개)%s", addrStr(cmpl.bd_addr).c_str(), id, bondCount(),
          restored ? " — 이전 구독 유지" : pending == 1 ? " — 구독 적용, 버튼 준비" : "");
   }
@@ -410,6 +438,7 @@ void setup() {
 
   replies = xQueueCreate(8, sizeof(Reply));
   phoneCmds = xQueueCreate(8, sizeof(PhoneCmd));
+  kickQ = xQueueCreate(8, sizeof(uint16_t));
   prefs.begin("s3xy", false);
   hasToken = prefs.getBytes("tok", token, 16) == 16;
 
@@ -458,6 +487,7 @@ void setup() {
   adv->setMinInterval(0x20);  // 20 ms
   adv->setMaxInterval(0x40);  // 40 ms
 
+  knownBonds = bondCount();
   logf("보드 블루투스 주소 %s (고정), 폰 페어링 %s", BLEDevice::getAddress().toString().c_str(), hasToken ? "있음" : "없음");
   startAdv();
   logf("ENH_BTN 광고 중 (페어링 %d개)", bondCount());
@@ -473,8 +503,8 @@ void loop() {
       logf("응답 못 보냄");
     }
   }
-  int dc = disconnectConn;
-  if (dc >= 0) { disconnectConn = -1; server->disconnect((uint16_t)dc); }
+  uint16_t dc;
+  while (xQueueReceive(kickQ, &dc, 0) == pdTRUE) server->disconnect(dc);
 
   // 폰 명령
   PhoneCmd m;
@@ -495,6 +525,12 @@ void loop() {
   // 30초 넘게 암호화 안 된 접속(페어링 안 된 낯선 기기)은 끊는다 — 접속 자리를 차지하지 않게
   for (int i = 0; i < MAX_CONN; i++) {
     Conn& c = conns[i];
+    // 동시에 붙으면 보안 요청이 겹쳐 하나가 빠질 수 있다 — 5초·15초에 다시 요청
+    if (c.used && !c.encrypted && !c.kicked && c.encRetries < 2 && millis() - c.at > (c.encRetries == 0 ? 5000UL : 15000UL)) {
+      c.encRetries++;
+      logf("접속 id=%d 암호화 다시 요청(%d)", c.id, c.encRetries);
+      esp_ble_set_encryption(c.addr, ESP_BLE_SEC_ENCRYPT);
+    }
     if (c.used && !c.encrypted && !c.kicked && millis() - c.at > 30000) {
       c.kicked = true;
       logf("암호화 안 된 접속 id=%d 끊음(페어링 안 된 기기)", c.id);
