@@ -94,7 +94,7 @@ class SettingsActivity : Activity() {
             }
             cmdStatus = text("", 13f)
             row(button("보드 페어링") { pairBoard() })
-            hint("보드 경유: 보드를 엔하우토에 버튼으로 등록(클릭 = 크루징 속도 내림, 더블클릭 = 올림)한 뒤, 보드 BOOT를 3초 넘게 눌러 파란 불이 두 번씩 깜빡이면(1분) [보드 페어링]. 폰에 페어링 요청이 뜨면 승인. 한 번만 하면 됩니다(새로 페어링하면 이전 폰은 못 씀). 아래 [페어링하기]·버튼 유지는 폰 직접일 때만 씁니다.")
+            hint("보드 경유: 보드 BOOT 3초(파란 불 두 번씩 깜빡) 뒤 엔하우토에 버튼으로 등록(클릭 = 크루징 속도 내림, 더블클릭 = 올림)하고, 보드 BOOT를 3초 넘게 눌러 파란 불이 두 번씩 깜빡이면(1분) [보드 페어링]. 폰에 페어링 요청이 뜨면 승인. 한 번만 하면 됩니다(새로 페어링하면 이전 폰은 못 씀). 아래 [페어링하기]·버튼 유지는 폰 직접일 때만 씁니다.")
             row(
                 button("페어링하기") { togglePairing() },
                 button("감속 신호 테스트") { if (DriveState.running) Toast.makeText(this@SettingsActivity, "감시 중엔 테스트할 수 없습니다 — 감시를 끄고 하세요 (앱이 아는 차 프로필이 어긋남)", Toast.LENGTH_LONG).show() else { if (!boardReadyForTest()) return@button; outputs.refresh(); outputs.down(Camera(0.0, 0.0, 100, CamKind.SPOT, 0, "테스트"), 300.0) } },
@@ -318,7 +318,9 @@ class SettingsActivity : Activity() {
                 Toast.makeText(this, "보드 찾는 중…", Toast.LENGTH_SHORT).show()
                 BoardLink.pair(this, { DriveState.log(it) }) { ok, msg ->
                     runOnUiThread {
-                        if (ok) Prefs.setViaBoard(this, true)
+                        if (ok) Prefs.setViaBoard(applicationContext, true)
+                        // 기다리는 동안 설정 화면을 나갔거나 돌렸으면 창 대신 짧은 알림(닫힌 화면에 창을 띄우면 앱이 죽음)
+                        if (isFinishing || isDestroyed) { Toast.makeText(applicationContext, (if (ok) "보드 페어링 됨" else "보드 페어링 실패") + " — 기록을 보세요", Toast.LENGTH_LONG).show(); return@runOnUiThread }
                         AlertDialog.Builder(this).setTitle(if (ok) "보드 페어링 됨" else "보드 페어링 실패").setMessage(msg + if (ok) "\n\n커맨더 연결을 '보드 경유'로 바꿨습니다. 감시를 다시 켜면 적용됩니다." else "")
                             .setPositiveButton("확인") { _, _ -> recreate() }.show()
                     }

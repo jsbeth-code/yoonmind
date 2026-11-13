@@ -94,6 +94,9 @@ object BoardLink {
         }
     }
 
+    /** 보드가 쓰기를 거절한 GATT 상태(쓰기 금지·인증·권한·암호화 부족) — 명령이 보드에 안 들어감. */
+    private val REJECTED = setOf(3, 5, 8, 15)
+
     // ---- 누름 ----
     private val pressDone = Semaphore(0)
     @Volatile private var pressSeq = 0
@@ -117,7 +120,9 @@ object BoardLink {
         val w = writeCmd(byteArrayOf(0x10, k.toByte(), n.toByte(), (gap and 0xFF).toByte(), (gap shr 8).toByte(), seq.toByte()))
         if (w != 0) {
             onPressProgress = null
-            if (w == -2 && kind == S3xyButton.Press.DOUBLE) { log("보드에 복귀 요청 전달 확인 못 함 — 나간 것으로 봄"); return n }
+            // 복귀는 보드가 분명히 안 받은 경우(폰에서 못 보냄 -1, 보드가 쓰기 거절 3·5·8·15)만 0으로 센다.
+            // 그 밖(응답 없음, 133 같은 끊김 오류)은 보드가 받아 끝까지 올렸을 수 있으니 나간 것으로 본다(차를 더 빠르게 보는 쪽).
+            if (kind == S3xyButton.Press.DOUBLE && w != -1 && w !in REJECTED) { log("보드에 복귀 요청 전달 확인 못 함(${if (w == -2) "응답 없음" else "오류 $w"}) — 나간 것으로 봄"); return n }
             log("보드에 ${kind.label} 요청 못 보냄(${if (w == -2) "응답 없음" else "오류 $w"})")
             return 0
         }
@@ -143,14 +148,17 @@ object BoardLink {
         app = ctx.applicationContext
         if (active) return
         active = true
+        quiet = false
+        lastOkAt = android.os.SystemClock.elapsedRealtime()
         connect()
+        main.removeCallbacks(watchdog); main.postDelayed(watchdog, 15_000)
     }
 
     @Synchronized
     fun stop() {
         if (!active) return
         active = false
-        main.removeCallbacks(reconnect)
+        main.removeCallbacks(reconnect); main.removeCallbacks(watchdog)
         closeGatt()
         log("보드 연결 끔")
     }
@@ -164,6 +172,20 @@ object BoardLink {
 
     private val reconnect = Runnable { if (active) connect() }
 
+    /** 마지막으로 정상(인증됨)이었거나 새로 접속을 시작한 시각. */
+    @Volatile private var lastOkAt = 0L
+    @Volatile private var quiet = false
+    /** 1분 넘게 인증까지 못 가면(인사 실패·서비스 못 찾음·블루투스 껐다 켬 등으로 멈춤) 연결을 처음부터 다시 한다. */
+    private val watchdog = object : Runnable {
+        override fun run() {
+            if (!active) return
+            val now = android.os.SystemClock.elapsedRealtime()
+            if (linkUp && authed) lastOkAt = now
+            else if (now - lastOkAt > 60_000) { quiet = true; lastOkAt = now; connect() }
+            main.postDelayed(this, 15_000)
+        }
+    }
+
     private fun connect() {
         val ctx = app ?: return
         val addr = Prefs.boardAddr(ctx)
@@ -175,7 +197,7 @@ object BoardLink {
         try {
             val dev = adapter.getRemoteDevice(addr)
             gatt = dev.connectGatt(ctx, true, callback, BluetoothDevice.TRANSPORT_LE)
-            log("보드 찾는 중 ${addr}")
+            if (!quiet) log("보드 찾는 중 ${addr}")
         } catch (e: Exception) {
             log("보드 접속 오류: ${e.message} — 10초 뒤 다시"); main.postDelayed(reconnect, 10_000)
         }
@@ -212,9 +234,10 @@ object BoardLink {
             if (gatt !== g || !active) return@execute
             val w = writeCmd(byteArrayOf(0x01) + tok)
             if (w == 0) return@execute // 결과는 알림(81)으로
-            log("보드 인사 실패(${w}) — 페어링(암호화) 기다렸다 다시 ${attempt}/6")
+            if (!quiet || attempt == 6) log("보드 인사 실패(${w}) — 암호화 기다렸다 다시 ${attempt}/6")
             Thread.sleep(5_000)
         }
+        log("⚠ 보드와 암호화가 안 됨 — 보드에서 페어링을 지웠다면 폰 블루투스 설정에서 ENH_BTN '기기 삭제' 후 보드 BOOT 3초 → [보드 페어링]. 1분마다 다시 시도")
     }
 
     private fun handleEvt(v: ByteArray) {
@@ -223,7 +246,8 @@ object BoardLink {
             0x81 -> {
                 authed = v.size >= 2 && v[1].toInt() == 1
                 authRejected = !authed
-                log(if (authed) "보드 연결·인증됨" else "⚠ 보드가 이 폰을 거절 — 보드 BOOT 3초 후 설정 ⑥ [보드 페어링]")
+                if (authed) { quiet = false; lastOkAt = android.os.SystemClock.elapsedRealtime() }
+                if (authed || !quiet) log(if (authed) "보드 연결·인증됨" else "⚠ 보드가 이 폰을 거절 — 보드 BOOT 3초 후 설정 ⑥ [보드 페어링]")
                 DriveState.changed()
             }
             0x83 -> if (v.size >= 2) {
@@ -253,7 +277,8 @@ object BoardLink {
                 val was = linkUp
                 linkUp = false; authed = false; cmdState = 0; cmdChar = null
                 pressDone.release()
-                log("보드 연결 끊김" + (if (status != 0) " (status $status)" else "") + (if (active) " — 다시 찾음" else ""))
+                if (was || !quiet) log("보드 연결 끊김" + (if (status != 0) " (status $status)" else "") + (if (active) " — 다시 찾음" else ""))
+                if (was) quiet = false
                 if (was) DriveState.changed()
                 if (active) { closeGatt(); main.removeCallbacks(reconnect); main.postDelayed(reconnect, 3_000) }
             }
@@ -276,16 +301,22 @@ object BoardLink {
      * ENH_BTN을 10초 찾아, 폰 서비스가 있는 보드에 페어링을 요청한다(보드 BOOT 3초로 창이 열려 있어야 함).
      * 성공하면 주소·토큰을 저장한다. done(성공, 사람이 읽을 결과)은 작업 스레드에서 부른다.
      */
+    @Volatile var pairing = false
+        private set
+
     fun pair(context: Context, logger: (String) -> Unit, done: (Boolean, String) -> Unit) {
         val ctx = context.applicationContext
+        synchronized(this) { if (pairing) { done(false, "이미 보드를 찾는 중입니다"); return }; pairing = true }
         log = logger; app = ctx
         Thread {
+          try {
             val wasActive = active
             if (wasActive) stop()
             val r = try { pairBlocking(ctx) } catch (e: SecurityException) { false to "블루투스 권한이 없습니다" } catch (e: Exception) { false to "오류: ${e.message}" }
             log("보드 페어링: ${r.second}")
             if (wasActive) start(ctx, log)
             done(r.first, r.second)
+          } finally { pairing = false }
         }.start()
     }
 
@@ -313,7 +344,7 @@ object BoardLink {
             if (r == 2) refused = true
         }
         return false to if (refused) "보드가 거절 — 보드 BOOT를 3초 넘게 눌러 파란 불이 두 번씩 깜빡일 때(1분 안) 다시"
-            else "찾은 ENH_BTN ${list.size}개 중 FSD 감속 보드가 없습니다(보드에 2단계 프로그램이 들어갔는지 확인)"
+            else "찾은 ENH_BTN ${list.size}개 중 페어링할 수 있는 FSD 감속 보드가 없습니다. 보드에 2단계 프로그램이 들어갔는지, BOOT 3초로 창을 열었는지 확인. 보드 페어링을 지운 적이 있으면 폰 블루투스 설정에서 ENH_BTN '기기 삭제' 후 다시"
     }
 
     /** 1 = 페어링 됨, 2 = 보드가 거절(창 닫힘), 0 = 보드 아님·실패. */
@@ -363,7 +394,8 @@ object BoardLink {
                     else { @Suppress("DEPRECATION") cmd.value = req; cmd.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT; @Suppress("DEPRECATION") g.writeCharacteristic(cmd) }
                 if (ok && wrote.tryAcquire(5, TimeUnit.SECONDS) && wStatus == 0) break
                 if (attempt == 1) log("보드 페어링: 폰에 뜨는 페어링 요청을 승인하세요")
-                Thread.sleep(3_000)
+                // 승인이 늦어 쓰기 결과가 늦게 와도 보드는 이미 받았을 수 있다 — 다시 보내기 전에 답을 기다린다(02를 두 번 보내면 두 번째가 거절로 덮음)
+                if (reply.tryAcquire(3, TimeUnit.SECONDS)) { reply.release(); break }
                 if (attempt == 8) return 0
             }
             if (!reply.tryAcquire(5, TimeUnit.SECONDS)) return 0

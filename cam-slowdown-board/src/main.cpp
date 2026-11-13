@@ -18,8 +18,10 @@
 //
 // 보드 조작:
 //  - BOOT 짧게(1초 미만) = 클릭(감속 시험), 1~3초 = 더블클릭(복귀 시험)
-//  - BOOT 3초 넘게 누름 = 폰 페어링 창 1분(파란 불 두 번씩 깜빡). 이때 앱 설정 ⑥ [보드 페어링]
-//  - BOOT 누른 채 전원 넣고 5초 = 저장된 페어링 모두 지움(커맨더·폰 모두)
+//  - BOOT 3초 넘게 누름 = 페어링 창 1분(파란 불 두 번씩 깜빡). 새 기기(커맨더·폰)는 이때만 페어링된다.
+//    커맨더는 엔하우토 Add S3XY Button, 폰은 앱 설정 ⑥ [보드 페어링]
+//  - BOOT 10초 넘게 누름 = 저장된 페어링 모두 지우고 다시 시작(커맨더·폰 모두)
+//  - 암호화(페어링된 키) 안 된 접속은 커맨더로 보지 않고 30초 뒤 끊는다
 //  - 파란 불: 켜져 있음 = 커맨더 연결·준비 / 빠르게 깜빡 = 접속은 됐지만 준비 전 / 2초마다 짧게 = 커맨더 기다리는 중
 //  - USB 시리얼(115200)에 동작 기록
 
@@ -65,6 +67,10 @@ struct Conn {
   bool authed;      // 토큰이 맞은 폰
   bool subscribed;  // 커맨더 알림 구독(재접속 때는 저장된 구독을 살림)
   bool confirmed;   // 버튼 ID 특성을 쓰거나 구독을 쓴 접속 = 커맨더 확정
+  bool encrypted;   // 페어링된 키로 암호화됨 — 암호화 안 된 접속은 커맨더로 보지 않는다(낯선 기기)
+  bool restore;     // 암호화되면 저장된 구독을 살림
+  int8_t pendingSub;  // 암호화 전에 온 구독 쓰기(-1 없음)
+  bool kicked;
   unsigned long at;
 };
 static const int MAX_CONN = 4;
@@ -112,6 +118,7 @@ static int commanderConn(bool* ready) {
     Conn& c = conns[i];
     if (!c.used || c.phone) continue;
     anyOther = true;
+    if (!c.encrypted) continue;
     if (!c.subscribed) continue;
     if (best < 0 || (c.confirmed && !bestConfirmed) || (c.confirmed == bestConfirmed && c.at > bestAt)) {
       best = c.id; bestConfirmed = c.confirmed; bestAt = c.at;
@@ -175,14 +182,12 @@ class ServerCb : public BLEServerCallbacks {
       Conn& c = conns[i];
       c = Conn{};
       c.used = true; c.id = p->connect.conn_id; memcpy(c.addr, p->connect.remote_bda, 6);
-      c.subscribed = restore; c.at = millis();
+      c.subscribed = false; c.restore = restore; c.pendingSub = -1; c.at = millis();
       break;
     }
     portEXIT_CRITICAL(&connMux);
-    if (restore) cccd->setNotifications(true);
     connChanged = true;
-    logf("접속 %s id=%d (페어링 %d개, 접속 %d개)%s", addrStr(p->connect.remote_bda).c_str(), p->connect.conn_id, bondCount(), connCount(),
-         restore ? " — 이전 구독 유지" : "");
+    logf("접속 %s id=%d (페어링 %d개, 접속 %d개) — 암호화 기다림", addrStr(p->connect.remote_bda).c_str(), p->connect.conn_id, bondCount(), connCount());
     startAdv();
   }
   void onDisconnect(BLEServer* s, esp_ble_gatts_cb_param_t* p) override {
@@ -211,12 +216,17 @@ static void gattsHandler(esp_gatts_cb_event_t event, esp_gatt_if_t gif, esp_ble_
   }
   if (event == ESP_GATTS_WRITE_EVT && cccd && param->write.handle == cccd->getHandle() && param->write.len >= 1) {
     bool on = (param->write.value[0] & 1) != 0;
-    bool phone = false;
+    bool phone = false, enc = false;
     portENTER_CRITICAL(&connMux);
     Conn* c = findConn(param->write.conn_id);
-    if (c) { phone = c->phone; if (!phone) { c->subscribed = on; c->confirmed = true; } }
+    if (c) {
+      phone = c->phone; enc = c->encrypted;
+      if (!phone && enc) { c->subscribed = on; c->confirmed = true; }
+      else if (!phone) c->pendingSub = on ? 1 : 0;
+    }
     portEXIT_CRITICAL(&connMux);
-    if (phone) return;
+    if (phone || !c) return;
+    if (!enc) { logf("구독 쓰기 id=%d — 암호화 뒤 적용", param->write.conn_id); return; }
     prefs.putBool("sub", on);
     connChanged = true;
     logf(on ? "알림 구독됨 id=%d — 버튼 준비" : "알림 구독 해제 id=%d", param->write.conn_id);
@@ -232,7 +242,7 @@ class IdCb : public BLECharacteristicCallbacks {
     uint16_t conn = p->write.conn_id;
     portENTER_CRITICAL(&connMux);
     Conn* cc = findConn(conn);
-    if (cc && !cc->phone) cc->confirmed = true;
+    if (cc && !cc->phone && cc->encrypted) cc->confirmed = true;
     portEXIT_CRITICAL(&connMux);
     String hex;
     for (size_t i = 0; i < v.size(); i++) { char h[4]; snprintf(h, sizeof(h), "%02X ", (uint8_t)v[i]); hex += h; }
@@ -274,10 +284,33 @@ class SecCb : public BLESecurityCallbacks {
   uint32_t onPassKeyRequest() override { return 0; }
   void onPassKeyNotify(uint32_t) override {}
   bool onConfirmPIN(uint32_t) override { return true; }
-  bool onSecurityRequest() override { return true; }
+  // 새 기기의 페어링(본딩) 요청: 페어링 창(BOOT 3초)이 열려 있을 때만 받는다. 이미 페어링된 커맨더·폰은 저장된 키로 암호화돼 여기를 거치지 않는다.
+  bool onSecurityRequest() override {
+    bool ok = pairWindowOpen();
+    logf(ok ? "새 기기 페어링 요청 — 받음(페어링 창)" : "새 기기 페어링 요청 — 거절(보드 BOOT 3초로 페어링 창을 먼저 여세요)");
+    return ok;
+  }
   void onAuthenticationComplete(esp_ble_auth_cmpl_t cmpl) override {
-    if (cmpl.success) logf("페어링·암호화 됨 %s (페어링 %d개)", addrStr(cmpl.bd_addr).c_str(), bondCount());
-    else logf("페어링 실패 reason=0x%02X", cmpl.fail_reason);
+    if (!cmpl.success) { logf("페어링·암호화 실패 %s reason=0x%02X", addrStr(cmpl.bd_addr).c_str(), cmpl.fail_reason); return; }
+    // 어느 접속인지: 주소가 같은 접속, 없으면(주소가 바뀌는 기기) 아직 암호화 안 된 가장 최근 접속
+    int pending = -1; bool restored = false; uint16_t id = 0;
+    portENTER_CRITICAL(&connMux);
+    Conn* c = nullptr;
+    for (int i = 0; i < MAX_CONN; i++) if (conns[i].used && !conns[i].encrypted && memcmp(conns[i].addr, cmpl.bd_addr, 6) == 0) c = &conns[i];
+    if (!c) for (int i = 0; i < MAX_CONN; i++) if (conns[i].used && !conns[i].encrypted && (!c || conns[i].at > c->at)) c = &conns[i];
+    if (c) {
+      c->encrypted = true; id = c->id;
+      if (!c->phone) {
+        if (c->pendingSub >= 0) { pending = c->pendingSub; c->subscribed = pending == 1; c->confirmed = true; c->pendingSub = -1; }
+        else if (c->restore) { c->subscribed = true; restored = true; }
+      }
+    }
+    portEXIT_CRITICAL(&connMux);
+    if (pending >= 0) prefs.putBool("sub", pending == 1);
+    if (restored) cccd->setNotifications(true);
+    connChanged = true;
+    logf("암호화 됨 %s id=%d (페어링 %d개)%s", addrStr(cmpl.bd_addr).c_str(), id, bondCount(),
+         restored ? " — 이전 구독 유지" : pending == 1 ? " — 구독 적용, 버튼 준비" : "");
   }
 };
 
@@ -389,22 +422,6 @@ void setup() {
   sec->setInitEncryptionKey(ESP_BLE_ENC_KEY_MASK | ESP_BLE_ID_KEY_MASK);
   sec->setRespEncryptionKey(ESP_BLE_ENC_KEY_MASK | ESP_BLE_ID_KEY_MASK);
 
-  // BOOT를 누른 채 켜서 5초 유지하면 페어링을 모두 지운다
-  if (digitalRead(BOOT_PIN) == LOW) {
-    logf("BOOT 누름 — 5초 유지하면 페어링을 모두 지웁니다");
-    unsigned long t0 = millis();
-    while (digitalRead(BOOT_PIN) == LOW && millis() - t0 < 5000) {
-      digitalWrite(LED_PIN, (millis() / 100) % 2);
-      delay(10);
-    }
-    if (millis() - t0 >= 5000) {
-      eraseBonds();
-      for (int i = 0; i < 6; i++) { digitalWrite(LED_PIN, i % 2); delay(150); }
-      while (digitalRead(BOOT_PIN) == LOW) delay(10);
-    }
-    digitalWrite(LED_PIN, LOW);
-  }
-
   server = BLEDevice::createServer();
   server->setCallbacks(new ServerCb());
 
@@ -473,7 +490,17 @@ void loop() {
     sendStateToPhones();
   }
 
-  if (pairWindowUntil != 0 && !pairWindowOpen()) { pairWindowUntil = 0; logf("폰 페어링 창 닫힘(1분)"); }
+  if (pairWindowUntil != 0 && !pairWindowOpen()) { pairWindowUntil = 0; logf("페어링 창 닫힘(1분)"); }
+
+  // 30초 넘게 암호화 안 된 접속(페어링 안 된 낯선 기기)은 끊는다 — 접속 자리를 차지하지 않게
+  for (int i = 0; i < MAX_CONN; i++) {
+    Conn& c = conns[i];
+    if (c.used && !c.encrypted && !c.kicked && millis() - c.at > 30000) {
+      c.kicked = true;
+      logf("암호화 안 된 접속 id=%d 끊음(페어링 안 된 기기)", c.id);
+      server->disconnect(c.id);
+    }
+  }
 
   // BOOT 버튼: 1초 미만 = 클릭, 1~3초 = 더블클릭, 3초 넘게 = 폰 페어링 창
   static bool wasDown = false;
@@ -481,11 +508,19 @@ void loop() {
   static unsigned long downAt = 0;
   bool down = digitalRead(BOOT_PIN) == LOW;
   if (down && !wasDown) { downAt = millis(); longFired = false; }
+  if (down && longFired && millis() - downAt >= 10000) {
+    // 10초 = 페어링 모두 지우고 다시 시작
+    for (int i = 0; i < 10; i++) { digitalWrite(LED_PIN, i % 2); delay(80); }
+    eraseBonds();
+    logf("다시 시작");
+    delay(200);
+    ESP.restart();
+  }
   if (down && !longFired && millis() - downAt >= 3000) {
     longFired = true;
     pairWindowUntil = millis() + PAIR_WINDOW_MS;
     if (pairWindowUntil == 0) pairWindowUntil = 1;
-    logf("폰 페어링 창 열림(1분) — 앱 설정 ⑥ [보드 페어링]");
+    logf("페어링 창 열림(1분) — 엔하우토 Add S3XY Button 또는 앱 설정 ⑥ [보드 페어링]. 10초까지 누르고 있으면 페어링 모두 지움");
   }
   if (!down && wasDown && !longFired) {
     unsigned long held = millis() - downAt;
