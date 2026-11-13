@@ -348,26 +348,34 @@ object BoardLink {
         if (list.isEmpty()) return false to "ENH_BTN을 못 찾았습니다 — 보드 전원이 켜져 있고 가까이 있는지 확인"
         var refused = false
         for (dev in list) {
-            val r = tryPair(ctx, dev)
-            if (r == 1) return true to "보드(${dev.address})와 페어링 됨"
-            if (r == 2) refused = true
+            // 찾은 직후 첫 접속이 1~2초 만에 실패하는 일이 잦다(실차 2026-11-13) — 같은 기기에 3번까지 다시
+            for (attempt in 1..3) {
+                val r = tryPair(ctx, dev)
+                if (r == 1) return true to "보드(${dev.address})와 페어링 됨"
+                if (r == 2) { refused = true; break }
+                if (r == 3) break // 폰 서비스가 없는 ENH_BTN(다른 버튼)
+                if (attempt < 3) { log("보드 페어링: 접속 실패 — 다시 ${attempt + 1}/3"); Thread.sleep(1_000) }
+            }
         }
-        return false to if (refused) "보드가 거절 — 보드 BOOT를 3초 넘게 눌러 파란 불이 두 번씩 깜빡일 때(1분 안) 다시"
+        return false to if (refused) "보드가 거절 — 보드 프로그램이 옛 버전이면 새 프로그램을 넣은 뒤, 보드 BOOT 3초(파란 불 두 번씩 깜빡) → 바로 [찾기]"
             else "찾은 ENH_BTN ${list.size}개 중 페어링할 수 있는 FSD 감속 보드가 없습니다. 보드에 2단계 프로그램이 들어갔는지, BOOT 3초로 창을 열었는지 확인. 보드 페어링을 지운 적이 있으면 폰 블루투스 설정에서 ENH_BTN '기기 삭제' 후 다시"
     }
 
-    /** 1 = 페어링 됨, 2 = 보드가 거절(창 닫힘), 0 = 보드 아님·실패. */
+    /** 1 = 페어링 됨, 2 = 보드가 거절, 3 = 폰 서비스 없음(보드 아님), 0 = 접속·통신 실패(어디서인지 기록). */
     private fun tryPair(ctx: Context, dev: BluetoothDevice): Int {
         val connected = Semaphore(0); val discovered = Semaphore(0); val wrote = Semaphore(0); val reply = Semaphore(0)
         var wStatus = -1
         var answer: ByteArray? = null
+        var linkOk = false
+        var connStatus = 0
         // 토큰(82 + 16바이트)을 한 번 받으면 뒤에 오는 거절(82)로 덮지 않는다.
         // 승인 뒤 안드로이드가 막혔던 페어링 요청을 스스로 다시 보내고 앱도 다시 보내면, 보드는 첫 요청에 토큰을 주고 둘째는 거절한다(실차 2026-11-13).
         fun keepAnswer(v: ByteArray) { synchronized(this) { if ((answer?.size ?: 0) < 17) { answer = v } } }
         val cb = object : BluetoothGattCallback() {
             override fun onConnectionStateChange(g: BluetoothGatt, status: Int, newState: Int) {
-                if (newState == BluetoothProfile.STATE_CONNECTED) connected.release()
-                else if (newState == BluetoothProfile.STATE_DISCONNECTED) { connected.release(); discovered.release(); wrote.release(); reply.release() }
+                connStatus = status
+                if (newState == BluetoothProfile.STATE_CONNECTED) { linkOk = true; connected.release() }
+                else if (newState == BluetoothProfile.STATE_DISCONNECTED) { linkOk = false; connected.release(); discovered.release(); wrote.release(); reply.release() }
             }
             override fun onServicesDiscovered(g: BluetoothGatt, status: Int) { discovered.release() }
             override fun onCharacteristicWrite(g: BluetoothGatt, c: BluetoothGattCharacteristic, status: Int) { wStatus = status; wrote.release() }
@@ -384,13 +392,13 @@ object BoardLink {
         }
         val g = dev.connectGatt(ctx, false, cb, BluetoothDevice.TRANSPORT_LE) ?: return 0
         try {
-            if (!connected.tryAcquire(10, TimeUnit.SECONDS)) return 0
+            if (!connected.tryAcquire(10, TimeUnit.SECONDS) || !linkOk) { log("보드 페어링: 접속 안 됨(status $connStatus)"); return 0 }
             Thread.sleep(300)
             g.discoverServices()
-            if (!discovered.tryAcquire(10, TimeUnit.SECONDS)) return 0
-            val svc = g.getService(SERVICE) ?: return 0
-            val cmd = svc.getCharacteristic(CMD) ?: return 0
-            val evt = svc.getCharacteristic(EVT) ?: return 0
+            if (!discovered.tryAcquire(10, TimeUnit.SECONDS) || !linkOk) { log("보드 페어링: 서비스 찾기 실패(status $connStatus)"); return 0 }
+            val svc = g.getService(SERVICE) ?: run { log("보드 페어링: ${dev.address}에 폰 서비스 없음 — 다른 ENH_BTN이거나 보드 프로그램이 옛 버전"); return 3 }
+            val cmd = svc.getCharacteristic(CMD) ?: return 3
+            val evt = svc.getCharacteristic(EVT) ?: return 3
             log("보드 페어링: FSD 감속 보드 찾음 ${dev.address}")
             g.setCharacteristicNotification(evt, true)
             evt.getDescriptor(CCCD)?.let { d ->
@@ -410,7 +418,7 @@ object BoardLink {
                 if (reply.tryAcquire(3, TimeUnit.SECONDS)) { reply.release(); break }
                 if (attempt == 8) return 0
             }
-            if (!reply.tryAcquire(5, TimeUnit.SECONDS)) return 0
+            if (!reply.tryAcquire(5, TimeUnit.SECONDS)) { log("보드 페어링: 보드 답 없음"); return 0 }
             // 거절이 먼저 보이면 토큰이 뒤따라올 수 있으니 조금 더 기다린다
             if ((answer?.size ?: 0) < 17) reply.tryAcquire(2, TimeUnit.SECONDS)
             val a = answer ?: return 0

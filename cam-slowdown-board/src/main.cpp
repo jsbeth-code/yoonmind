@@ -413,12 +413,10 @@ static void handlePhone(const PhoneCmd& m) {
       logf("같은 폰의 페어링 요청 다시 옴 id=%d — 같은 토큰 다시 보냄", m.conn);
       return;
     }
-    if (!pairWindowOpen()) {
-      uint8_t r[1] = {0x82};
-      toPhone(m.conn, r, 1);
-      logf("폰 페어링 거절 — 보드 BOOT를 3초 넘게 눌러 페어링 창을 먼저 여세요");
-      return;
-    }
+    // 명령 특성은 암호화가 필요하고, 새 기기 페어링(본딩)은 창 안에서만 남는다(창 밖 새 페어링은 지우고 끊음).
+    // 그러니 여기까지 온 접속은 창에서 페어링해 둔 기기다 — 토큰 요청은 창과 무관하게 받는다.
+    // (실차 2026-11-13: 창을 연 직후에도 "보드가 거절"이 반복됨 — 원인 미확인. 창 시간에 기대지 않게 바꿈)
+    logf("폰 페어링 요청 id=%d (페어링 창 %s)", m.conn, pairWindowOpen() ? "열림" : "닫힘");
     for (int i = 0; i < 16; i += 4) { uint32_t x = esp_random(); memcpy(token + i, &x, 4); }
     prefs.putBytes("tok", token, 16);
     hasToken = true;
