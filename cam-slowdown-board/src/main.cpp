@@ -105,6 +105,27 @@ static String addrStr(const uint8_t* a) {
 
 static int bondCount() { return esp_ble_get_bond_device_num(); }
 
+// 받아들인 페어링 주소(창 밖 새 페어링 판별용). 수만 보면 낯선 기기 페어링이 지워지기 전 커맨더 재암호화를 새 페어링으로 오인한다.
+static const int MAX_KNOWN = 16;
+static uint8_t knownAddrs[MAX_KNOWN][6];
+static int knownN = 0;
+static void refreshKnown() {
+  int n = esp_ble_get_bond_device_num();
+  if (n > MAX_KNOWN) n = MAX_KNOWN;
+  knownN = 0;
+  if (n <= 0) return;
+  esp_ble_bond_dev_t* list = (esp_ble_bond_dev_t*)malloc(sizeof(esp_ble_bond_dev_t) * n);
+  if (!list) return;
+  esp_ble_get_bond_device_list(&n, list);
+  for (int i = 0; i < n && i < MAX_KNOWN; i++) memcpy(knownAddrs[i], list[i].bd_addr, 6);
+  knownN = n < MAX_KNOWN ? n : MAX_KNOWN;
+  free(list);
+}
+static bool wasKnown(const uint8_t* a) {
+  for (int i = 0; i < knownN; i++) if (memcmp(knownAddrs[i], a, 6) == 0) return true;
+  return false;
+}
+
 static bool pairWindowOpen() { return pairWindowUntil != 0 && (long)(pairWindowUntil - millis()) > 0; }
 
 static Conn* findConn(uint16_t id) {
@@ -154,7 +175,7 @@ static void eraseBonds() {
       free(list);
     }
   }
-  knownBonds = 0;
+  knownBonds = 0; knownN = 0;
   prefs.putBool("sub", false);
   prefs.remove("tok");
   hasToken = false;
@@ -317,7 +338,7 @@ class SecCb : public BLESecurityCallbacks {
     // 보드가 접속마다 먼저 보안 요청을 보내므로 스택은 낯선 기기와도 Just Works 페어링을 끝낸다(위 onSecurityRequest를 안 거침).
     // 페어링 수가 늘었는데 창이 닫혀 있으면 그 새 페어링을 지우고 끊는다.
     int nb = bondCount();
-    if (nb > knownBonds && !pairWindowOpen()) {
+    if (nb > knownBonds && !wasKnown(cmpl.bd_addr) && !pairWindowOpen()) {
       esp_ble_remove_bond_device(cmpl.bd_addr);
       uint16_t kid = 0xFFFF;
       portENTER_CRITICAL(&connMux);
@@ -327,7 +348,7 @@ class SecCb : public BLESecurityCallbacks {
       logf("페어링 창 밖의 새 기기 %s — 페어링 지우고 끊음(등록하려면 BOOT 3초 먼저)", addrStr(cmpl.bd_addr).c_str());
       return;
     }
-    knownBonds = nb;
+    if (nb != knownBonds || !wasKnown(cmpl.bd_addr)) { knownBonds = nb; refreshKnown(); }
     // 어느 접속인지: 주소가 같은 접속, 없으면(주소가 바뀌는 기기) 아직 암호화 안 된 가장 최근 접속
     int pending = -1; bool restored = false; uint16_t id = 0;
     portENTER_CRITICAL(&connMux);
@@ -488,6 +509,7 @@ void setup() {
   adv->setMaxInterval(0x40);  // 40 ms
 
   knownBonds = bondCount();
+  refreshKnown();
   logf("보드 블루투스 주소 %s (고정), 폰 페어링 %s", BLEDevice::getAddress().toString().c_str(), hasToken ? "있음" : "없음");
   startAdv();
   logf("ENH_BTN 광고 중 (페어링 %d개)", bondCount());

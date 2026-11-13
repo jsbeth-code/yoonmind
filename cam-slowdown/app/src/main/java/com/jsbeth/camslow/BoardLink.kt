@@ -211,6 +211,7 @@ object BoardLink {
         if (svc == null) { oldFirmware = true; if (!quiet) log("보드에 폰 서비스가 없음 — 보드 프로그램이 옛 버전(1단계)"); DriveState.changed(); return@execute }
         val cmd = svc.getCharacteristic(CMD); val evt = svc.getCharacteristic(EVT)
         if (cmd == null || evt == null) { oldFirmware = true; log("보드 서비스 모양이 다름 — 보드 프로그램 확인"); return@execute }
+        oldFirmware = false
         cmdChar = cmd
         g.setCharacteristicNotification(evt, true)
         evt.getDescriptor(CCCD)?.let { d ->
