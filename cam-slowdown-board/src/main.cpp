@@ -406,6 +406,13 @@ static void handlePhone(const PhoneCmd& m) {
     logf(ok ? "폰 인증됨 id=%d" : "폰 인증 실패 id=%d — 페어링한 폰이 아님(BOOT 3초 후 앱에서 [보드 페어링])", m.conn);
     if (ok) { uint8_t s[2] = {0x83, commanderState()}; toPhone(m.conn, s, 2); }
   } else if (op == 0x02 && m.len == 1) {
+    // 방금 페어링한 같은 폰이 요청을 다시 보내면(승인 뒤 안드로이드 재전송 + 앱 재시도) 같은 토큰을 다시 준다
+    if (c->authed && hasToken) {
+      uint8_t r[17]; r[0] = 0x82; memcpy(r + 1, token, 16);
+      toPhone(m.conn, r, 17);
+      logf("같은 폰의 페어링 요청 다시 옴 id=%d — 같은 토큰 다시 보냄", m.conn);
+      return;
+    }
     if (!pairWindowOpen()) {
       uint8_t r[1] = {0x82};
       toPhone(m.conn, r, 1);

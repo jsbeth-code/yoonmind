@@ -353,6 +353,9 @@ object BoardLink {
         val connected = Semaphore(0); val discovered = Semaphore(0); val wrote = Semaphore(0); val reply = Semaphore(0)
         var wStatus = -1
         var answer: ByteArray? = null
+        // 토큰(82 + 16바이트)을 한 번 받으면 뒤에 오는 거절(82)로 덮지 않는다.
+        // 승인 뒤 안드로이드가 막혔던 페어링 요청을 스스로 다시 보내고 앱도 다시 보내면, 보드는 첫 요청에 토큰을 주고 둘째는 거절한다(실차 2026-11-13).
+        fun keepAnswer(v: ByteArray) { synchronized(this) { if ((answer?.size ?: 0) < 17) { answer = v } } }
         val cb = object : BluetoothGattCallback() {
             override fun onConnectionStateChange(g: BluetoothGatt, status: Int, newState: Int) {
                 if (newState == BluetoothProfile.STATE_CONNECTED) connected.release()
@@ -362,13 +365,13 @@ object BoardLink {
             override fun onCharacteristicWrite(g: BluetoothGatt, c: BluetoothGattCharacteristic, status: Int) { wStatus = status; wrote.release() }
             override fun onDescriptorWrite(g: BluetoothGatt, d: BluetoothGattDescriptor, status: Int) { wStatus = status; wrote.release() }
             override fun onCharacteristicChanged(g: BluetoothGatt, c: BluetoothGattCharacteristic, value: ByteArray) {
-                if (value.isNotEmpty() && (value[0].toInt() and 0xFF) == 0x82) { answer = value; reply.release() }
+                if (value.isNotEmpty() && (value[0].toInt() and 0xFF) == 0x82) { keepAnswer(value); reply.release() }
             }
             @Deprecated("API 33 미만")
             override fun onCharacteristicChanged(g: BluetoothGatt, c: BluetoothGattCharacteristic) {
                 if (Build.VERSION.SDK_INT >= 33) return
                 @Suppress("DEPRECATION") val v = c.value ?: return
-                if (v.isNotEmpty() && (v[0].toInt() and 0xFF) == 0x82) { answer = v; reply.release() }
+                if (v.isNotEmpty() && (v[0].toInt() and 0xFF) == 0x82) { keepAnswer(v); reply.release() }
             }
         }
         val g = dev.connectGatt(ctx, false, cb, BluetoothDevice.TRANSPORT_LE) ?: return 0
@@ -400,6 +403,8 @@ object BoardLink {
                 if (attempt == 8) return 0
             }
             if (!reply.tryAcquire(5, TimeUnit.SECONDS)) return 0
+            // 거절이 먼저 보이면 토큰이 뒤따라올 수 있으니 조금 더 기다린다
+            if ((answer?.size ?: 0) < 17) reply.tryAcquire(2, TimeUnit.SECONDS)
             val a = answer ?: return 0
             if (a.size < 17) return 2
             Prefs.setBoard(ctx, dev.address, bytesToHex(a.copyOfRange(1, 17)))
