@@ -924,6 +924,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun togglePairing() {
+        if (Prefs.viaBoard(this)) { Toast.makeText(this, "보드 경유 중입니다 — 보드는 엔하우토에 보드를 등록하고, 폰은 설정 ⑥ [보드 페어링]", Toast.LENGTH_LONG).show(); return }
         if (S3xyButton.running && S3xyButton.pairingMode) { S3xyButton.stop(); render(); return }
         if (S3xyButton.running) { Toast.makeText(this, "주행 감시가 켜 둔 상태입니다 — 이미 광고 중", Toast.LENGTH_SHORT).show(); return }
         val ok = S3xyButton.start(this, { DriveState.log(it) }, Prefs.renameAdapter(this))

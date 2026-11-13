@@ -132,9 +132,12 @@ object S3xyButton {
     @Volatile var progress: Pair<Int, Int>? = null
     @Volatile var progressKind: Press? = null
 
-    val running: Boolean get() = server != null
-    /** 확인 전(임시) 커맨더는 준비로 치지 않는다 — 워치 같은 다른 본딩 기기에도 전송 성공이 와서 클릭이 셈에 들어가기 때문. */
-    val ready: Boolean get() = device != null && subscribed && !provisional
+    /** v0.15.0: 보드 경유면 폰은 버튼(GATT 서버·광고)을 켜지 않고 BoardLink로 보드에 신호만 보낸다. */
+    val viaBoard: Boolean get() = BoardLink.active
+    val running: Boolean get() = server != null || BoardLink.active
+    /** 확인 전(임시) 커맨더는 준비로 치지 않는다 — 워치 같은 다른 본딩 기기에도 전송 성공이 와서 클릭이 셈에 들어가기 때문.
+     *  보드 경유면 폰↔보드, 보드↔커맨더가 둘 다 정상일 때만. */
+    val ready: Boolean get() = if (BoardLink.active) BoardLink.ready else device != null && subscribed && !provisional
     /** 아무 기기도 접속해 있지 않은지(커맨더가 아예 안 찾아옴). */
     val idle: Boolean get() = server != null && device == null
 
@@ -146,6 +149,7 @@ object S3xyButton {
     }
     val status: String
         get() = when {
+            BoardLink.active -> BoardLink.status
             server == null -> "꺼짐"
             ready -> "커맨더 연결됨 · 준비"
             device != null && provisional -> "커맨더인지 확인 중 — 확인 전엔 신호 안 보냄(안 풀리면 [페어링하기] 후 enhauto에서 버튼 다시 추가)"
@@ -214,6 +218,7 @@ object S3xyButton {
 
     /** v0.14.3 조사: 폰에 커맨더 본딩(정식 페어링)이 남아 있는지 기록. 버튼을 새로 켤 때, 감시 시작 때, 커맨더가 1분 넘게 안 올 때. */
     fun logBond(reason: String) {
+        if (BoardLink.active) { log("보드 경유 확인($reason): ${BoardLink.status}"); return }
         val adapter = app?.getSystemService(BluetoothManager::class.java)?.adapter ?: return
         runCatching {
             val known = subscribedAddrs()
@@ -230,9 +235,16 @@ object S3xyButton {
     @Synchronized
     fun start(context: Context, logger: (String) -> Unit, renameAdapter: Boolean): Boolean {
         log = logger
-        if (server != null) { logBond("감시 시작 · 버튼 유지 중"); return true }
         val ctx = context.applicationContext
         app = ctx
+        if (Prefs.viaBoard(ctx)) {
+            // 보드 경유: 폰 버튼이 켜져 있으면 끈다(폰과 보드가 둘 다 ENH_BTN이면 헷갈림)
+            if (server != null) { log("보드 경유로 바뀜 — 폰 버튼(ENH_BTN) 끔"); stopPhoneButton() }
+            BoardLink.start(ctx, logger)
+            return true
+        }
+        if (BoardLink.active) { log("폰 직접으로 바뀜 — 보드 연결 끔"); BoardLink.stop() }
+        if (server != null) { logBond("감시 시작 · 버튼 유지 중"); return true }
         val manager = ctx.getSystemService(BluetoothManager::class.java)
         val adapter = manager?.adapter
         if (adapter == null || !adapter.isEnabled) { log("블루투스가 꺼져 있음"); return false }
@@ -303,6 +315,11 @@ object S3xyButton {
 
     @Synchronized
     fun stop() {
+        BoardLink.stop()
+        if (server != null || advertising) stopPhoneButton()
+    }
+
+    private fun stopPhoneButton() {
         startedAt = 0L
         pairingMode = false
         main.removeCallbacks(pairingTimeout)
@@ -486,6 +503,16 @@ object S3xyButton {
             val times = timesOf().coerceAtLeast(0)
             var sentCount = 0
             if (times == 0) { onDone?.invoke(0, 0); return@execute }
+            if (BoardLink.active) {
+                if (!BoardLink.ready) { log("보드 경유: ${kind.label} 못 보냄 (상태: ${BoardLink.status})"); onDone?.invoke(0, times); return@execute }
+                progressKind = kind; progress = 0 to times
+                try {
+                    sentCount = BoardLink.press(kind, times, gapMs) { i -> progress = i to times }.coerceIn(0, times)
+                    log("보드 경유 ${kind.label} ${sentCount}/$times 나감")
+                } finally { progress = null; progressKind = null }
+                onDone?.invoke(sentCount, times)
+                return@execute
+            }
             if (!ready) { log((if (provisional) "커맨더 확인 전이라" else "커맨더가 연결·구독되지 않아") + " ${kind.label} 못 보냄 (상태: $status)"); onDone?.invoke(0, times); return@execute }
             progressKind = kind; progress = 0 to times
             try {

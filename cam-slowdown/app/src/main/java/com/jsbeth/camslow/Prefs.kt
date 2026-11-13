@@ -271,6 +271,13 @@ object Prefs {
     /** 감시를 꺼도 커맨더 버튼(BLE 광고·GATT)을 계속 켜 둔다 — 다시 켜면 폰 블루투스 주소가 바뀌어 커맨더가 못 찾는 문제 때문(v0.12.7). */
     fun keepButton(ctx: Context) = sp(ctx).getBoolean("keepButton", true)
     fun setKeepButton(ctx: Context, v: Boolean) = put(ctx) { putBoolean("keepButton", v) }
+    /** v0.15.0 커맨더 연결: false = 폰 직접(폰이 ENH_BTN), true = 보드 경유(ESP32 보드가 ENH_BTN, 폰은 보드에 신호만). */
+    fun viaBoard(ctx: Context) = sp(ctx).getBoolean("viaBoard", false)
+    fun setViaBoard(ctx: Context, v: Boolean) = put(ctx) { putBoolean("viaBoard", v) }
+    /** 보드 주소와 보드가 준 토큰(16바이트 hex). 토큰은 화면·기록에 내지 않는다. */
+    fun boardAddr(ctx: Context) = sp(ctx).getString("boardAddr", "") ?: ""
+    fun boardToken(ctx: Context) = sp(ctx).getString("boardToken", "") ?: ""
+    fun setBoard(ctx: Context, addr: String, token: String) = put(ctx) { putString("boardAddr", addr); putString("boardToken", token) }
     fun renameAdapter(ctx: Context) = sp(ctx).getBoolean("renameAdapter", true)
     fun setRenameAdapter(ctx: Context, v: Boolean) = put(ctx) { putBoolean("renameAdapter", v) }
 

@@ -2,6 +2,7 @@ package com.jsbeth.camslow
 
 import android.Manifest
 import android.app.Activity
+import android.app.AlertDialog
 import android.bluetooth.BluetoothManager
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -85,11 +86,19 @@ class SettingsActivity : Activity() {
         ui.question(6, "차와 연결")
         ui.group {
             switchRow("S3XY 커맨더로 차 휠 조작", "끄면 음성 안내만", Prefs.bleOn(this@SettingsActivity)) { Prefs.setBleOn(this@SettingsActivity, it); refreshStatus() }
+            text("커맨더 연결", 14f, bold = true)
+            radioGroup(listOf("폰 직접 (폰이 커맨더 버튼)", "보드 경유 (ESP32 보드가 커맨더 버튼, 폰은 보드에 신호)"), if (Prefs.viaBoard(this@SettingsActivity)) 1 else 0) { i ->
+                Prefs.setViaBoard(this@SettingsActivity, i == 1)
+                if (DriveState.running) Toast.makeText(this@SettingsActivity, "감시를 다시 켜면 적용됩니다", Toast.LENGTH_SHORT).show()
+                refreshStatus()
+            }
             cmdStatus = text("", 13f)
+            row(button("보드 페어링") { pairBoard() })
+            hint("보드 경유: 보드를 엔하우토에 버튼으로 등록(클릭 = 크루징 속도 내림, 더블클릭 = 올림)한 뒤, 보드 BOOT를 3초 넘게 눌러 파란 불이 두 번씩 깜빡이면(1분) [보드 페어링]. 폰에 페어링 요청이 뜨면 승인. 한 번만 하면 됩니다(새로 페어링하면 이전 폰은 못 씀). 아래 [페어링하기]·버튼 유지는 폰 직접일 때만 씁니다.")
             row(
                 button("페어링하기") { togglePairing() },
-                button("감속 신호 테스트") { if (DriveState.running) Toast.makeText(this@SettingsActivity, "감시 중엔 테스트할 수 없습니다 — 감시를 끄고 하세요 (앱이 아는 차 프로필이 어긋남)", Toast.LENGTH_LONG).show() else { outputs.refresh(); outputs.down(Camera(0.0, 0.0, 100, CamKind.SPOT, 0, "테스트"), 300.0) } },
-                button("복귀 신호 테스트") { if (DriveState.running) Toast.makeText(this@SettingsActivity, "감시 중엔 테스트할 수 없습니다 — 감시를 끄고 하세요 (앱이 아는 차 프로필이 어긋남)", Toast.LENGTH_LONG).show() else { outputs.refresh(); outputs.up("테스트", force = true) } },
+                button("감속 신호 테스트") { if (DriveState.running) Toast.makeText(this@SettingsActivity, "감시 중엔 테스트할 수 없습니다 — 감시를 끄고 하세요 (앱이 아는 차 프로필이 어긋남)", Toast.LENGTH_LONG).show() else { if (!boardReadyForTest()) return@button; outputs.refresh(); outputs.down(Camera(0.0, 0.0, 100, CamKind.SPOT, 0, "테스트"), 300.0) } },
+                button("복귀 신호 테스트") { if (DriveState.running) Toast.makeText(this@SettingsActivity, "감시 중엔 테스트할 수 없습니다 — 감시를 끄고 하세요 (앱이 아는 차 프로필이 어긋남)", Toast.LENGTH_LONG).show() else { if (!boardReadyForTest()) return@button; outputs.refresh(); outputs.up("테스트", force = true) } },
             )
             hint("페어링: 위 버튼으로 ENH_BTN 광고를 켜고, enhauto 앱 Buttons → Add S3XY Button → 폰에 뜨는 페어링 요청 승인. 그 뒤 enhauto에서 이 버튼의 클릭 = 크루징 속도 내림, 더블클릭 = 크루징 속도 올림으로 지정(FSD에선 프로필 한 칸 내림/올림). 연결되면 [페어링하기]를 다시 눌러 끕니다. 차 프로필 화면을 보며 테스트 버튼으로 단수를 세어 보세요.")
             switchRow("감시를 꺼도 커맨더 버튼 유지", "앱을 다시 켜면 폰 블루투스 주소가 바뀌어 커맨더가 못 찾는 문제 때문에 켜 둡니다. 작은 알림이 남고 배터리를 조금 더 씁니다", Prefs.keepButton(this@SettingsActivity)) { Prefs.setKeepButton(this@SettingsActivity, it) }
@@ -224,7 +233,12 @@ class SettingsActivity : Activity() {
 
     override fun onResume() { super.onResume(); DriveState.addListener(listener); refreshStatus() }
     override fun onPause() { DriveState.removeListener(listener); super.onPause() }
-    override fun onDestroy() { outputs.shutdown(); super.onDestroy() }
+    override fun onDestroy() {
+        outputs.shutdown()
+        // 시험하려고 켠 보드 연결은 감시 중이 아니면 끈다
+        if (!DriveState.running && BoardLink.active) S3xyButton.stop()
+        super.onDestroy()
+    }
 
     private fun showResult() {
         val u = Prefs.usualProfile(this); val s = Prefs.slowProfile(this)
@@ -235,7 +249,10 @@ class SettingsActivity : Activity() {
 
     private fun refreshStatus() {
         cmdStatus.text = if (!Prefs.bleOn(this)) "–  커맨더 안 씀 (음성만)"
-            else if (S3xyButton.ready) "✔  커맨더 연결됨 · 버튼 준비" else "✖  ${S3xyButton.status}"
+            else if (S3xyButton.ready) (if (S3xyButton.viaBoard) "✔  보드 경유 · 커맨더 준비" else "✔  커맨더 연결됨 · 버튼 준비")
+            else if (Prefs.viaBoard(this) && !S3xyButton.viaBoard)
+                (if (Prefs.boardAddr(this).isEmpty()) "✖  보드 경유 · 보드 페어링 안 됨 — [보드 페어링]" else "–  보드 경유 · 보드 ${Prefs.boardAddr(this)} 페어링됨 — 감시를 켜면 연결")
+            else "✖  ${S3xyButton.status}"
         val missing = AutoStart.missing(this)
         permStatus.text = if (!Prefs.autoStart(this)) "–  자동 시작 꺼짐"
             else if (Prefs.autoDeviceAddress(this).isEmpty()) "✖  차를 골라야 합니다"
@@ -282,7 +299,36 @@ class SettingsActivity : Activity() {
         }
     }
 
+    /** 보드 경유 시험: 감시가 꺼져 있으면 보드 연결부터 켠다(설정 화면을 닫으면 끔). */
+    private fun boardReadyForTest(): Boolean {
+        if (!Prefs.viaBoard(this) || !Prefs.bleOn(this)) return true
+        if (!S3xyButton.running) {
+            S3xyButton.start(this, { DriveState.log(it) }, false)
+            Toast.makeText(this, "보드에 연결하는 중 — 상태 줄이 '커맨더 준비'가 되면 다시 누르세요", Toast.LENGTH_LONG).show()
+            return false
+        }
+        if (!S3xyButton.ready) { Toast.makeText(this, "아직 준비 안 됨: ${S3xyButton.status}", Toast.LENGTH_LONG).show(); return false }
+        return true
+    }
+
+    private fun pairBoard() {
+        AlertDialog.Builder(this).setTitle("보드 페어링")
+            .setMessage("1. 보드가 전원에 꽂혀 있고 폰 가까이 있는지 확인\n2. 보드 BOOT 버튼을 3초 넘게 누름 → 파란 불이 두 번씩 깜빡임(1분 동안)\n3. 아래 [찾기] → 폰에 페어링 요청이 뜨면 승인\n\n10~30초 걸립니다.")
+            .setPositiveButton("찾기") { _, _ ->
+                Toast.makeText(this, "보드 찾는 중…", Toast.LENGTH_SHORT).show()
+                BoardLink.pair(this, { DriveState.log(it) }) { ok, msg ->
+                    runOnUiThread {
+                        if (ok) Prefs.setViaBoard(this, true)
+                        AlertDialog.Builder(this).setTitle(if (ok) "보드 페어링 됨" else "보드 페어링 실패").setMessage(msg + if (ok) "\n\n커맨더 연결을 '보드 경유'로 바꿨습니다. 감시를 다시 켜면 적용됩니다." else "")
+                            .setPositiveButton("확인") { _, _ -> recreate() }.show()
+                    }
+                }
+            }
+            .setNegativeButton("취소", null).show()
+    }
+
     private fun togglePairing() {
+        if (Prefs.viaBoard(this)) { Toast.makeText(this, "보드 경유 중입니다 — [보드 페어링]을 쓰세요", Toast.LENGTH_LONG).show(); return }
         if (S3xyButton.running && S3xyButton.pairingMode) { S3xyButton.stop(); refreshStatus(); return }
         if (S3xyButton.running) { Toast.makeText(this, "이미 광고 중", Toast.LENGTH_SHORT).show(); return }
         val ok = S3xyButton.start(this, { DriveState.log(it) }, Prefs.renameAdapter(this))

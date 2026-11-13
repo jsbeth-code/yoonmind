@@ -502,7 +502,8 @@ class DriveService : Service(), LocationListener {
         }
         if (!cmdWarned && now - cmdLostAt >= CMD_WARN_MS) {
             cmdWarned = true; cmdWarnAt = now
-            DriveState.log("⚠ 커맨더가 1분 넘게 연결되지 않음 (${S3xyButton.status}) — 감속 신호가 나가지 않습니다. 계속되면 [페어링하기] 후 enhauto에서 버튼 다시 추가")
+            DriveState.log("⚠ 커맨더가 1분 넘게 연결되지 않음 (${S3xyButton.status}) — 감속 신호가 나가지 않습니다. " +
+                if (S3xyButton.viaBoard) "보드 전원·보드 불빛을 확인하세요" else "계속되면 [페어링하기] 후 enhauto에서 버튼 다시 추가")
             outputs.say("커맨더가 연결되지 않았습니다. 감속 신호가 나가지 않습니다")
             S3xyButton.logBond("커맨더 1분 넘게 안 옴")
         }
@@ -573,6 +574,7 @@ class DriveService : Service(), LocationListener {
                     val prevUsual = DriveState.outputs?.usual
                     val out = outputs.refresh(keepBle = true)
                     if (Prefs.bleOn(this) != out.ble) DriveState.log("커맨더 사용 변경은 감시를 다시 켜면 적용됩니다")
+                    if (out.ble && S3xyButton.running && Prefs.viaBoard(this) != S3xyButton.viaBoard) DriveState.log("커맨더 연결 방식(폰 직접/보드 경유) 변경은 감시를 다시 켜면 적용됩니다")
                     if (!DriveState.simulating) dropDestIfOff()
                     val cfg = Prefs.engine(this).copy(bleLatencyS = out.bleDownSeconds())
                     e.config = cfg
@@ -623,7 +625,7 @@ class DriveService : Service(), LocationListener {
     }
 
     /** 감시를 꺼도 커맨더 버튼을 계속 켜 둘지(설정 ⑥, 커맨더 사용 중일 때). */
-    private fun keepButton() = Prefs.bleOn(this) && Prefs.keepButton(this)
+    private fun keepButton() = Prefs.bleOn(this) && Prefs.keepButton(this) && !Prefs.viaBoard(this) // 보드 경유는 유지할 게 없음(보드 주소가 고정)
 
     /** 감시가 꺼진 뒤: 커맨더 버튼을 유지하면 작은 알림으로 서비스를 남기고, 아니면 끝낸다. */
     private fun idleOrStop() {
