@@ -37,19 +37,25 @@ jobs:
             0x8000 $B/partitions.bin \
             0xe000 ~/.platformio/packages/framework-arduinoespressif32/tools/partitions/boot_app0.bin \
             0x10000 $B/firmware.bin
-          ls -l cam-slowdown-board.bin
+          cp $B/firmware.bin cam-slowdown-board-app.bin
+          ls -l cam-slowdown-board.bin cam-slowdown-board-app.bin
       - uses: actions/upload-artifact@v4
         with:
           name: cam-slowdown-board-bin
-          path: cam-slowdown-board/cam-slowdown-board.bin
+          path: |
+            cam-slowdown-board/cam-slowdown-board.bin
+            cam-slowdown-board/cam-slowdown-board-app.bin
       - name: Publish to release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: cam-slowdown-board-latest
           name: FSD 감속 버튼 보드 프로그램 (최신 빌드)
           prerelease: true
-          files: cam-slowdown-board/cam-slowdown-board.bin
+          files: |
+            cam-slowdown-board/cam-slowdown-board.bin
+            cam-slowdown-board/cam-slowdown-board-app.bin
           body: |
             ESP32 보드(ESP32-WROOM-32 / DEVKIT V1)용. 넣는 법은 cam-slowdown-board/README.md.
-            Espressif 웹 도구에서 Flash Address 0x0 에 cam-slowdown-board.bin 하나만 넣으면 된다.
+            처음: Espressif 웹 도구에서 Flash Address 0x0 에 cam-slowdown-board.bin 하나만 넣으면 된다.
+            업데이트(커맨더·폰 페어링 유지): Flash Address 0x10000 에 cam-slowdown-board-app.bin.
             브랜치 ${{ github.ref_name }} / 커밋 ${{ github.sha }}
