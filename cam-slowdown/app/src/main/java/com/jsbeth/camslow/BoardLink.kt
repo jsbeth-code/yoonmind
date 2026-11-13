@@ -331,10 +331,18 @@ object BoardLink {
                 synchronized(found) { found[r.device.address] = r.device to r.rssi }
             }
         }
-        log("보드 페어링: ENH_BTN 찾는 중(10초)")
+        log("보드 페어링: ENH_BTN 찾는 중(최대 10초)")
         scanner.startScan(listOf(ScanFilter.Builder().setDeviceName(S3xyButton.NAME).build()),
             ScanSettings.Builder().setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY).build(), scanCb)
-        Thread.sleep(10_000)
+        // 찾으면 1.5초만 더 보고 끝낸다(늘 10초를 다 쓰면 보드 페어링 창 1분을 넘길 수 있음)
+        val t0 = android.os.SystemClock.elapsedRealtime()
+        var firstAt = 0L
+        while (true) {
+            Thread.sleep(250)
+            val now = android.os.SystemClock.elapsedRealtime()
+            if (firstAt == 0L && synchronized(found) { found.isNotEmpty() }) firstAt = now
+            if ((firstAt > 0L && now - firstAt >= 1_500) || now - t0 >= 10_000) break
+        }
         try { scanner.stopScan(scanCb) } catch (_: Exception) {}
         val list = synchronized(found) { found.values.sortedByDescending { it.second }.map { it.first } }
         if (list.isEmpty()) return false to "ENH_BTN을 못 찾았습니다 — 보드 전원이 켜져 있고 가까이 있는지 확인"
