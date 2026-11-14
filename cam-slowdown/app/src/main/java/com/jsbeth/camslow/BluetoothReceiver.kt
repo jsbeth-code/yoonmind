@@ -20,9 +20,8 @@ import android.os.PowerManager
 class BluetoothReceiver : BroadcastReceiver() {
     override fun onReceive(ctx: Context, intent: Intent) {
         // v0.16.0: 블루투스를 껐다 켜면 보드 검색 등록이 사라지므로 기기 연결·끊김 때 다시 등록해 둔다.
-        // v0.16.1: 매번 하면 "검색 너무 잦음"(30초 5회) 제한에 걸려 등록이 사라질 수 있어 15분에 한 번만(Fable 점검)
+        // v0.16.1: 매번 하면 "검색 너무 잦음"(30초 5회) 제한에 걸려 등록이 사라질 수 있어 5분에 한 번만(Fable 점검)
         if (!DriveState.running) runCatching { BoardScan.refresh(ctx) }
-        if (!Prefs.autoStart(ctx)) return
         val want = Prefs.autoDeviceAddress(ctx)
         if (want.isBlank()) return
         @Suppress("DEPRECATION")
@@ -31,8 +30,14 @@ class BluetoothReceiver : BroadcastReceiver() {
         else intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE)
         val addr = device?.address ?: return
         if (!addr.equals(want, ignoreCase = true)) return
+        // v0.16.1 차 연결 상태는 자동 시작 설정과 상관없이 기록(보드 끊김 자동 정지 판단용)
         when (intent.action) {
-            BluetoothDevice.ACTION_ACL_CONNECTED -> AutoStart.carConnected(ctx)
+            BluetoothDevice.ACTION_ACL_CONNECTED -> AutoStart.carLinked = true
+            BluetoothDevice.ACTION_ACL_DISCONNECTED -> AutoStart.carLinked = false
+        }
+        if (!Prefs.autoStart(ctx)) return
+        when (intent.action) {
+            BluetoothDevice.ACTION_ACL_CONNECTED -> AutoStart.onCarConnected(ctx)
             BluetoothDevice.ACTION_ACL_DISCONNECTED -> AutoStart.carDisconnected(ctx)
         }
     }
@@ -59,7 +64,18 @@ object AutoStart {
 
     /** v0.16.1 자동 시작용 차(설정 ⑥)의 블루투스가 지금 연결돼 있는지(이 프로세스가 본 연결·끊김 기준). 보드 끊김 자동 정지·보드 자동 시작 조용히 정지 판단에 쓴다. */
     @Volatile var carLinked = false
-    fun carConnected(ctx: Context) {
+    /** 차가 지금 연결돼 있는지: 이 프로세스가 본 연결·끊김, 모르면(앱이 다시 뜬 뒤) 기기의 연결 상태를 직접 묻는다(숨은 API, 실패하면 false). */
+    @android.annotation.SuppressLint("MissingPermission")
+    fun carConnected(ctx: Context): Boolean {
+        if (carLinked) return true
+        val addr = Prefs.autoDeviceAddress(ctx)
+        if (addr.isBlank()) return false
+        return runCatching {
+            val dev = ctx.getSystemService(android.bluetooth.BluetoothManager::class.java)?.adapter?.getRemoteDevice(addr) ?: return false
+            dev.javaClass.getMethod("isConnected").invoke(dev) as? Boolean ?: false
+        }.getOrDefault(false)
+    }
+    fun onCarConnected(ctx: Context) {
         carLinked = true
         if (DriveState.running) {
             // 이미 감시 중(연결이 잠깐 끊겼다 붙은 경우): 예약된 자동 정지만 취소

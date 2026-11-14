@@ -71,11 +71,11 @@ object BoardScan {
         if (why != null || r != 0) DriveState.log(if (r == 0) "보드 자동 시작 검색 등록(${why ?: "다시"})" else "보드 자동 시작 검색 등록 실패(코드 $r)")
     }
 
-    /** v0.16.1 블루투스 기기 연결·끊김 때: 15분 안에 등록했으면 그대로 둔다(검색 시작·중지를 30초에 5번 넘게 하면 안드로이드가 막음). */
+    /** v0.16.1 블루투스 기기 연결·끊김 때: 5분 안에 등록했으면 그대로 둔다(검색 시작·중지를 30초에 5번 넘게 하면 안드로이드가 막음). */
     fun refresh(context: Context) {
         val now = System.currentTimeMillis()
         val at = Prefs.boardScanRegAt(context.applicationContext)
-        if (at != 0L && now >= at && now - at < 15 * 60_000L) return
+        if (at != 0L && now >= at && now - at < 5 * 60_000L) return
         update(context)
     }
 

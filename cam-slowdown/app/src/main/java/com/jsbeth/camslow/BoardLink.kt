@@ -16,11 +16,7 @@ import android.content.Context
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
-import java.net.HttpURLConnection
-import java.net.URL
-import java.security.MessageDigest
 import java.util.UUID
-import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.Semaphore
 import java.util.concurrent.TimeUnit
 

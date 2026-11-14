@@ -475,46 +475,30 @@ class DriveService : Service(), LocationListener {
         override fun run() { deadReckonStep(); main.postDelayed(this, 1_000) }
     }
     private val watchdog = object : Runnable {
-        override fun run() { checkGps(); checkCommander(); checkBoardLink(); checkBoardIdle(); KakaoSafety.ensureDelegates(); main.postDelayed(this, 5_000) }
+        override fun run() { checkGps(); checkCommander(); checkBoardLink(); KakaoSafety.ensureDelegates(); main.postDelayed(this, 5_000) }
     }
     /** v0.16.0 보드 경유: 이번 감시에서 보드가 한 번이라도 붙었는지, 끊긴 뒤 자동 정지 예약 중인지. */
     private var boardWasLinked = false
     private var boardStopPending = false
     /** 이번 정지가 "보드 끊기고 60초"였는지 — 그러면 다음에 보드가 보이면 바로 다시 시작(무장). */
-    private var stopByBoardLost = false
     private var boardKeepLogged = false
-    /** v0.16.1 마지막으로 10 km/h 넘게 움직인 시각, 이번 감시 시작 위치·멀리 갔는지, 시작 출처(보드 자동 시작이면 조용히 정지 판단). */
-    private var lastMovingAt = 0L
-    private var startLat = Double.NaN; private var startLon = Double.NaN
-    private var movedFar = false
-    private var startSource: String? = null
-    private var startedAt = 0L
+    /** v0.16.1 마지막으로 10 km/h 넘게 움직인 시각(보드 끊김 자동 정지 판단). */
+    private var boardMovingAt = 0L
     private val boardStopRunnable: Runnable = object : Runnable { override fun run() {
         boardStopPending = false
         if (!DriveState.running || DriveState.simulating) return
-        // v0.16.1 주행 중(차 블루투스 연결 또는 최근 60초 안 움직임)이면 보드만 끊긴 것 — 감시는 유지하고 1분 뒤 다시 본다(Fable 점검)
+        // v0.16.1 주행 중(차 블루투스 연결 또는 최근 5분 안 움직임)이면 보드만 끊긴 것 — 감시는 유지하고 1분 뒤 다시 본다(Fable 점검)
         val nowT = SystemClock.elapsedRealtime()
-        if (AutoStart.carLinked || (lastMovingAt > 0L && nowT - lastMovingAt < 60_000L)) {
+        // 신호 대기·정체를 고려해 5분 안에 움직였으면 주행 중으로 본다
+        if (AutoStart.carConnected(this@DriveService) || (boardMovingAt > 0L && nowT - boardMovingAt < 5 * 60_000L)) {
             if (!boardKeepLogged) { boardKeepLogged = true; DriveState.log("보드 연결이 끊겼지만 주행 중(차 연결·움직임) — 감시 유지, 감속 신호는 안 나감") }
             boardStopPending = true
             main.postDelayed(this, AUTO_STOP_DELAY_MS)
             return
         }
         DriveState.log("보드 연결이 끊기고 60초 — 자동 정지(차 꺼짐으로 봄)")
-        stopByBoardLost = true
         stopAll(); stopAfterSpeech()
-        stopByBoardLost = false
     } }
-    /** v0.16.1 보드로 자동 시작했는데 5분 동안 200 m도 안 움직이고 차 블루투스도 없으면(차가 깬 채 집에 있는 등) 조용히 정지. */
-    private fun checkBoardIdle() {
-        if (startSource != "board" || movedFar || DriveState.simulating || !DriveState.running) return
-        if (AutoStart.carLinked) return
-        if (SystemClock.elapsedRealtime() - startedAt < 5 * 60_000L) return
-        startSource = null
-        DriveState.log("보드로 자동 시작했지만 5분 동안 움직임 없음 — 조용히 정지(보드가 3분 넘게 꺼졌다 켜지면 다시 자동 시작)")
-        stopAll(quiet = true); stopAfterSpeech()
-    }
-
     /** 보드는 차가 깨어 있을 때만 켜진다: 감시 중 보드 연결이 끊기고 60초 지나면 자동 정지(설정 ⑥ 자동 정지 + 보드 자동 시작이 켜져 있을 때). */
     private fun checkBoardLink() {
         if (DriveState.simulating || !outputs.settings.ble || !S3xyButton.viaBoard) return
@@ -687,7 +671,6 @@ class DriveService : Service(), LocationListener {
                 if (intent?.getStringExtra("source") == "board") DriveState.log("보드 켜짐 — 자동 시작")
                 AutoStart.cancelNotification(this)
                 startGps()
-                startSource = intent?.getStringExtra("source")
             }
         }
         return START_STICKY
@@ -795,8 +778,7 @@ class DriveService : Service(), LocationListener {
         Prefs.setBoardArmed(this, false)
         BoardScan.update(this)
         boardWasLinked = false; boardStopPending = false; main.removeCallbacks(boardStopRunnable)
-        boardKeepLogged = false; lastMovingAt = 0L; startLat = Double.NaN; startLon = Double.NaN; movedFar = false; startSource = null
-        startedAt = SystemClock.elapsedRealtime()
+        boardKeepLogged = false; boardMovingAt = 0L
         DriveState.status = null
         DriveState.log("카메라 데이터 읽는 중…")
         DriveState.changed()
@@ -847,9 +829,7 @@ class DriveService : Service(), LocationListener {
             gpsWarned = false; DriveState.drActive = false; DriveState.log("GPS 복구")
         }
         val speed = if (loc.hasSpeed()) loc.speed.toDouble() else 0.0
-        if (speed >= 2.8) lastMovingAt = SystemClock.elapsedRealtime()
-        if (startLat.isNaN()) { startLat = loc.latitude; startLon = loc.longitude }
-        else if (!movedFar && Geo.distance(startLat, startLon, loc.latitude, loc.longitude) > 200.0) movedFar = true
+        if (speed >= 2.8) boardMovingAt = SystemClock.elapsedRealtime()
         val course = if (loc.hasBearing() && speed >= 3.0) loc.bearing.toDouble() else null
         val fix = Fix(loc.latitude, loc.longitude, speed, course, acc)
         lastFix = fix

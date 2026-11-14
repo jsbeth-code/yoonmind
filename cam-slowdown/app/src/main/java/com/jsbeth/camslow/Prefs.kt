@@ -278,11 +278,6 @@ object Prefs {
     fun boardAddr(ctx: Context) = sp(ctx).getString("boardAddr", "") ?: ""
     fun boardToken(ctx: Context) = sp(ctx).getString("boardToken", "") ?: ""
     fun setBoard(ctx: Context, addr: String, token: String) = put(ctx) { putString("boardAddr", addr); putString("boardToken", token) }
-    /** v0.16.0 보드 프로그램 버전(보드가 04에 답한 것)과 릴리스 최신 버전(커밋 앞 7자). 빈 글 = 모름. */
-    fun boardFwVer(ctx: Context) = sp(ctx).getString("boardFwVer", "") ?: ""
-    fun setBoardFwVer(ctx: Context, v: String) = put(ctx) { putString("boardFwVer", v) }
-    fun boardFwLatest(ctx: Context) = sp(ctx).getString("boardFwLatest", "") ?: ""
-    fun setBoardFwLatest(ctx: Context, v: String) = put(ctx) { putString("boardFwLatest", v) }
     /** v0.16.0 보드가 켜지면(차가 깨면) 자동 시작(보드 경유일 때만). */
     fun boardAutoStart(ctx: Context) = sp(ctx).getBoolean("boardAutoStart", true)
     fun setBoardAutoStart(ctx: Context, v: Boolean) = put(ctx) { putBoolean("boardAutoStart", v) }
