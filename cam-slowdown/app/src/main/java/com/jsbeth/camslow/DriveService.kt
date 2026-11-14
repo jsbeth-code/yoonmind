@@ -461,6 +461,8 @@ class DriveService : Service(), LocationListener {
     /** v0.16.3 간단 모드에서만 말하는 카메라 접근 안내(500·200 m, 경고음 없음). 평소에도 갱신해 두어 화면이 꺼지는 순간 이미 지난 거리는 말하지 않는다. */
     private val simpleAlerts = ApproachAlerts(announce = true, distanceAlways = true, beepOn = false, checkpoints = listOf(500, 200), sayLimit = true)
     private var screenReceiverOn = false
+    /** 이번 감시(주행)에서 "간단 모드"를 이미 말했는지. */
+    private var simpleSaid = false
     private val screenReceiver = object : android.content.BroadcastReceiver() {
         override fun onReceive(c: Context, i: Intent) { updateSimple() }
     }
@@ -473,7 +475,10 @@ class DriveService : Service(), LocationListener {
         DriveState.simple = on
         DriveState.log(if (on) "간단 모드 켬 — 카카오 음성 끔, 카메라 500·200 m와 감속·복귀·안전 안내만" else "간단 모드 끔")
         KakaoSafety.applyVolume()
-        if (on) outputs.say("간단 모드")
+        if (on) when (Prefs.simpleAnnounce(this)) {
+            "EVERY" -> outputs.say("간단 모드")
+            "ONCE" -> if (!simpleSaid) { simpleSaid = true; outputs.say("간단 모드") }
+        }
         DriveState.changed()
     }
     private var startedAt = 0L
@@ -816,7 +821,7 @@ class DriveService : Service(), LocationListener {
             lastFix = null; DriveState.drActive = false
             cmdLostAt = 0L; cmdWarned = false; cmdHelpShown = false
             startedAt = SystemClock.elapsedRealtime(); firstFixSeen = false; kakaoLive = null; kakaoFailSaid = false; kakaoLostAt = 0L; kakaoLostSaid = false
-            alerts.reset(); simpleAlerts.reset()
+            alerts.reset(); simpleAlerts.reset(); simpleSaid = false
             if (!screenReceiverOn) runCatching {
                 registerReceiver(screenReceiver, android.content.IntentFilter().apply { addAction(Intent.ACTION_SCREEN_OFF); addAction(Intent.ACTION_SCREEN_ON) })
                 screenReceiverOn = true

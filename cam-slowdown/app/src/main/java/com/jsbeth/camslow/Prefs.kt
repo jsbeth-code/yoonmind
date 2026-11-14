@@ -202,6 +202,9 @@ object Prefs {
     /** v0.16.3 간단 모드: OFF / AUTO(화면이 꺼지면) / ON. 카카오 음성 끔, 우리 안내는 카메라 500·200 m + 감속·복귀 + 안전 안내. */
     fun simpleMode(ctx: Context) = sp(ctx).getString("simpleMode", "AUTO") ?: "AUTO"
     fun setSimpleMode(ctx: Context, v: String) = put(ctx) { putString("simpleMode", v) }
+    /** v0.16.5 간단 모드 들어갈 때 "간단 모드" 알림: OFF / ONCE(한 번 주행에 처음 한 번, 기본) / EVERY(들어갈 때마다). */
+    fun simpleAnnounce(ctx: Context) = sp(ctx).getString("simpleAnnounce", "ONCE") ?: "ONCE"
+    fun setSimpleAnnounce(ctx: Context, v: String) = put(ctx) { putString("simpleAnnounce", v) }
     fun cmdWarnRepeatMin(ctx: Context) = sp(ctx).getInt("cmdWarnRepeatMin", 0)
     fun setCmdWarnRepeatMin(ctx: Context, v: Int) = put(ctx) { putInt("cmdWarnRepeatMin", v) }
     /** 목적지가 들어올 때 기본 경로 종류(작은 창에서 10초 안에 바꿀 수 있음). */

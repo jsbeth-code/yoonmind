@@ -11,8 +11,8 @@ android {
         applicationId = "com.jsbeth.camslow"
         minSdk = 26
         targetSdk = 34
-        versionCode = 84
-        versionName = "0.16.4"
+        versionCode = 85
+        versionName = "0.16.5"
         // 카카오 네이티브 앱 키: CI는 GitHub Secrets KAKAO_NATIVE_APP_KEY 환경변수, 로컬은 -PKAKAO_NATIVE_APP_KEY=…
         val kakaoKey = (System.getenv("KAKAO_NATIVE_APP_KEY") ?: (project.findProperty("KAKAO_NATIVE_APP_KEY") as String?) ?: "").trim()
         buildConfigField("String", "KAKAO_NATIVE_APP_KEY", "\"$kakaoKey\"")
