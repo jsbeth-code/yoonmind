@@ -278,8 +278,28 @@ object Prefs {
     fun boardAddr(ctx: Context) = sp(ctx).getString("boardAddr", "") ?: ""
     fun boardToken(ctx: Context) = sp(ctx).getString("boardToken", "") ?: ""
     fun setBoard(ctx: Context, addr: String, token: String) = put(ctx) { putString("boardAddr", addr); putString("boardToken", token) }
+    /** v0.16.0 보드 프로그램 버전(보드가 04에 답한 것)과 릴리스 최신 버전(커밋 앞 7자). 빈 글 = 모름. */
+    fun boardFwVer(ctx: Context) = sp(ctx).getString("boardFwVer", "") ?: ""
+    fun setBoardFwVer(ctx: Context, v: String) = put(ctx) { putString("boardFwVer", v) }
+    fun boardFwLatest(ctx: Context) = sp(ctx).getString("boardFwLatest", "") ?: ""
+    fun setBoardFwLatest(ctx: Context, v: String) = put(ctx) { putString("boardFwLatest", v) }
+    /** v0.16.0 보드가 켜지면(차가 깨면) 자동 시작(보드 경유일 때만). */
+    fun boardAutoStart(ctx: Context) = sp(ctx).getBoolean("boardAutoStart", true)
+    fun setBoardAutoStart(ctx: Context, v: Boolean) = put(ctx) { putBoolean("boardAutoStart", v) }
+    /** 보드 자동 시작 무장: true면 다음에 보드가 보이면 바로 시작. 감시를 직접 끄면 false — 보드가 한동안 안 보였다가 다시 보여야 시작. */
+    fun boardArmed(ctx: Context) = sp(ctx).getBoolean("boardArmed", true)
+    fun setBoardArmed(ctx: Context, v: Boolean) = put(ctx) { putBoolean("boardArmed", v) }
+    /** 마지막으로 보드를 본(연결·검색) 시각(벽시계 ms). */
+    fun boardSeenAt(ctx: Context) = sp(ctx).getLong("boardSeenAt", 0L)
+    fun setBoardSeenAt(ctx: Context, v: Long) = put(ctx) { putLong("boardSeenAt", v) }
     fun renameAdapter(ctx: Context) = sp(ctx).getBoolean("renameAdapter", true)
     fun setRenameAdapter(ctx: Context, v: Boolean) = put(ctx) { putBoolean("renameAdapter", v) }
+
+    // ---- v0.16.0 소리 크기(알람 등 소리 채널 음량 안에서의 비율, 0~100, 0 = 끔)
+    fun kakaoVolume(ctx: Context) = sp(ctx).getInt("kakaoVolume", 100).coerceIn(0, 100)
+    fun setKakaoVolume(ctx: Context, v: Int) = put(ctx) { putInt("kakaoVolume", v.coerceIn(0, 100)) }
+    fun appVolume(ctx: Context) = sp(ctx).getInt("appVolume", 100).coerceIn(0, 100)
+    fun setAppVolume(ctx: Context, v: Int) = put(ctx) { putInt("appVolume", v.coerceIn(0, 100)) }
 
     // ---- 자동 시작
     fun autoStart(ctx: Context) = sp(ctx).getBoolean("autoStart", false)

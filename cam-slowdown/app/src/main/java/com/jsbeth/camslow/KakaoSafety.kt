@@ -662,6 +662,8 @@ object KakaoSafety : KNGuidance_SafetyGuideDelegate, KNGuidance_LocationGuideDel
         val info = describeVoice(voiceGuide)
         main.post { log("카카오 음성 정보: $info") }
         if (!voiceNoted) { voiceNoted = true; main.post { log("카카오 음성 첫 안내: 조각 ${data?.size ?: 0}개 · 화면 ${if (naviView != null) "있음" else "없음"}") } }
+        // v0.16.0: 카카오 음성 크기 0%이거나 설정 ⑦ 음성·효과음이 꺼져 있으면 아무 데서도 내지 않는다(대기 줄에도 넣지 않음)
+        if (voiceVolume() <= 0f) return false
         // 직접 재생은 메인 스레드에서 차례로. 한 번 실패한 형식이면 그 뒤로는 카카오에 맡긴다.
         if (data != null && !voiceFailed && app != null) { main.post { playVoice(data) }; return false }
         val v = naviView?.takeIf { it === initedView } ?: return true
@@ -694,6 +696,27 @@ object KakaoSafety : KNGuidance_SafetyGuideDelegate, KNGuidance_LocationGuideDel
     private val voiceQueue = ArrayDeque<ByteArray>()
     private var voicePlayer: android.media.MediaPlayer? = null
 
+    /** v0.16.0 카카오 길안내 음성 크기(0~1): 메인 화면 메뉴의 "카카오 길안내 음성" × 설정 ⑦ 음성·효과음(끄면 0). 소리 채널 음량 안에서의 비율. */
+    @Volatile private var volCtx: android.content.Context? = null
+    /** 감시 전(안내가 아직 안 돎)에도 크기 설정을 읽을 수 있게 화면이 넣는다. */
+    fun bindContext(c: android.content.Context) { volCtx = c.applicationContext }
+    fun voiceVolume(): Float {
+        val a: android.content.Context = app ?: volCtx ?: return 1f
+        return if (!Prefs.alertsOn(a)) 0f else Prefs.kakaoVolume(a) / 100f
+    }
+    /** 카카오 화면 소리(sndVolume): 직접 재생 중이면 0(화면 효과음 끔), 카카오에 맡겼으면 음성 크기. */
+    fun viewVolume(): Float = if (voiceFailed) voiceVolume() else 0f
+
+    /** 크기를 바꾸면 바로 적용(감시 중에도): 나오는 음성의 크기, 0이면 멈추고 대기 줄을 비움, 카카오 화면 소리. */
+    fun applyVolume() = main.post {
+        val v = voiceVolume()
+        if (v <= 0f) {
+            voiceQueue.clear()
+            runCatching { voicePlayer?.stop() }; runCatching { voicePlayer?.release() }; voicePlayer = null
+        } else runCatching { voicePlayer?.setVolume(v, v) }
+        runCatching { naviView?.sndVolume = viewVolume() }
+    }
+
     /** 카카오 음성이 지금 나오는 중(우리 안내가 기다린다). */
     val voicePlaying: Boolean get() = runCatching { voicePlayer?.isPlaying == true }.getOrDefault(false) || voiceQueue.isNotEmpty()
     /** 우리 앱(TTS)이 말하는 중인지 — DriveService가 넣는다. 말하는 중이면 카카오 음성이 기다린다. */
@@ -702,6 +725,7 @@ object KakaoSafety : KNGuidance_SafetyGuideDelegate, KNGuidance_LocationGuideDel
     /** 카카오 음성 조각을 차례로 튼다(메인 스레드). 우리 안내가 말하는 중이면 끝날 때까지(최대 5초) 기다린다. */
     private fun playVoice(chunks: List<ByteArray>, waitedMs: Long = 0) {
         val a = app ?: return
+        if (voiceVolume() <= 0f) return
         if (waitedMs < 5_000 && runCatching { ourSpeaking() }.getOrDefault(false)) {
             main.postDelayed({ playVoice(chunks, waitedMs + 200) }, 200); return
         }
@@ -711,6 +735,8 @@ object KakaoSafety : KNGuidance_SafetyGuideDelegate, KNGuidance_LocationGuideDel
     }
     private fun playNext(a: Application): Boolean {
         val bytes = voiceQueue.removeFirstOrNull() ?: return true
+        val vol = voiceVolume()
+        if (vol <= 0f) { voiceQueue.clear(); return true }
         return try {
             val f = java.io.File(a.cacheDir, "kn_voice_${(voiceFileSeq++) % 8}.bin").apply { writeBytes(bytes) }
             val mp = android.media.MediaPlayer()
@@ -718,6 +744,7 @@ object KakaoSafety : KNGuidance_SafetyGuideDelegate, KNGuidance_LocationGuideDel
                 .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH).build())
             mp.setDataSource(f.absolutePath)
             mp.setOnCompletionListener { runCatching { it.release() }; if (voicePlayer === it) voicePlayer = null; playNext(a) }
+            mp.setVolume(vol, vol)
             mp.prepare(); mp.start()
             voicePlayer = mp
             lastVoiceAt = System.currentTimeMillis()
@@ -726,7 +753,7 @@ object KakaoSafety : KNGuidance_SafetyGuideDelegate, KNGuidance_LocationGuideDel
             if (!voiceFailed) {
                 voiceFailed = true; log("카카오 음성 직접 재생 실패: ${e.javaClass.simpleName} ${e.message ?: ""} — 다음부터 카카오에 맡김(카카오 화면 소리 켬)")
                 // v0.14.1: 카카오 화면 소리를 꺼 두었으니(경고음) 맡기는 순간 다시 켠다 — 안 그러면 길안내 음성이 안 나온다
-                main.post { runCatching { naviView?.sndVolume = 1f } }
+                main.post { runCatching { naviView?.sndVolume = viewVolume() } }
             }
             voiceQueue.clear()
             false

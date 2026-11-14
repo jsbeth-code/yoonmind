@@ -151,6 +151,9 @@ class MainActivity : AppCompatActivity() {
         if (Theme.current(this).night) setTheme(androidx.appcompat.R.style.Theme_AppCompat_NoActionBar) else setTheme(androidx.appcompat.R.style.Theme_AppCompat_Light_NoActionBar)
         super.onCreate(savedInstanceState)
         outputs = Outputs(this)
+        KakaoSafety.bindContext(this)
+        // v0.16.0 보드 자동 시작 검색(블루투스를 껐다 켜면 사라지므로 앱을 열 때마다 다시 등록)
+        if (!DriveState.running) BoardScan.update(this)
         build()
         askPermissions()
         // 다시 만들 때(테마 변경 등)는 처음 받은 인텐트를 또 처리하지 않는다(딥링크 확인창·자동 시작 반복 방지)
@@ -441,6 +444,8 @@ class MainActivity : AppCompatActivity() {
         expanded.addView(toggleBtn, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
         nowView = tv(12f, M_MUTED).apply { setPadding(dp(2), dp(6), dp(2), dp(2)) }
         expanded.addView(nowView)
+        // v0.16.0 소리 크기(카카오 길안내 음성 / 앱 안내 음성). 0%면 끔, 바꾸면 바로 적용(감시 중에도)
+        expanded.addView(volumeBox(), LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
 
         // 점검·기록: 평소엔 한 줄로 접어 두고 누르면 펼친다
         fun foldBox(): LinearLayout = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; background = rounded(M_ITEM, 12f) }
@@ -486,6 +491,36 @@ class MainActivity : AppCompatActivity() {
             (sheet as FloatSheet).scroller = sv
         }
         return sheet
+    }
+
+    /** v0.16.0 메뉴의 소리 크기 막대 둘. 소리 채널(설정 ⑦, 기본 알람) 음량 안에서의 비율로, 0이면 끔(따로 켬·끔 없음). */
+    private fun volumeBox(): LinearLayout {
+        val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; background = rounded(M_ITEM, 12f); setPadding(dp(12), dp(8), dp(12), dp(8)) }
+        fun slider(label: String, get: () -> Int, set: (Int) -> Unit) {
+            val head = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+            val pct = tv(13f, M_MUTED)
+            fun show(v: Int) { pct.text = if (v == 0) "꺼짐" else "$v%" }
+            head.addView(tv(13f, M_FG).apply { text = label; maxLines = 1; ellipsize = TextUtils.TruncateAt.END }, LinearLayout.LayoutParams(0, -2, 1f))
+            head.addView(pct)
+            box.addView(head)
+            val accent = android.content.res.ColorStateList.valueOf(t.path)
+            val bar = android.widget.SeekBar(this).apply {
+                max = 100; progress = get()
+                progressTintList = accent; thumbTintList = accent
+                progressBackgroundTintList = android.content.res.ColorStateList.valueOf(M_LINE)
+                setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
+                    override fun onProgressChanged(sb: android.widget.SeekBar, v: Int, fromUser: Boolean) { if (fromUser) { set(v); show(v) } }
+                    override fun onStartTrackingTouch(sb: android.widget.SeekBar) {}
+                    override fun onStopTrackingTouch(sb: android.widget.SeekBar) {}
+                })
+            }
+            show(get())
+            box.addView(bar, LinearLayout.LayoutParams(-1, dp(34)))
+        }
+        slider("카카오 길안내 음성", { Prefs.kakaoVolume(this) }) { Prefs.setKakaoVolume(this, it); KakaoSafety.applyVolume() }
+        slider("앱 안내 음성 (감속합니다·복귀합니다 등)", { Prefs.appVolume(this) }) { Prefs.setAppVolume(this, it) }
+        box.addView(tv(11f, M_MUTED).apply { text = "소리 채널(설정 ⑦) 음량 안에서의 크기 · 0%면 끔" + if (!Prefs.alertsOn(this@MainActivity)) "\n지금 설정 ⑦ 음성·효과음이 꺼져 있어 모두 무음" else "" })
+        return box
     }
 
     private fun recenterMap() {
@@ -1097,7 +1132,7 @@ class MainActivity : AppCompatActivity() {
                 nv.useDarkMode = t.night
                 nv.useJcImg = true      // 교차로 확대 그림
                 // v0.14.0: 카카오 화면 효과음(반복 삐)이 시끄러워 끔. 길안내 음성은 우리가 직접 틀고, 직접 재생이 실패해 카카오에 맡길 때만 켠다
-                nv.sndVolume = if (KakaoSafety.voiceFailed) 1f else 0f
+                nv.sndVolume = KakaoSafety.viewVolume() // v0.16.0: 맡길 때는 카카오 음성 크기(설정 ⑦ 끄면 0)
                 mapFrame.addView(nv, FrameLayout.LayoutParams(-1, -1))
                 pill.bringToFront()
                 naviView = nv

@@ -20,6 +20,8 @@
     <!-- 배터리 최적화 제외: Android 12+에서 백그라운드(블루투스 연결 이벤트)에서 포그라운드 서비스를 띄우기 위한 예외 조건 -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
+    <!-- v0.16.0 보드 자동 시작: 폰을 다시 켜면 보드 검색을 다시 등록 -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
     <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
@@ -63,6 +65,15 @@
             <intent-filter>
                 <action android:name="android.bluetooth.device.action.ACL_CONNECTED" />
                 <action android:name="android.bluetooth.device.action.ACL_DISCONNECTED" />
+            </intent-filter>
+        </receiver>
+        <!-- v0.16.0 보드 검색 결과(PendingIntent로 시스템이 보냄) -->
+        <receiver android:name=".BoardScanReceiver" android:exported="false" />
+        <!-- v0.16.0 재부팅·앱 업데이트 뒤 보드 검색 다시 등록(보호 브로드캐스트) -->
+        <receiver android:name=".BoardBootReceiver" android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
             </intent-filter>
         </receiver>
     </application>

@@ -19,6 +19,8 @@ import android.os.PowerManager
  */
 class BluetoothReceiver : BroadcastReceiver() {
     override fun onReceive(ctx: Context, intent: Intent) {
+        // v0.16.0: 블루투스를 껐다 켜면 보드 검색 등록이 사라지므로, 블루투스 기기 연결·끊김이 올 때마다 조용히 다시 등록해 둔다
+        if (!DriveState.running) runCatching { BoardScan.update(ctx) }
         if (!Prefs.autoStart(ctx)) return
         val want = Prefs.autoDeviceAddress(ctx)
         if (want.isBlank()) return
@@ -60,11 +62,17 @@ object AutoStart {
             try { ctx.startService(Intent(ctx, DriveService::class.java).setAction(DriveService.ACTION_CAR_CONNECTED)) } catch (_: Exception) {}
             return
         }
+        startDrive(ctx, "bluetooth")
+    }
+
+    /** 백그라운드에서 감시 시작(차 블루투스·보드 켜짐). 조건이 모자라거나 막히면 탭하면 시작되는 알림. source: "bluetooth" / "board". */
+    fun startDrive(ctx: Context, source: String) {
+        if (DriveState.running) return
         val missing = missing(ctx)
         if (missing.isEmpty()) {
             try {
                 ctx.startForegroundService(
-                    Intent(ctx, DriveService::class.java).setAction(DriveService.ACTION_START).putExtra("source", "bluetooth"),
+                    Intent(ctx, DriveService::class.java).setAction(DriveService.ACTION_START).putExtra("source", source),
                 )
                 return
             } catch (e: Exception) {
@@ -72,7 +80,7 @@ object AutoStart {
                 DriveState.log("자동 시작 실패: ${e.javaClass.simpleName}")
             }
         }
-        notifyTapToStart(ctx, missing)
+        notifyTapToStart(ctx, missing, source)
     }
 
     fun carDisconnected(ctx: Context) {
@@ -81,7 +89,7 @@ object AutoStart {
     }
 
     /** 바로 시작하지 못할 때: 탭하면 시작되는 알림(알림 탭은 사용자 조작이라 포그라운드 서비스 시작이 허용된다). */
-    private fun notifyTapToStart(ctx: Context, missing: List<String>) {
+    private fun notifyTapToStart(ctx: Context, missing: List<String>, source: String) {
         val nm = ctx.getSystemService(NotificationManager::class.java)
         nm.createNotificationChannel(NotificationChannel(CHANNEL, "차 연결 자동 시작", NotificationManager.IMPORTANCE_HIGH))
         val open = PendingIntent.getActivity(
@@ -93,7 +101,7 @@ object AutoStart {
             else "탭해서 시작. 자동 시작하려면 설정에서 ${missing.joinToString(", ")} 필요"
         nm.notify(NOTI_ID, Notification.Builder(ctx, CHANNEL)
             .setSmallIcon(android.R.drawable.ic_menu_compass)
-            .setContentTitle("차 연결됨 — FSD 감속")
+            .setContentTitle(if (source == "board") "보드 켜짐(차 깸) — FSD 감속" else "차 연결됨 — FSD 감속")
             .setContentText(text)
             .setStyle(Notification.BigTextStyle().bigText(text))
             .setContentIntent(open)

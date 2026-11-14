@@ -196,20 +196,28 @@ class Outputs(ctx: Context, private val logInit: Boolean = false) {
         } catch (_: Exception) {}
     }
 
+    private var toneVol = -1
+    /** v0.16.0 효과음 크기 = 90 × 앱 안내 음성 비율(0이면 효과음 없음). */
     private fun toneFor(route: VoiceRoute): ToneGenerator? {
         val st = streamOf(route)
-        if (tone == null || toneStream != st) {
+        val vol = (90 * Prefs.appVolume(app) / 100).coerceIn(0, 100)
+        if (vol <= 0) return null
+        if (tone == null || toneStream != st || toneVol != vol) {
             try { tone?.release() } catch (_: Exception) {}
-            tone = try { ToneGenerator(st, 90) } catch (_: RuntimeException) { null }
-            toneStream = st
+            tone = try { ToneGenerator(st, vol) } catch (_: RuntimeException) { null }
+            toneStream = st; toneVol = vol
         }
         return tone
     }
+
+    /** v0.16.0 앱 안내 음성 크기(0~1): 메인 화면 메뉴의 막대. 소리 채널 음량 안에서의 비율, 0이면 끔. 말할 때마다 읽어 바로 적용. */
+    private fun appVolume(): Float = Prefs.appVolume(app) / 100f
 
     /** 효과음 뒤에 말한다. 통화 채널이면 먼저 링크를 열고 1초 기다린다(못 열면 폰 스피커로). */
     private fun announce(toneType: Int, toneMs: Int, text: String, id: String) {
         val s = settings
         if (!s.alerts) return
+        if (appVolume() <= 0f) return // 앱 안내 음성 0% = 끔(통화 채널도 열지 않음)
         var route = s.route
         if (route == VoiceRoute.CAR_CALL && !startSco()) {
             DriveState.log("통화 채널을 못 열어 폰 스피커로 냅니다")
@@ -228,7 +236,10 @@ class Outputs(ctx: Context, private val logInit: Boolean = false) {
                 override fun run() {
                     if (KakaoSafety.voicePlaying && SystemClock.elapsedRealtime() - waitStart < 6_000) { main.postDelayed(this, 200); return }
                     // v0.13.3: 앞의 우리 안내를 끊지 않고 이어서 말한다("감속합니다"가 다음 안내에 잘리지 않게)
-                    val res = tts?.speak(text, TextToSpeech.QUEUE_ADD, null, id) ?: TextToSpeech.ERROR
+                    val vol = appVolume()
+                    if (vol <= 0f) return
+                    val params = android.os.Bundle().apply { putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, vol) }
+                    val res = tts?.speak(text, TextToSpeech.QUEUE_ADD, params, id) ?: TextToSpeech.ERROR
                     if (res != TextToSpeech.SUCCESS) DriveState.log("음성 출력 실패 — $ttsStatus")
                 }
             }
@@ -293,6 +304,7 @@ class Outputs(ctx: Context, private val logInit: Boolean = false) {
         refresh()
         DriveState.log("안내 소리 테스트 (${settings.route.label}) — $ttsStatus")
         if (!settings.alerts) { DriveState.log("음성·효과음이 꺼져 있습니다"); return }
+        if (appVolume() <= 0f) { DriveState.log("앱 안내 음성 크기가 0%(꺼짐) — 메인 화면 메뉴에서 올리세요"); return }
         announce(ToneGenerator.TONE_PROP_BEEP2, 300, "안내 소리 테스트입니다. 이 소리가 들리면 설정이 맞습니다", "test")
     }
 
@@ -463,7 +475,36 @@ class DriveService : Service(), LocationListener {
         override fun run() { deadReckonStep(); main.postDelayed(this, 1_000) }
     }
     private val watchdog = object : Runnable {
-        override fun run() { checkGps(); checkCommander(); KakaoSafety.ensureDelegates(); main.postDelayed(this, 5_000) }
+        override fun run() { checkGps(); checkCommander(); checkBoardLink(); KakaoSafety.ensureDelegates(); main.postDelayed(this, 5_000) }
+    }
+    /** v0.16.0 보드 경유: 이번 감시에서 보드가 한 번이라도 붙었는지, 끊긴 뒤 자동 정지 예약 중인지. */
+    private var boardWasLinked = false
+    private var boardStopPending = false
+    /** 이번 정지가 "보드 끊기고 60초"였는지 — 그러면 다음에 보드가 보이면 바로 다시 시작(무장). */
+    private var stopByBoardLost = false
+    private val boardStopRunnable = Runnable {
+        boardStopPending = false
+        if (!DriveState.running || DriveState.simulating) return@Runnable
+        DriveState.log("보드 연결이 끊기고 60초 — 자동 정지(차 꺼짐으로 봄)")
+        stopByBoardLost = true
+        stopAll(); stopAfterSpeech()
+        stopByBoardLost = false
+    }
+    /** 보드는 차가 깨어 있을 때만 켜진다: 감시 중 보드 연결이 끊기고 60초 지나면 자동 정지(설정 ⑥ 자동 정지 + 보드 자동 시작이 켜져 있을 때). */
+    private fun checkBoardLink() {
+        if (DriveState.simulating || !outputs.settings.ble || !S3xyButton.viaBoard) return
+        if (BoardLink.connected) {
+            BoardScan.noteSeen(this, 30_000)
+            boardWasLinked = true
+            if (boardStopPending) { boardStopPending = false; main.removeCallbacks(boardStopRunnable); DriveState.log("보드 다시 연결됨 — 자동 정지 취소") }
+            return
+        }
+        if (!boardWasLinked || boardStopPending || BoardLink.otaBusy) return
+        if (!Prefs.autoStop(this) || !Prefs.boardAutoStart(this)) return
+        boardStopPending = true
+        main.removeCallbacks(boardStopRunnable)
+        main.postDelayed(boardStopRunnable, AUTO_STOP_DELAY_MS)
+        DriveState.log("보드 연결 끊김 — ${AUTO_STOP_DELAY_MS / 1000}초 안에 다시 안 붙으면 자동 정지")
     }
     /** 커맨더 감시: 감시 시작(또는 연결이 끊긴) 뒤 60초 넘게 커맨더가 준비 안 되면 한 번 말한다. 다시 붙으면 알린다. */
     private var cmdLostAt = 0L
@@ -617,6 +658,7 @@ class DriveService : Service(), LocationListener {
                     DriveState.log("이미 감시 중"); return START_STICKY
                 }
                 if (intent?.getStringExtra("source") == "bluetooth") DriveState.log("차 블루투스 연결 — 자동 시작")
+                if (intent?.getStringExtra("source") == "board") DriveState.log("보드 켜짐 — 자동 시작")
                 AutoStart.cancelNotification(this)
                 startGps()
             }
@@ -722,6 +764,10 @@ class DriveService : Service(), LocationListener {
         lm.removeUpdates(this)
         main.removeCallbacks(watchdog)
         DriveState.running = true
+        // v0.16.0 감시 중엔 보드 검색을 쉬고, 이번 켜짐에선 무장을 푼다(직접 끄면 보드가 꺼졌다 켜질 때까지 다시 안 켬)
+        Prefs.setBoardArmed(this, false)
+        BoardScan.update(this)
+        boardWasLinked = false; boardStopPending = false; main.removeCallbacks(boardStopRunnable)
         DriveState.status = null
         DriveState.log("카메라 데이터 읽는 중…")
         DriveState.changed()
@@ -1023,6 +1069,7 @@ class DriveService : Service(), LocationListener {
         main.removeCallbacks(teslaPoll); appliedDest = null; DriveState.teslaDest = null
         DriveState.drActive = false
         main.removeCallbacks(autoStopRunnable); autoStopPending = false
+        main.removeCallbacks(boardStopRunnable); boardStopPending = false
         stopSimulation()
         getSystemService(LocationManager::class.java).removeUpdates(this)
         KakaoSafety.stop()
@@ -1044,10 +1091,14 @@ class DriveService : Service(), LocationListener {
         DriveState.map = null
         DriveState.carProfile = null
         OverlayWindow.hide()
+        // v0.16.0 보드 자동 시작: 보드가 붙어 있던 채 끄면 지금 본 것으로(직접 끔 → 보드가 꺼졌다 켜져야 다시), 보드 끊김 자동 정지면 바로 다시 무장
+        if (BoardLink.connected) BoardScan.noteSeen(this, 0)
+        if (stopByBoardLost) Prefs.setBoardArmed(this, true)
         if (S3xyButton.running && !S3xyButton.pairingMode && !keepButton()) S3xyButton.stop()
         else if (S3xyButton.running) DriveState.log("커맨더 버튼 남김(" + (if (S3xyButton.pairingMode) "페어링 모드" else "유지 설정") + ")")
         DriveState.log("주행 감시 정지")
         if (!wasSlowed && !quiet) outputs.say("감시를 끕니다")
+        BoardScan.update(this, "감시 꺼짐")
         DriveState.changed()
     }
 

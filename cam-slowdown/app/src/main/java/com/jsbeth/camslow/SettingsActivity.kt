@@ -21,6 +21,7 @@ class SettingsActivity : Activity() {
     private lateinit var outputs: Outputs
     private lateinit var resultView: TextView
     private lateinit var cmdStatus: TextView
+    private lateinit var fwStatus: TextView
     private lateinit var permStatus: TextView
     private lateinit var zoneStatus: TextView
     private lateinit var ttsStatus: TextView
@@ -85,20 +86,25 @@ class SettingsActivity : Activity() {
         // 6 차와 연결
         ui.question(6, "차와 연결")
         ui.group {
-            switchRow("S3XY 커맨더로 차 휠 조작", "끄면 음성 안내만", Prefs.bleOn(this@SettingsActivity)) { Prefs.setBleOn(this@SettingsActivity, it); refreshStatus() }
+            switchRow("S3XY 커맨더로 차 휠 조작", "끄면 음성 안내만", Prefs.bleOn(this@SettingsActivity)) { Prefs.setBleOn(this@SettingsActivity, it); BoardScan.update(this@SettingsActivity, "설정"); refreshStatus() }
             text("커맨더 연결", 14f, bold = true)
             radioGroup(listOf("폰 직접 (폰이 커맨더 버튼)", "보드 경유 (ESP32 보드가 커맨더 버튼, 폰은 보드에 신호)"), if (Prefs.viaBoard(this@SettingsActivity)) 1 else 0) { i ->
                 Prefs.setViaBoard(this@SettingsActivity, i == 1)
+                BoardScan.update(this@SettingsActivity, "설정")
                 if (DriveState.running) Toast.makeText(this@SettingsActivity, "감시를 다시 켜면 적용됩니다", Toast.LENGTH_SHORT).show()
                 refreshStatus()
             }
             cmdStatus = text("", 13f)
             row(button("보드 페어링") { pairBoard() })
+            // v0.16.0 보드 프로그램 무선 업데이트
+            fwStatus = text("", 13f)
+            row(button("보드 프로그램 업데이트") { updateBoardFirmware() })
+            hint("보드 프로그램을 앱이 블루투스로 넣습니다(1~3분, 감시를 끈 채 보드 전원을 켜고 폰을 가까이). 커맨더·폰 페어링은 그대로 남습니다. 이 기능이 든 보드 프로그램은 PC로 한 번 넣어야 합니다(보드 README).")
             hint("보드 경유: 보드 BOOT 3초(파란 불 두 번씩 깜빡) 뒤 엔하우토에 버튼으로 등록(클릭 = 크루징 속도 내림, 더블클릭 = 올림)하고, 보드 BOOT를 3초 넘게 눌러 파란 불이 두 번씩 깜빡이면(1분) [보드 페어링]. 폰에 페어링 요청이 뜨면 승인. 한 번만 하면 됩니다(새로 페어링하면 이전 폰은 못 씀). 아래 [페어링하기]·버튼 유지는 폰 직접일 때만 씁니다.")
             row(
                 button("페어링하기") { togglePairing() },
-                button("감속 신호 테스트") { if (DriveState.running) Toast.makeText(this@SettingsActivity, "감시 중엔 테스트할 수 없습니다 — 감시를 끄고 하세요 (앱이 아는 차 프로필이 어긋남)", Toast.LENGTH_LONG).show() else { if (!boardReadyForTest()) return@button; outputs.refresh(); outputs.down(Camera(0.0, 0.0, 100, CamKind.SPOT, 0, "테스트"), 300.0) } },
-                button("복귀 신호 테스트") { if (DriveState.running) Toast.makeText(this@SettingsActivity, "감시 중엔 테스트할 수 없습니다 — 감시를 끄고 하세요 (앱이 아는 차 프로필이 어긋남)", Toast.LENGTH_LONG).show() else { if (!boardReadyForTest()) return@button; outputs.refresh(); outputs.up("테스트", force = true) } },
+                button("감속 신호 테스트") { if (BoardLink.otaBusy) Toast.makeText(this@SettingsActivity, "보드 프로그램 업데이트 중입니다", Toast.LENGTH_SHORT).show() else if (DriveState.running) Toast.makeText(this@SettingsActivity, "감시 중엔 테스트할 수 없습니다 — 감시를 끄고 하세요 (앱이 아는 차 프로필이 어긋남)", Toast.LENGTH_LONG).show() else { if (!boardReadyForTest()) return@button; outputs.refresh(); outputs.down(Camera(0.0, 0.0, 100, CamKind.SPOT, 0, "테스트"), 300.0) } },
+                button("복귀 신호 테스트") { if (BoardLink.otaBusy) Toast.makeText(this@SettingsActivity, "보드 프로그램 업데이트 중입니다", Toast.LENGTH_SHORT).show() else if (DriveState.running) Toast.makeText(this@SettingsActivity, "감시 중엔 테스트할 수 없습니다 — 감시를 끄고 하세요 (앱이 아는 차 프로필이 어긋남)", Toast.LENGTH_LONG).show() else { if (!boardReadyForTest()) return@button; outputs.refresh(); outputs.up("테스트", force = true) } },
             )
             hint("페어링: 위 버튼으로 ENH_BTN 광고를 켜고, enhauto 앱 Buttons → Add S3XY Button → 폰에 뜨는 페어링 요청 승인. 그 뒤 enhauto에서 이 버튼의 클릭 = 크루징 속도 내림, 더블클릭 = 크루징 속도 올림으로 지정(FSD에선 프로필 한 칸 내림/올림). 연결되면 [페어링하기]를 다시 눌러 끕니다. 차 프로필 화면을 보며 테스트 버튼으로 단수를 세어 보세요.")
             switchRow("감시를 꺼도 커맨더 버튼 유지", "앱을 다시 켜면 폰 블루투스 주소가 바뀌어 커맨더가 못 찾는 문제 때문에 켜 둡니다. 작은 알림이 남고 배터리를 조금 더 씁니다", Prefs.keepButton(this@SettingsActivity)) { Prefs.setKeepButton(this@SettingsActivity, it) }
@@ -115,7 +121,10 @@ class SettingsActivity : Activity() {
                 val d = devices.getOrNull(i - 1)
                 Prefs.setAutoDevice(this@SettingsActivity, d?.first ?: "", d?.second ?: ""); refreshStatus()
             }
-            switchRow("연결이 끊기고 60초 지나면 자동 정지", "", Prefs.autoStop(this@SettingsActivity)) { Prefs.setAutoStop(this@SettingsActivity, it) }
+            switchRow("보드가 켜지면 자동 시작(보드 경유)", "보드는 차가 깨어 있을 때만 켜집니다 — 앱이 꺼져 있어도 보드가 보이면 감시 시작. 직접 끄면 보드가 꺼졌다 켜질 때까지 다시 켜지 않음. 보드 페어링·보드 경유일 때만", Prefs.boardAutoStart(this@SettingsActivity)) {
+                Prefs.setBoardAutoStart(this@SettingsActivity, it); BoardScan.update(this@SettingsActivity, "설정"); refreshStatus()
+            }
+            switchRow("연결이 끊기고 60초 지나면 자동 정지", "차 블루투스 또는 (보드 자동 시작이면) 보드 연결", Prefs.autoStop(this@SettingsActivity)) { Prefs.setAutoStop(this@SettingsActivity, it) }
             permStatus = text("", 13f)
             row(
                 button("위치 '항상 허용' 요청") { requestBackgroundLocation() },
@@ -125,7 +134,7 @@ class SettingsActivity : Activity() {
 
         // 7 안내
         ui.question(7, "안내·화면")
-        ui.switchRow("음성·효과음", "", Prefs.alertsOn(this)) { Prefs.setAlertsOn(this, it) }
+        ui.switchRow("음성·효과음", "끄면 카카오 길안내 음성까지 모두 무음. 크기는 메인 화면 메뉴의 막대(카카오·앱 따로)", Prefs.alertsOn(this)) { Prefs.setAlertsOn(this, it); KakaoSafety.applyVolume() }
         ui.numberRow("과속 기준(km/h)", "제한속도보다 이만큼 넘으면 화면 속도를 빨갛게 (7). 과속 음성·경고음은 카카오 내비가 함", Prefs.overspeedMargin(this).toString(), false) { Prefs.setOverspeedMargin(this, it.toInt()) }
         ui.text("소리를 어디로 낼까요?", 14f)
         val routes = VoiceRoute.values()
@@ -202,6 +211,68 @@ class SettingsActivity : Activity() {
             button("고급 설정 기본값으로") { Prefs.resetAdvanced(this@SettingsActivity); CameraRepo.invalidate(); recreate() }
         }
         ui.show()
+        swipeSlop = ui.dp(100).toFloat()
+        // 보드 프로그램 최신 버전(릴리스) — 보드를 쓸 때만
+        if (Prefs.boardAddr(this).isNotEmpty()) BoardLink.fetchLatestVersion(this) { if (!isFinishing && !isDestroyed) refreshStatus() }
+    }
+
+    // ---- v0.16.0 오른쪽으로 쓸면 닫기(스크롤·막대·입력칸·스위치 조작과 겹치지 않게 터치 단계에서 판별)
+    private var swipeSlop = 0f
+    private var swX = 0f; private var swY = 0f
+    private var swTrack = false
+    override fun dispatchTouchEvent(e: android.view.MotionEvent): Boolean {
+        when (e.actionMasked) {
+            android.view.MotionEvent.ACTION_DOWN -> { swX = e.rawX; swY = e.rawY; swTrack = !touchesControl(window.decorView, e.rawX.toInt(), e.rawY.toInt()) }
+            android.view.MotionEvent.ACTION_POINTER_DOWN -> swTrack = false
+            android.view.MotionEvent.ACTION_MOVE -> if (swTrack) {
+                val dx = e.rawX - swX; val dy = kotlin.math.abs(e.rawY - swY)
+                if (dy > ui.dp(24) && dy > kotlin.math.abs(dx)) swTrack = false // 세로 스크롤
+                else if (dx > swipeSlop && dx > dy * 2) {
+                    swTrack = false
+                    // 아래 화면에는 취소를 보내(누르던 버튼이 눌리지 않게) 닫는다
+                    val cancel = android.view.MotionEvent.obtain(e).apply { action = android.view.MotionEvent.ACTION_CANCEL }
+                    super.dispatchTouchEvent(cancel); cancel.recycle()
+                    finish()
+                    overridePendingTransition(android.R.anim.fade_in, android.R.anim.slide_out_right)
+                    return true
+                }
+            }
+        }
+        return super.dispatchTouchEvent(e)
+    }
+
+    /** 이 점 아래에 가로로 끄는 조작(막대·입력칸·스위치·목록 고르기)이 있는지. */
+    private fun touchesControl(v: View, x: Int, y: Int): Boolean {
+        if (v.visibility != View.VISIBLE) return false
+        val loc = IntArray(2); v.getLocationOnScreen(loc)
+        if (x < loc[0] || y < loc[1] || x >= loc[0] + v.width || y >= loc[1] + v.height) return false
+        if (v is android.widget.AbsSeekBar || v is EditText || v is android.widget.Switch || v is android.widget.Spinner) return true
+        if (v is android.view.ViewGroup) for (i in 0 until v.childCount) if (touchesControl(v.getChildAt(i), x, y)) return true
+        return false
+    }
+
+    /** v0.16.0 설정 ⑥ [보드 프로그램 업데이트]. 감시 중엔 막는다(주행 중 업데이트 금지). */
+    private fun updateBoardFirmware() {
+        if (DriveState.running) { Toast.makeText(this, "감시 중엔 보드 프로그램을 업데이트할 수 없습니다 — 감시를 끄고 하세요", Toast.LENGTH_LONG).show(); return }
+        if (Prefs.boardAddr(this).isEmpty()) { Toast.makeText(this, "먼저 [보드 페어링]을 하세요", Toast.LENGTH_LONG).show(); return }
+        if (BoardLink.otaBusy) { Toast.makeText(this, "이미 업데이트 중입니다", Toast.LENGTH_SHORT).show(); return }
+        val cur = Prefs.boardFwVer(this); val latest = Prefs.boardFwLatest(this)
+        val same = cur.isNotEmpty() && latest.isNotEmpty() && cur == latest
+        AlertDialog.Builder(this).setTitle("보드 프로그램 업데이트")
+            .setMessage((if (same) "이미 최신($cur)입니다. 그래도 다시 넣을까요?\n\n" else "보드 ${cur.ifEmpty { "모름" }} → 최신 ${latest.ifEmpty { "(받을 때 확인)" }}\n\n") +
+                "보드 전원을 켜 두고(차 USB) 폰을 보드 가까이 두세요. 1~3분 걸리고, 화면을 끄거나 이 화면을 닫아도 계속됩니다. 끊기거나 실패해도 보드는 원래 프로그램 그대로입니다.")
+            .setPositiveButton("업데이트") { _, _ ->
+                val app = applicationContext
+                Toast.makeText(this, "보드 프로그램 업데이트 시작", Toast.LENGTH_SHORT).show()
+                BoardLink.updateFirmware(this, { DriveState.log(it) }) { ok, msg ->
+                    runOnUiThread {
+                        Toast.makeText(app, (if (ok) "보드 업데이트: " else "보드 업데이트 실패: ") + msg, Toast.LENGTH_LONG).show()
+                        if (!isFinishing && !isDestroyed) refreshStatus()
+                    }
+                }
+                refreshStatus()
+            }
+            .setNegativeButton("취소", null).show()
     }
 
     /** 감시 중이면 서비스가 설정을 다시 읽게(목적지 따라가기 끔·연결 끊기를 바로 반영). */
@@ -237,6 +308,7 @@ class SettingsActivity : Activity() {
         outputs.shutdown()
         // 시험하려고 켠 보드 연결은 감시 중이 아니면 끈다
         if (!DriveState.running && BoardLink.active) S3xyButton.stop()
+        BoardScan.update(this)
         super.onDestroy()
     }
 
@@ -257,6 +329,19 @@ class SettingsActivity : Activity() {
         permStatus.text = if (!Prefs.autoStart(this)) "–  자동 시작 꺼짐"
             else if (Prefs.autoDeviceAddress(this).isEmpty()) "✖  차를 골라야 합니다"
             else if (missing.isEmpty()) "✔  자동 시작 조건 모두 충족" else "✖  아직 필요: ${missing.joinToString(", ")}"
+        // v0.16.0 보드 자동 시작 상태
+        val boardMissing = missing + (if (!BoardScan.hasScanPermission(this)) listOf("블루투스 검색 권한") else emptyList())
+        permStatus.append("\n" + when {
+            !Prefs.boardAutoStart(this) -> "–  보드 자동 시작 꺼짐"
+            !Prefs.bleOn(this) || !Prefs.viaBoard(this) -> "–  보드 자동 시작: 커맨더 연결이 '보드 경유'일 때만"
+            Prefs.boardAddr(this).isEmpty() -> "✖  보드 자동 시작: 보드 페어링 필요"
+            boardMissing.isEmpty() -> "✔  보드가 켜지면 자동 시작"
+            else -> "✖  보드 자동 시작에 아직 필요: ${boardMissing.joinToString(", ")}"
+        })
+        // v0.16.0 보드 프로그램 버전
+        val fwCur = Prefs.boardFwVer(this).ifEmpty { "모름" }
+        val fwLatest = Prefs.boardFwLatest(this).ifEmpty { "모름" }
+        fwStatus.text = "보드 프로그램: $fwCur (최신 $fwLatest)" + (if (BoardLink.otaProgress.isNotEmpty()) "\n⟳  ${BoardLink.otaProgress}" else "")
         val zones = CameraRepo.cachedZoneCount()
         zoneStatus.text = if (!Prefs.schoolZoneOn(this)) "" else when (zones) { null -> "보호구역 파일 확인 중"; 0 -> "✖  보호구역 파일 없음 — 메인 메뉴에서 '어린이보호구역 CSV'"; else -> "✔  보호구역 ${zones}곳" }
         val t = DriveState.ttsStatus.ifEmpty { outputs.ttsStatus }
@@ -318,7 +403,7 @@ class SettingsActivity : Activity() {
                 Toast.makeText(this, "보드 찾는 중…", Toast.LENGTH_SHORT).show()
                 BoardLink.pair(this, { DriveState.log(it) }) { ok, msg ->
                     runOnUiThread {
-                        if (ok) Prefs.setViaBoard(applicationContext, true)
+                        if (ok) { Prefs.setViaBoard(applicationContext, true); BoardScan.update(applicationContext, "보드 페어링") }
                         // 기다리는 동안 설정 화면을 나갔거나 돌렸으면 창 대신 짧은 알림(닫힌 화면에 창을 띄우면 앱이 죽음)
                         if (isFinishing || isDestroyed) { Toast.makeText(applicationContext, (if (ok) "보드 페어링 됨" else "보드 페어링 실패") + " — 기록을 보세요", Toast.LENGTH_LONG).show(); return@runOnUiThread }
                         AlertDialog.Builder(this).setTitle(if (ok) "보드 페어링 됨" else "보드 페어링 실패").setMessage(msg + if (ok) "\n\n커맨더 연결을 '보드 경유'로 바꿨습니다. 감시를 다시 켜면 적용됩니다." else "")
