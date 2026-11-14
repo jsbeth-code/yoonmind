@@ -15,6 +15,10 @@ class ApproachAlerts(
     var announce: Boolean = true,
     var distanceAlways: Boolean = false,
     var beepOn: Boolean = true,
+    /** 말할 거리(m). 첫 값(가장 먼 것)은 "N미터 앞, 제한속도 L 과속카메라입니다". */
+    val checkpoints: List<Int> = CHECKPOINTS,
+    /** v0.16.3 간단 모드: 뒤 체크포인트도 늘 제한속도까지 말한다("200미터 앞, 제한속도 80"). */
+    val sayLimit: Boolean = false,
 ) {
     sealed class Out {
         data class Say(val text: String) : Out()
@@ -66,7 +70,7 @@ class ApproachAlerts(
         }
 
         // 지나온 체크포인트는 한 번에 처리: 가장 가까운(작은) 것 하나만 말한다
-        val due = CHECKPOINTS.filter { distM <= it + 15 && it !in said }
+        val due = checkpoints.filter { distM <= it + 15 && it !in said }
         if (due.isNotEmpty()) {
             said += due
             val cp = due.min()
@@ -74,7 +78,7 @@ class ApproachAlerts(
                 val d = if (distM >= 485) 500 else (Math.round(distM / 50.0) * 50).toInt().coerceAtLeast(50)
                 out += Out.Say("${d}미터 앞, 제한속도 $limit $what" + "입니다")
             } else if (cp < 500 && (speeding || distanceAlways)) {
-                out += Out.Say("${cp}미터" + if (speeding) ", 감속하세요" else "")
+                out += Out.Say("${cp}미터" + (if (sayLimit) " 앞, 제한속도 $limit" else "") + if (speeding) ", 감속하세요" else "")
             }
         }
 

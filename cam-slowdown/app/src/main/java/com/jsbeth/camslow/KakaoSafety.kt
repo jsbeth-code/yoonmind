@@ -702,7 +702,8 @@ object KakaoSafety : KNGuidance_SafetyGuideDelegate, KNGuidance_LocationGuideDel
     fun bindContext(c: android.content.Context) { volCtx = c.applicationContext }
     fun voiceVolume(): Float {
         val a: android.content.Context = app ?: volCtx ?: return 1f
-        return if (!Prefs.alertsOn(a)) 0f else Prefs.kakaoVolume(a) / 100f
+        // v0.16.3 간단 모드(화면 꺼짐 등)면 카카오 음성은 끈다
+        return if (!Prefs.alertsOn(a) || DriveState.simple) 0f else Prefs.kakaoVolume(a) / 100f
     }
     /** 카카오 화면 소리(sndVolume): 직접 재생 중이면 0(화면 효과음 끔), 카카오에 맡겼으면 음성 크기. */
     fun viewVolume(): Float = if (voiceFailed) voiceVolume() else 0f

@@ -129,6 +129,12 @@ class SettingsActivity : Activity() {
 
         // 7 안내
         ui.question(7, "안내·화면")
+        ui.text("간단 모드 (폰 화면을 끄고 달릴 때)", 14f)
+        val simpleModes = listOf("AUTO", "ON", "OFF")
+        ui.radioGroup(listOf("화면이 꺼지면 자동 (기본)", "항상", "끔"), simpleModes.indexOf(Prefs.simpleMode(this)).coerceAtLeast(0)) { i ->
+            Prefs.setSimpleMode(this, simpleModes[i]); notifyDrive()
+        }
+        ui.hint("간단 모드: 카카오 내비 음성을 끄고, 앱이 과속 카메라 500 m·200 m 앞 안내와 감속·복귀, 연결·목적지 같은 안전 안내만 말합니다. 감속·복귀 신호는 그대로 나갑니다.")
         ui.switchRow("음성·효과음", "끄면 카카오 길안내 음성까지 모두 무음. 크기는 메인 화면 메뉴의 막대(카카오·앱 따로)", Prefs.alertsOn(this)) { Prefs.setAlertsOn(this, it); KakaoSafety.applyVolume() }
         ui.numberRow("과속 기준(km/h)", "제한속도보다 이만큼 넘으면 화면 속도를 빨갛게 (7). 과속 음성·경고음은 카카오 내비가 함", Prefs.overspeedMargin(this).toString(), false) { Prefs.setOverspeedMargin(this, it.toInt()) }
         ui.text("소리를 어디로 낼까요?", 14f)

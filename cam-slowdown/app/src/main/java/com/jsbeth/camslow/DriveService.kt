@@ -29,6 +29,8 @@ import java.util.Locale
 /** 화면과 서비스가 공유하는 상태. 모든 접근은 메인 스레드에서. */
 object DriveState {
     var running = false
+    /** v0.16.3 간단 모드가 지금 켜져 있는지(설정 "항상" 또는 "화면이 꺼지면 자동" + 화면 꺼짐). */
+    @Volatile var simple = false
     var simulating = false
     var status: EngineStatus? = null
     /** 지금 쓰는 엔진 설정(화면에 감속 시작 거리를 보여 주기 위해). */
@@ -456,6 +458,23 @@ class DriveService : Service(), LocationListener {
     private var gpsWarned = false
     /** 접근 안내·과속 경고음. */
     private val alerts = ApproachAlerts()
+    /** v0.16.3 간단 모드에서만 말하는 카메라 접근 안내(500·200 m, 경고음 없음). 평소에도 갱신해 두어 화면이 꺼지는 순간 이미 지난 거리는 말하지 않는다. */
+    private val simpleAlerts = ApproachAlerts(announce = true, distanceAlways = true, beepOn = false, checkpoints = listOf(500, 200), sayLimit = true)
+    private var screenReceiverOn = false
+    private val screenReceiver = object : android.content.BroadcastReceiver() {
+        override fun onReceive(c: Context, i: Intent) { updateSimple() }
+    }
+    /** 간단 모드 켜짐 여부를 다시 계산해 바뀌면 기록·카카오 음성 크기에 반영. */
+    private fun updateSimple() {
+        val mode = Prefs.simpleMode(this)
+        val interactive = runCatching { getSystemService(android.os.PowerManager::class.java)?.isInteractive ?: true }.getOrDefault(true)
+        val on = DriveState.running && !DriveState.simulating && (mode == "ON" || (mode == "AUTO" && !interactive))
+        if (on == DriveState.simple) return
+        DriveState.simple = on
+        DriveState.log(if (on) "간단 모드 켬 — 카카오 음성 끔, 카메라 500·200 m와 감속·복귀·안전 안내만" else "간단 모드 끔")
+        KakaoSafety.applyVolume()
+        DriveState.changed()
+    }
     private var startedAt = 0L
     private var firstFixSeen = false
     /** 카카오가 지금 판단에 쓰이는지(null = 이번 감시에서 아직 모름). 바뀔 때 음성으로 알린다. */
@@ -463,6 +482,7 @@ class DriveService : Service(), LocationListener {
     private var kakaoFailSaid = false
     private var kakaoLostAt = 0L
     private var kakaoLostSaid = false
+    private var kakaoLostSaidAt = 0L
     // 추측 항법: 마지막 실제 fix
     private var lastFix: Fix? = null
     private var roads: RoadNet? = null
@@ -620,6 +640,7 @@ class DriveService : Service(), LocationListener {
                 return START_STICKY
             }
             ACTION_SETTINGS_CHANGED -> {
+                updateSimple()
                 val e = engine
                 if (DriveState.running && e != null) {
                     val prevUsual = DriveState.outputs?.usual
@@ -794,7 +815,12 @@ class DriveService : Service(), LocationListener {
             lastFix = null; DriveState.drActive = false
             cmdLostAt = 0L; cmdWarned = false; cmdHelpShown = false
             startedAt = SystemClock.elapsedRealtime(); firstFixSeen = false; kakaoLive = null; kakaoFailSaid = false; kakaoLostAt = 0L; kakaoLostSaid = false
-            alerts.reset()
+            alerts.reset(); simpleAlerts.reset()
+            if (!screenReceiverOn) runCatching {
+                registerReceiver(screenReceiver, android.content.IntentFilter().apply { addAction(Intent.ACTION_SCREEN_OFF); addAction(Intent.ACTION_SCREEN_ON) })
+                screenReceiverOn = true
+            }
+            updateSimple()
             alerts.margin = Prefs.overspeedMargin(this); alerts.announce = Prefs.approachVoice(this)
             alerts.distanceAlways = Prefs.distanceVoiceAlways(this); alerts.beepOn = Prefs.overspeedBeep(this)
             main.postDelayed(watchdog, 5_000)
@@ -950,6 +976,9 @@ class DriveService : Service(), LocationListener {
         val secLimit = if (st.slowed && st.holdKind == "구간단속") st.target?.limitKmh else null
         alerts.update(now, st.nextCamera, st.nextDistM, st.speedKmh, secLimit)
         DriveState.overspeedKmh = alerts.overspeedKmh; DriveState.overLimit = alerts.overLimit
+        // v0.16.3 간단 모드: 카카오 음성 대신 우리가 카메라 500·200 m 안내(평소엔 계산만)
+        for (o in simpleAlerts.update(now, st.nextCamera, st.nextDistM, st.speedKmh, secLimit))
+            if (o is ApproachAlerts.Out.Say && DriveState.simple && !DriveState.simulating) outputs.say(o.text)
         // 감시가 "제대로" 시작됐는지 음성으로: GPS를 늦게 잡았을 때, 카카오가 붙거나 끊길 때
         if (!DriveState.simulating && !fix.estimated) {
             if (!firstFixSeen) {
@@ -972,13 +1001,19 @@ class DriveService : Service(), LocationListener {
                         kakaoLostAt = now; kakaoLostSaid = false
                         DriveState.log("카카오 끊김 — 내장 데이터로 판단 (속도 ${(fix.speedMps * 3.6).toInt()} km/h, 카카오 마지막 정보 ${KakaoSafety.ageS() ?: -1}초 전)")
                     }
+                    // v0.16.3 끊긴 채면 커맨더 경고와 같은 간격(설정 ⑥ 한 번만/1분/3분)으로 다시 알린다
+                    !live && kakaoLostSaid && kakaoLostAt > 0 && Prefs.cmdWarnRepeatMin(this).let { m -> m > 0 && now - kakaoLostSaidAt >= m * 60_000L } -> {
+                        kakaoLostSaidAt = now
+                        DriveState.log("카카오 아직 끊김 (${KakaoSafety.status})")
+                        outputs.say("카카오가 아직 연결되지 않았습니다. 내장 데이터로 판단합니다")
+                    }
                     !live && prev == false && !kakaoLostSaid && kakaoLostAt > 0 && now - kakaoLostAt > 30_000 -> {
-                        kakaoLostSaid = true
+                        kakaoLostSaid = true; kakaoLostSaidAt = now
                         DriveState.log("카카오 끊김 30초 넘음 (${KakaoSafety.status})")
                         outputs.say("카카오 끊김. 내장 데이터로 판단합니다")
                     }
                     !live && prev == null && !kakaoFailSaid && now - startedAt > 20_000 -> {
-                        kakaoFailSaid = true; kakaoLostAt = now; kakaoLostSaid = true
+                        kakaoFailSaid = true; kakaoLostAt = now; kakaoLostSaid = true; kakaoLostSaidAt = now
                         DriveState.log("카카오 연결 안 됨 — 내장 데이터로 판단 (${KakaoSafety.status})")
                         outputs.say("카카오 연결 안 됨. 내장 데이터로 판단합니다")
                     }
@@ -1076,6 +1111,8 @@ class DriveService : Service(), LocationListener {
 
     /** quiet = 운전자가 앱을 밀어 닫았을 때: "감시를 끕니다"는 말하지 않는다(감속 상태 경고는 안전상 그대로). */
     private fun stopAll(quiet: Boolean = false) {
+        if (screenReceiverOn) { runCatching { unregisterReceiver(screenReceiver) }; screenReceiverOn = false }
+        if (DriveState.simple) { DriveState.simple = false; KakaoSafety.applyVolume() }
         main.removeCallbacks(watchdog)
         main.removeCallbacks(drRunnable)
         main.removeCallbacks(teslaPoll); appliedDest = null; DriveState.teslaDest = null
