@@ -28,13 +28,7 @@ jobs:
       - name: Install PlatformIO
         run: pip install platformio esptool==4.8.1
       - name: Build
-        run: |
-          # 보드 프로그램 버전 = 커밋 앞 7자(앱 설정 ⑥에 보임, 무선 업데이트 비교용). 따옴표 없이 넣고 코드에서 글로 바꾼다.
-          export PLATFORMIO_BUILD_FLAGS="-DFW_VER=${GITHUB_SHA::7}"
-          pio run
-          SIZE=$(stat -c%s .pio/build/esp32dev/firmware.bin)
-          echo "firmware.bin ${SIZE} bytes (OTA slot 1310720)"
-          if [ "$SIZE" -gt 1310720 ]; then echo "::error::firmware too big for OTA slot"; exit 1; fi
+        run: pio run
       - name: Merge into one file (flash at 0x0)
         run: |
           B=.pio/build/esp32dev
@@ -44,20 +38,13 @@ jobs:
             0xe000 ~/.platformio/packages/framework-arduinoespressif32/tools/partitions/boot_app0.bin \
             0x10000 $B/firmware.bin
           cp $B/firmware.bin cam-slowdown-board-app.bin
-          cp ~/.platformio/packages/framework-arduinoespressif32/tools/partitions/boot_app0.bin cam-slowdown-board-otadata.bin
-          echo -n "${GITHUB_SHA::7}" > cam-slowdown-board-version.txt
-          md5sum cam-slowdown-board-app.bin | cut -d' ' -f1 | tr -d '\n' > cam-slowdown-board-app.bin.md5
-          ls -l cam-slowdown-board.bin cam-slowdown-board-app.bin cam-slowdown-board-otadata.bin
-          cat cam-slowdown-board-version.txt; echo; cat cam-slowdown-board-app.bin.md5; echo
+          ls -l cam-slowdown-board.bin cam-slowdown-board-app.bin
       - uses: actions/upload-artifact@v4
         with:
           name: cam-slowdown-board-bin
           path: |
             cam-slowdown-board/cam-slowdown-board.bin
             cam-slowdown-board/cam-slowdown-board-app.bin
-            cam-slowdown-board/cam-slowdown-board-otadata.bin
-            cam-slowdown-board/cam-slowdown-board-version.txt
-            cam-slowdown-board/cam-slowdown-board-app.bin.md5
       - name: Publish to release
         uses: softprops/action-gh-release@v2
         with:
@@ -67,14 +54,8 @@ jobs:
           files: |
             cam-slowdown-board/cam-slowdown-board.bin
             cam-slowdown-board/cam-slowdown-board-app.bin
-            cam-slowdown-board/cam-slowdown-board-otadata.bin
-            cam-slowdown-board/cam-slowdown-board-version.txt
-            cam-slowdown-board/cam-slowdown-board-app.bin.md5
           body: |
             ESP32 보드(ESP32-WROOM-32 / DEVKIT V1)용. 넣는 법은 cam-slowdown-board/README.md.
             처음: Espressif 웹 도구에서 Flash Address 0x0 에 cam-slowdown-board.bin 하나만 넣으면 된다.
             업데이트(커맨더·폰 페어링 유지): Flash Address 0x10000 에 cam-slowdown-board-app.bin.
-            앱 v0.16.0~: 설정 ⑥ [보드 프로그램 업데이트]로 무선 업데이트(이 기능이 든 프로그램을 PC로 한 번 넣은 뒤부터).
-            무선 업데이트를 한 번이라도 한 보드를 PC로 업데이트할 때는 0xe000 에 cam-slowdown-board-otadata.bin 도 함께 넣는다.
-            버전(커밋 앞 7자): cam-slowdown-board-version.txt
             브랜치 ${{ github.ref_name }} / 커밋 ${{ github.sha }}

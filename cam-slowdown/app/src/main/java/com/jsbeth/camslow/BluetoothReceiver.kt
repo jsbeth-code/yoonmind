@@ -19,8 +19,9 @@ import android.os.PowerManager
  */
 class BluetoothReceiver : BroadcastReceiver() {
     override fun onReceive(ctx: Context, intent: Intent) {
-        // v0.16.0: 블루투스를 껐다 켜면 보드 검색 등록이 사라지므로, 블루투스 기기 연결·끊김이 올 때마다 조용히 다시 등록해 둔다
-        if (!DriveState.running) runCatching { BoardScan.update(ctx) }
+        // v0.16.0: 블루투스를 껐다 켜면 보드 검색 등록이 사라지므로 기기 연결·끊김 때 다시 등록해 둔다.
+        // v0.16.1: 매번 하면 "검색 너무 잦음"(30초 5회) 제한에 걸려 등록이 사라질 수 있어 15분에 한 번만(Fable 점검)
+        if (!DriveState.running) runCatching { BoardScan.refresh(ctx) }
         if (!Prefs.autoStart(ctx)) return
         val want = Prefs.autoDeviceAddress(ctx)
         if (want.isBlank()) return
@@ -56,7 +57,10 @@ object AutoStart {
     fun isBatteryExempt(ctx: Context): Boolean =
         ctx.getSystemService(PowerManager::class.java).isIgnoringBatteryOptimizations(ctx.packageName)
 
+    /** v0.16.1 자동 시작용 차(설정 ⑥)의 블루투스가 지금 연결돼 있는지(이 프로세스가 본 연결·끊김 기준). 보드 끊김 자동 정지·보드 자동 시작 조용히 정지 판단에 쓴다. */
+    @Volatile var carLinked = false
     fun carConnected(ctx: Context) {
+        carLinked = true
         if (DriveState.running) {
             // 이미 감시 중(연결이 잠깐 끊겼다 붙은 경우): 예약된 자동 정지만 취소
             try { ctx.startService(Intent(ctx, DriveService::class.java).setAction(DriveService.ACTION_CAR_CONNECTED)) } catch (_: Exception) {}
@@ -84,6 +88,7 @@ object AutoStart {
     }
 
     fun carDisconnected(ctx: Context) {
+        carLinked = false
         if (!Prefs.autoStop(ctx) || !DriveState.running) return
         try { ctx.startService(Intent(ctx, DriveService::class.java).setAction(DriveService.ACTION_CAR_DISCONNECTED)) } catch (_: Exception) {}
     }

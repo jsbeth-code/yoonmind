@@ -15,12 +15,6 @@
 //  보드 → 폰: 81 결과(1 됨·0 토큰 틀림) / 82 + 토큰16 = 페어링 됨, 82 = 거절(창 닫힘)
 //             83 커맨더(0 없음·1 접속만·2 준비) / 90 번호 i N = i번째 누름 나감 / 91 번호 나간수 N 사유(0 다 나감·1 인증 안 됨·2 커맨더 준비 안 됨·3 잘못된 명령)
 //  토큰은 페어링한 폰 하나만 가진다(새로 페어링하면 이전 폰은 못 씀).
-//  무선 업데이트(앱 v0.16.0~, 인증된 폰만):
-//   폰 → 보드: 04 = 버전 요청 / 20 크기(4, LE) md5(16) = 업데이트 시작 / 21 + 데이터(최대 ~240) = 조각(차례대로, 응답 있는 쓰기로 흐름 제어) / 22 = 끝
-//   보드 → 폰: 84 + 버전 글(ASCII, CI가 넣는 커밋 앞 7자, 없으면 dev) / A0 상태 오류 = 시작 결과(0 됨) / A1 상태 오류 = 조각 실패(실패할 때만)
-//             A2 + 받은 바이트(4, LE) = 32KB마다 진행 / A3 상태 오류 = 끝 결과(0이면 1초 뒤 다시 시작해 새 프로그램으로)
-//   상태: 1 인증 안 됨·시작 안 함, 2 크기·길이 틀림, 3 플래시 시작·쓰기·확인 실패(오류 = Update 오류 번호), 4 md5 형식·받기 넘침
-//   접속이 끊기거나 30초 동안 조각이 없으면 중단(Update.abort). 페어링·토큰(NVS)은 업데이트로 지워지지 않는다.
 //
 // 보드 조작:
 //  - BOOT 짧게(1초 미만) = 클릭(감속 시험), 1~3초 = 더블클릭(복귀 시험)
@@ -41,16 +35,6 @@
 #include <esp_gap_ble_api.h>
 #include <esp_gatts_api.h>
 #include <freertos/queue.h>
-#include <Update.h>
-
-// CI가 -DFW_VER=<커밋 앞 7자>로 넣는다(따옴표 없이 — 여기서 글로 바꿈). 없으면 dev.
-#define FW_STR_(x) #x
-#define FW_STR(x) FW_STR_(x)
-#ifdef FW_VER
-static const char* FW_VERSION = FW_STR(FW_VER);
-#else
-static const char* FW_VERSION = "dev";
-#endif
 
 static const char* SERVICE_UUID = "00003d46-87d2-479e-7e45-8551415a6de1";
 static const char* NOTIFY_UUID = "00003d50-87d2-479e-7e45-8551415a6de1";
@@ -75,8 +59,7 @@ static Preferences prefs;
 static volatile esp_gatt_if_t gattsIf = ESP_GATT_IF_NONE;
 
 // 접속 표(커맨더와 폰이 함께 붙는다). 블루투스 작업에서 바꾸고 loop에서 읽는다.
-// b: 무선 업데이트 조각(21 + 데이터 ~240)이 들어가게 MTU 247 기준(쓰기 최대 244바이트)
-struct PhoneCmd { uint16_t conn; uint8_t len; uint8_t b[244]; };
+struct PhoneCmd { uint16_t conn; uint8_t len; uint8_t b[20]; };
 
 struct Conn {
   bool used;
@@ -110,15 +93,6 @@ struct Reply { uint16_t conn; uint8_t len; uint8_t b[4]; };
 static QueueHandle_t replies;
 static QueueHandle_t phoneCmds;
 static QueueHandle_t kickQ;   // 끊을 접속 id
-static QueueHandle_t otaQ;    // 무선 업데이트 명령(20·21·22) — 순서대로, 다른 명령과 따로
-// 무선 업데이트 상태(loop에서만 바꿈, 끊김·넘침은 블루투스 작업이 표시)
-static volatile bool otaActive = false;
-static volatile uint16_t otaConn = 0xFFFF;
-static volatile bool otaLost = false;
-static volatile bool otaOverflow = false;
-static uint32_t otaSize = 0, otaGot = 0, otaNextMark = 0;
-static unsigned long otaLastAt = 0;
-static unsigned long restartAt = 0;
 static int knownBonds = 0;    // 받아들인 페어링 수 — 창 밖에서 늘면 낯선 기기의 새 페어링이라 지운다
 static volatile bool connChanged = false;
 
@@ -267,7 +241,6 @@ class ServerCb : public BLEServerCallbacks {
     Conn* c = findConn(p->disconnect.conn_id);
     if (c) { wasPhone = c->phone; c->used = false; }
     portEXIT_CRITICAL(&connMux);
-    if (otaActive && p->disconnect.conn_id == otaConn) otaLost = true;
     connChanged = true;
     logf("%s 연결 끊김 id=%d (남은 접속 %d개)", wasPhone ? "폰" : "커맨더(또는 다른 기기)", p->disconnect.conn_id, connCount());
     startAdv();
@@ -346,24 +319,15 @@ class PhoneCmdCb : public BLECharacteristicCallbacks {
     PhoneCmd m{};
     m.conn = p->write.conn_id; m.len = v.size();
     memcpy(m.b, v.data(), v.size());
-    bool ota = m.b[0] >= 0x20 && m.b[0] <= 0x22;
     // 폰 서비스에 써 온 접속은 커맨더가 아니다
-    bool changed = false;
     portENTER_CRITICAL(&connMux);
     Conn* cc = findConn(m.conn);
     if (cc) {
-      if (!cc->phone) changed = true;
       cc->phone = true; cc->subscribed = false;
       // 이미 페어링돼 있던 주소면(지울 대상이 아님) 보안 완료 이벤트가 빠져도 명령 특성 쓰기(암호화 필수)로 충분하다 — 시동 직후 동시 접속 경합 대비
-      if (!cc->authOk && wasKnown(cc->addr)) { cc->authOk = true; cc->encrypted = true; changed = true; }
+      if (!cc->authOk && wasKnown(cc->addr)) { cc->authOk = true; cc->encrypted = true; }
     }
     portEXIT_CRITICAL(&connMux);
-    if (ota) {
-      // 업데이트 조각마다 상태 알림을 보내지 않는다. 큐가 차면 loop가 비울 때까지 기다린다(쓰기 응답이 늦어져 폰이 천천히 보냄).
-      if (changed) connChanged = true;
-      if (xQueueSend(otaQ, &m, pdMS_TO_TICKS(2000)) != pdTRUE) otaOverflow = true;
-      return;
-    }
     connChanged = true;
     xQueueSend(phoneCmds, &m, 0);
   }
@@ -449,87 +413,6 @@ static void sendStateToPhones() {
   for (int i = 0; i < MAX_CONN; i++) if (conns[i].used && conns[i].phone && conns[i].authed) toPhone(conns[i].id, b, 2);
 }
 
-// ---- 무선 업데이트 ----
-
-static void otaReply(uint16_t conn, uint8_t op, uint8_t st, uint8_t err) { uint8_t r[3] = {op, st, err}; toPhone(conn, r, 3); }
-
-static void otaAbort(const char* why) {
-  if (otaActive) { Update.abort(); logf("무선 업데이트 중단: %s (%u/%u바이트)", why, (unsigned)otaGot, (unsigned)otaSize); }
-  otaActive = false; otaConn = 0xFFFF;
-}
-
-static void handleOta(const PhoneCmd& m) {
-  Conn* c = findConn(m.conn);
-  if (!c || c->kicked) return;
-  uint8_t op = m.b[0];
-  bool ok = c->authOk && c->authed;
-  if (op == 0x20) {
-    if (!ok) { otaReply(m.conn, 0xA0, 1, 0); logf("무선 업데이트 시작 거절 id=%d — 인증 안 된 폰", m.conn); return; }
-    if (m.len != 21) { otaReply(m.conn, 0xA0, 2, 0); return; }
-    if (otaActive) otaAbort("새로 시작");
-    uint32_t size = (uint32_t)m.b[1] | ((uint32_t)m.b[2] << 8) | ((uint32_t)m.b[3] << 16) | ((uint32_t)m.b[4] << 24);
-    char hex[33];
-    for (int i = 0; i < 16; i++) snprintf(hex + i * 2, 3, "%02x", m.b[5 + i]);
-    hex[32] = 0;
-    if (size == 0 || !Update.begin(size, U_FLASH)) {
-      uint8_t e = Update.getError();
-      otaReply(m.conn, 0xA0, size == 0 ? 2 : 3, e);
-      logf("무선 업데이트 시작 실패 %u바이트 — %s", (unsigned)size, Update.errorString());
-      return;
-    }
-    if (!Update.setMD5(hex)) { Update.abort(); otaReply(m.conn, 0xA0, 4, 0); logf("무선 업데이트 md5 형식 틀림"); return; }
-    otaSize = size; otaGot = 0; otaNextMark = 32768; otaLastAt = millis();
-    otaLost = false; otaOverflow = false;
-    otaConn = m.conn; otaActive = true;
-    otaReply(m.conn, 0xA0, 0, 0);
-    logf("무선 업데이트 시작 %u바이트 (지금 %s)", (unsigned)size, FW_VERSION);
-  } else if (op == 0x21) {
-    if (!ok || !otaActive || m.conn != otaConn) { otaReply(m.conn, 0xA1, 1, 0); return; }
-    size_t n = m.len - 1;
-    if (n == 0) return;
-    if (otaGot + n > otaSize) { otaAbort("크기를 넘음"); otaReply(m.conn, 0xA1, 2, 0); return; }
-    size_t w = Update.write((uint8_t*)m.b + 1, n);
-    if (w != n) { uint8_t e = Update.getError(); logf("무선 업데이트 쓰기 실패 — %s", Update.errorString()); otaAbort("쓰기 실패"); otaReply(m.conn, 0xA1, 3, e); return; }
-    otaGot += n; otaLastAt = millis();
-    if (otaGot >= otaNextMark || otaGot == otaSize) {
-      uint8_t r[5] = {0xA2, (uint8_t)otaGot, (uint8_t)(otaGot >> 8), (uint8_t)(otaGot >> 16), (uint8_t)(otaGot >> 24)};
-      toPhone(m.conn, r, 5);
-      while (otaNextMark <= otaGot) otaNextMark += 32768;
-    }
-  } else if (op == 0x22) {
-    if (!ok || !otaActive || m.conn != otaConn) { otaReply(m.conn, 0xA3, 1, 0); return; }
-    if (otaGot != otaSize) { otaAbort("받은 크기가 다름"); otaReply(m.conn, 0xA3, 2, 0); return; }
-    otaActive = false; otaConn = 0xFFFF;
-    if (!Update.end(true)) {
-      uint8_t e = Update.getError();
-      logf("무선 업데이트 확인 실패 — %s", Update.errorString());
-      otaReply(m.conn, 0xA3, 3, e);
-      return;
-    }
-    otaReply(m.conn, 0xA3, 0, 0);
-    logf("무선 업데이트 성공 %u바이트 — 1초 뒤 새 프로그램으로 다시 시작", (unsigned)otaSize);
-    restartAt = millis() + 1000;
-    if (restartAt == 0) restartAt = 1;
-  }
-}
-
-/** 업데이트 큐를 비운다. loop와 누름 사이 기다림에서 부른다(누르는 동안에도 업데이트가 멈추지 않게). */
-static void serviceOta() {
-  PhoneCmd m;
-  while (xQueueReceive(otaQ, &m, 0) == pdTRUE) handleOta(m);
-  if (otaOverflow) {
-    otaOverflow = false;
-    if (otaActive) { uint16_t c = otaConn; otaAbort("받기 넘침"); otaReply(c, 0xA1, 4, 0); }
-  }
-  if (otaActive && otaLost) { otaLost = false; otaAbort("폰 접속 끊김"); }
-  if (otaActive && millis() - otaLastAt > 30000) { uint16_t c = otaConn; otaAbort("30초 동안 조각 없음"); otaReply(c, 0xA1, 1, 0); }
-}
-
-static void waitServicing(unsigned ms) {
-  unsigned long t0 = millis();
-  while (millis() - t0 < ms) { serviceOta(); delay(2); }
-}
-
 static void handlePhone(const PhoneCmd& m) {
   Conn* c = findConn(m.conn);
   if (!c || c->kicked) return;
@@ -568,12 +451,6 @@ static void handlePhone(const PhoneCmd& m) {
   } else if (op == 0x03) {
     if (!c->authed) return;
     uint8_t s[2] = {0x83, commanderState()}; toPhone(m.conn, s, 2);
-  } else if (op == 0x04 && m.len == 1) {
-    if (!c->authed) return;
-    uint8_t r[21]; r[0] = 0x84;
-    size_t L = strlen(FW_VERSION); if (L > 20) L = 20;
-    memcpy(r + 1, FW_VERSION, L);
-    toPhone(m.conn, r, L + 1);
   } else if (op == 0x10 && m.len == 6) {
     uint8_t kind = m.b[1], n = m.b[2], seq = m.b[5];
     unsigned gap = m.b[3] | (m.b[4] << 8);
@@ -588,7 +465,7 @@ static void handlePhone(const PhoneCmd& m) {
         sent = i + 1;
         uint8_t pr[4] = {0x90, seq, sent, n};
         toPhone(m.conn, pr, 4);
-        if (sent < n) waitServicing(gap);
+        if (sent < n) delay(gap);
       }
     }
     uint8_t r[5] = {0x91, seq, sent, n, reason};
@@ -603,18 +480,15 @@ void setup() {
   pinMode(LED_PIN, OUTPUT);
   pinMode(BOOT_PIN, INPUT_PULLUP);
   delay(200);
-  logf("FSD 감속 버튼 보드 시작 (2단계: 폰 앱 경유) 프로그램 %s", FW_VERSION);
+  logf("FSD 감속 버튼 보드 시작 (2단계: 폰 앱 경유)");
 
   replies = xQueueCreate(8, sizeof(Reply));
   phoneCmds = xQueueCreate(8, sizeof(PhoneCmd));
-  otaQ = xQueueCreate(16, sizeof(PhoneCmd));
   kickQ = xQueueCreate(8, sizeof(uint16_t));
   prefs.begin("s3xy", false);
   hasToken = prefs.getBytes("tok", token, 16) == 16;
 
   BLEDevice::init(NAME);
-  // 무선 업데이트 조각을 크게(폰이 247을 요청). 커맨더가 MTU를 묻지 않으면 그쪽은 그대로 23.
-  BLEDevice::setMTU(247);
   BLEDevice::setCustomGattsHandler(gattsHandler);
   BLEDevice::setSecurityCallbacks(new SecCb());
   BLESecurity* sec = new BLESecurity();
@@ -678,10 +552,6 @@ void loop() {
   }
   uint16_t dc;
   while (xQueueReceive(kickQ, &dc, 0) == pdTRUE) server->disconnect(dc);
-
-  // 무선 업데이트(성공하면 1초 뒤 다시 시작)
-  serviceOta();
-  if (restartAt != 0 && (long)(millis() - restartAt) >= 0) { logf("다시 시작(새 프로그램)"); delay(50); ESP.restart(); }
 
   // 폰 명령
   PhoneCmd m;
@@ -749,12 +619,11 @@ void loop() {
   // 파란 불
   unsigned long t = millis();
   bool led;
-  if (otaActive) led = (t / 60) % 2;  // 무선 업데이트 중: 아주 빠르게
-  else if (pairWindowOpen()) { unsigned long k = t % 1000; led = k < 100 || (k >= 200 && k < 300); }
+  if (pairWindowOpen()) { unsigned long k = t % 1000; led = k < 100 || (k >= 200 && k < 300); }
   else if (st == 2) led = true;
   else if (st == 1) led = (t / 150) % 2;
   else led = (t % 2000) < 80;
   digitalWrite(LED_PIN, led);
 
-  delay(otaActive ? 1 : 10);
+  delay(10);
 }

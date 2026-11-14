@@ -21,7 +21,6 @@ class SettingsActivity : Activity() {
     private lateinit var outputs: Outputs
     private lateinit var resultView: TextView
     private lateinit var cmdStatus: TextView
-    private lateinit var fwStatus: TextView
     private lateinit var permStatus: TextView
     private lateinit var zoneStatus: TextView
     private lateinit var ttsStatus: TextView
@@ -96,15 +95,11 @@ class SettingsActivity : Activity() {
             }
             cmdStatus = text("", 13f)
             row(button("보드 페어링") { pairBoard() })
-            // v0.16.0 보드 프로그램 무선 업데이트
-            fwStatus = text("", 13f)
-            row(button("보드 프로그램 업데이트") { updateBoardFirmware() })
-            hint("보드 프로그램을 앱이 블루투스로 넣습니다(1~3분, 감시를 끈 채 보드 전원을 켜고 폰을 가까이). 커맨더·폰 페어링은 그대로 남습니다. 이 기능이 든 보드 프로그램은 PC로 한 번 넣어야 합니다(보드 README).")
             hint("보드 경유: 보드 BOOT 3초(파란 불 두 번씩 깜빡) 뒤 엔하우토에 버튼으로 등록(클릭 = 크루징 속도 내림, 더블클릭 = 올림)하고, 보드 BOOT를 3초 넘게 눌러 파란 불이 두 번씩 깜빡이면(1분) [보드 페어링]. 폰에 페어링 요청이 뜨면 승인. 한 번만 하면 됩니다(새로 페어링하면 이전 폰은 못 씀). 아래 [페어링하기]·버튼 유지는 폰 직접일 때만 씁니다.")
             row(
                 button("페어링하기") { togglePairing() },
-                button("감속 신호 테스트") { if (BoardLink.otaBusy) Toast.makeText(this@SettingsActivity, "보드 프로그램 업데이트 중입니다", Toast.LENGTH_SHORT).show() else if (DriveState.running) Toast.makeText(this@SettingsActivity, "감시 중엔 테스트할 수 없습니다 — 감시를 끄고 하세요 (앱이 아는 차 프로필이 어긋남)", Toast.LENGTH_LONG).show() else { if (!boardReadyForTest()) return@button; outputs.refresh(); outputs.down(Camera(0.0, 0.0, 100, CamKind.SPOT, 0, "테스트"), 300.0) } },
-                button("복귀 신호 테스트") { if (BoardLink.otaBusy) Toast.makeText(this@SettingsActivity, "보드 프로그램 업데이트 중입니다", Toast.LENGTH_SHORT).show() else if (DriveState.running) Toast.makeText(this@SettingsActivity, "감시 중엔 테스트할 수 없습니다 — 감시를 끄고 하세요 (앱이 아는 차 프로필이 어긋남)", Toast.LENGTH_LONG).show() else { if (!boardReadyForTest()) return@button; outputs.refresh(); outputs.up("테스트", force = true) } },
+                button("감속 신호 테스트") { if (DriveState.running) Toast.makeText(this@SettingsActivity, "감시 중엔 테스트할 수 없습니다 — 감시를 끄고 하세요 (앱이 아는 차 프로필이 어긋남)", Toast.LENGTH_LONG).show() else { if (!boardReadyForTest()) return@button; outputs.refresh(); outputs.down(Camera(0.0, 0.0, 100, CamKind.SPOT, 0, "테스트"), 300.0) } },
+                button("복귀 신호 테스트") { if (DriveState.running) Toast.makeText(this@SettingsActivity, "감시 중엔 테스트할 수 없습니다 — 감시를 끄고 하세요 (앱이 아는 차 프로필이 어긋남)", Toast.LENGTH_LONG).show() else { if (!boardReadyForTest()) return@button; outputs.refresh(); outputs.up("테스트", force = true) } },
             )
             hint("페어링: 위 버튼으로 ENH_BTN 광고를 켜고, enhauto 앱 Buttons → Add S3XY Button → 폰에 뜨는 페어링 요청 승인. 그 뒤 enhauto에서 이 버튼의 클릭 = 크루징 속도 내림, 더블클릭 = 크루징 속도 올림으로 지정(FSD에선 프로필 한 칸 내림/올림). 연결되면 [페어링하기]를 다시 눌러 끕니다. 차 프로필 화면을 보며 테스트 버튼으로 단수를 세어 보세요.")
             switchRow("감시를 꺼도 커맨더 버튼 유지", "앱을 다시 켜면 폰 블루투스 주소가 바뀌어 커맨더가 못 찾는 문제 때문에 켜 둡니다. 작은 알림이 남고 배터리를 조금 더 씁니다", Prefs.keepButton(this@SettingsActivity)) { Prefs.setKeepButton(this@SettingsActivity, it) }
@@ -213,7 +208,6 @@ class SettingsActivity : Activity() {
         ui.show()
         swipeSlop = ui.dp(100).toFloat()
         // 보드 프로그램 최신 버전(릴리스) — 보드를 쓸 때만
-        if (Prefs.boardAddr(this).isNotEmpty()) BoardLink.fetchLatestVersion(this) { if (!isFinishing && !isDestroyed) refreshStatus() }
     }
 
     // ---- v0.16.0 오른쪽으로 쓸면 닫기(스크롤·막대·입력칸·스위치 조작과 겹치지 않게 터치 단계에서 판별)
@@ -249,30 +243,6 @@ class SettingsActivity : Activity() {
         if (v is android.widget.AbsSeekBar || v is EditText || v is android.widget.Switch || v is android.widget.Spinner) return true
         if (v is android.view.ViewGroup) for (i in 0 until v.childCount) if (touchesControl(v.getChildAt(i), x, y)) return true
         return false
-    }
-
-    /** v0.16.0 설정 ⑥ [보드 프로그램 업데이트]. 감시 중엔 막는다(주행 중 업데이트 금지). */
-    private fun updateBoardFirmware() {
-        if (DriveState.running) { Toast.makeText(this, "감시 중엔 보드 프로그램을 업데이트할 수 없습니다 — 감시를 끄고 하세요", Toast.LENGTH_LONG).show(); return }
-        if (Prefs.boardAddr(this).isEmpty()) { Toast.makeText(this, "먼저 [보드 페어링]을 하세요", Toast.LENGTH_LONG).show(); return }
-        if (BoardLink.otaBusy) { Toast.makeText(this, "이미 업데이트 중입니다", Toast.LENGTH_SHORT).show(); return }
-        val cur = Prefs.boardFwVer(this); val latest = Prefs.boardFwLatest(this)
-        val same = cur.isNotEmpty() && latest.isNotEmpty() && cur == latest
-        AlertDialog.Builder(this).setTitle("보드 프로그램 업데이트")
-            .setMessage((if (same) "이미 최신($cur)입니다. 그래도 다시 넣을까요?\n\n" else "보드 ${cur.ifEmpty { "모름" }} → 최신 ${latest.ifEmpty { "(받을 때 확인)" }}\n\n") +
-                "보드 전원을 켜 두고(차 USB) 폰을 보드 가까이 두세요. 1~3분 걸리고, 화면을 끄거나 이 화면을 닫아도 계속됩니다. 끊기거나 실패해도 보드는 원래 프로그램 그대로입니다.")
-            .setPositiveButton("업데이트") { _, _ ->
-                val app = applicationContext
-                Toast.makeText(this, "보드 프로그램 업데이트 시작", Toast.LENGTH_SHORT).show()
-                BoardLink.updateFirmware(this, { DriveState.log(it) }) { ok, msg ->
-                    runOnUiThread {
-                        Toast.makeText(app, (if (ok) "보드 업데이트: " else "보드 업데이트 실패: ") + msg, Toast.LENGTH_LONG).show()
-                        if (!isFinishing && !isDestroyed) refreshStatus()
-                    }
-                }
-                refreshStatus()
-            }
-            .setNegativeButton("취소", null).show()
     }
 
     /** 감시 중이면 서비스가 설정을 다시 읽게(목적지 따라가기 끔·연결 끊기를 바로 반영). */
@@ -338,10 +308,6 @@ class SettingsActivity : Activity() {
             boardMissing.isEmpty() -> "✔  보드가 켜지면 자동 시작"
             else -> "✖  보드 자동 시작에 아직 필요: ${boardMissing.joinToString(", ")}"
         })
-        // v0.16.0 보드 프로그램 버전
-        val fwCur = Prefs.boardFwVer(this).ifEmpty { "모름" }
-        val fwLatest = Prefs.boardFwLatest(this).ifEmpty { "모름" }
-        fwStatus.text = "보드 프로그램: $fwCur (최신 $fwLatest)" + (if (BoardLink.otaProgress.isNotEmpty()) "\n⟳  ${BoardLink.otaProgress}" else "")
         val zones = CameraRepo.cachedZoneCount()
         zoneStatus.text = if (!Prefs.schoolZoneOn(this)) "" else when (zones) { null -> "보호구역 파일 확인 중"; 0 -> "✖  보호구역 파일 없음 — 메인 메뉴에서 '어린이보호구역 CSV'"; else -> "✔  보호구역 ${zones}곳" }
         val t = DriveState.ttsStatus.ifEmpty { outputs.ttsStatus }

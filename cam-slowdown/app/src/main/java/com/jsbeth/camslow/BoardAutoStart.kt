@@ -57,6 +57,7 @@ object BoardScan {
         if (!hasScanPermission(ctx)) { if (want && why != null) DriveState.log("보드 자동 시작: 블루투스 검색 권한이 없음 — 앱을 열어 권한 허용"); return }
         val pi = pending(ctx)
         try { scanner.stopScan(pi) } catch (_: Exception) {}
+        Prefs.setBoardScanRegAt(ctx, 0L)
         if (!want) { if (why != null && wanted(ctx)) DriveState.log("보드 자동 시작 검색 쉼($why)"); return }
         val addr = Prefs.boardAddr(ctx).uppercase()
         if (!BluetoothAdapter.checkBluetoothAddress(addr)) return
@@ -66,7 +67,16 @@ object BoardScan {
             .setCallbackType(ScanSettings.CALLBACK_TYPE_ALL_MATCHES)
         if (runCatching { adapter.isOffloadedScanBatchingSupported }.getOrDefault(false)) b.setReportDelay(10_000)
         val r = try { scanner.startScan(listOf(filter), b.build(), pi) } catch (e: Exception) { DriveState.log("보드 자동 시작 검색 등록 오류: ${e.javaClass.simpleName}"); return }
+        if (r == 0) Prefs.setBoardScanRegAt(ctx, System.currentTimeMillis())
         if (why != null || r != 0) DriveState.log(if (r == 0) "보드 자동 시작 검색 등록(${why ?: "다시"})" else "보드 자동 시작 검색 등록 실패(코드 $r)")
+    }
+
+    /** v0.16.1 블루투스 기기 연결·끊김 때: 15분 안에 등록했으면 그대로 둔다(검색 시작·중지를 30초에 5번 넘게 하면 안드로이드가 막음). */
+    fun refresh(context: Context) {
+        val now = System.currentTimeMillis()
+        val at = Prefs.boardScanRegAt(context.applicationContext)
+        if (at != 0L && now >= at && now - at < 15 * 60_000L) return
+        update(context)
     }
 
     /** 감시 중 보드가 연결돼 있을 때·검색에 보일 때: 마지막으로 본 시각(쓰기를 줄이려고 10초에 한 번). */
@@ -81,7 +91,7 @@ object BoardScan {
         val now = System.currentTimeMillis()
         val last = Prefs.boardSeenAt(ctx)
         noteSeen(ctx)
-        if (DriveState.running || BoardLink.otaBusy || BoardLink.pairing) return
+        if (DriveState.running || BoardLink.pairing) return
         if (!wanted(ctx)) return
         val fresh = last == 0L || now - last > GAP_MS || now < last
         if (!Prefs.boardArmed(ctx) && !fresh) return

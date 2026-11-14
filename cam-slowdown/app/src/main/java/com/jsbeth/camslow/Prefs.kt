@@ -291,6 +291,9 @@ object Prefs {
     fun setBoardArmed(ctx: Context, v: Boolean) = put(ctx) { putBoolean("boardArmed", v) }
     /** 마지막으로 보드를 본(연결·검색) 시각(벽시계 ms). */
     fun boardSeenAt(ctx: Context) = sp(ctx).getLong("boardSeenAt", 0L)
+    /** v0.16.1 보드 자동 시작 검색을 마지막으로 등록한 시각(0 = 등록 안 됨). 자주 다시 등록하지 않으려고. */
+    fun boardScanRegAt(ctx: Context) = sp(ctx).getLong("boardScanRegAt", 0L)
+    fun setBoardScanRegAt(ctx: Context, v: Long) = put(ctx) { putLong("boardScanRegAt", v) }
     fun setBoardSeenAt(ctx: Context, v: Long) = put(ctx) { putLong("boardSeenAt", v) }
     fun renameAdapter(ctx: Context) = sp(ctx).getBoolean("renameAdapter", true)
     fun setRenameAdapter(ctx: Context, v: Boolean) = put(ctx) { putBoolean("renameAdapter", v) }
