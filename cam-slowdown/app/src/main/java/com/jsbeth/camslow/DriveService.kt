@@ -473,6 +473,7 @@ class DriveService : Service(), LocationListener {
         DriveState.simple = on
         DriveState.log(if (on) "간단 모드 켬 — 카카오 음성 끔, 카메라 500·200 m와 감속·복귀·안전 안내만" else "간단 모드 끔")
         KakaoSafety.applyVolume()
+        if (on) outputs.say("간단 모드")
         DriveState.changed()
     }
     private var startedAt = 0L
@@ -821,7 +822,7 @@ class DriveService : Service(), LocationListener {
                 screenReceiverOn = true
             }
             updateSimple()
-            alerts.margin = Prefs.overspeedMargin(this); alerts.announce = Prefs.approachVoice(this)
+            alerts.margin = Prefs.overspeedMargin(this); simpleAlerts.margin = alerts.margin; alerts.announce = Prefs.approachVoice(this)
             alerts.distanceAlways = Prefs.distanceVoiceAlways(this); alerts.beepOn = Prefs.overspeedBeep(this)
             main.postDelayed(watchdog, 5_000)
             main.removeCallbacks(drRunnable); main.postDelayed(drRunnable, 1_000)
