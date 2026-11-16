@@ -10,6 +10,7 @@ import android.graphics.BitmapShader
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.Path
 import android.graphics.Shader
 import android.graphics.Typeface
 import android.graphics.drawable.ColorDrawable
@@ -79,6 +80,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var pill: LinearLayout
     private lateinit var pillDist: TextView
     private lateinit var pillSign: TextView
+    /** v0.16.6 GPS 찾는 중·없음 때 알림의 위성 그림. */
+    private lateinit var pillSat: SatIcon
     private lateinit var pillSub: TextView
     // 회전 카드
     private lateinit var turnCard: LinearLayout
@@ -337,6 +340,8 @@ class MainActivity : AppCompatActivity() {
             background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(Color.WHITE); setStroke(dp(4), CamCard.RED) }
         }
         row.addView(pillSign, LinearLayout.LayoutParams(dp(38), dp(38)).apply { rightMargin = dp(8) })
+        pillSat = SatIcon(this).apply { visibility = View.GONE }
+        row.addView(pillSat, LinearLayout.LayoutParams(dp(34), dp(34)).apply { rightMargin = dp(8) })
         val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         pillDist = tv(22f, Color.WHITE, font = jua)
         pillSub = tv(12f, Color.WHITE).apply { maxLines = 3; ellipsize = TextUtils.TruncateAt.END; maxWidth = dp(210) }
@@ -647,15 +652,17 @@ class MainActivity : AppCompatActivity() {
         if (camDrag.dragging) return
         val lp = pill.layoutParams as? FrameLayout.LayoutParams ?: return
         val f = Prefs.camCardPos(this, pillMode())
-        var g = Gravity.CENTER_VERTICAL or Gravity.END; var l = 0; var tm = dp(40); var rm = dp(10)
+        var g = Gravity.CENTER_VERTICAL or Gravity.END; val l = 0; var tm = dp(40); var rm = dp(10)
+        var tx = 0f; var ty = 0f
         if (f != null) {
             if (mapFrame.width == 0 || pill.width == 0) return
-            val freeW = (mapFrame.width - pill.width).coerceAtLeast(0)
-            tm = (f.second * (mapFrame.height - pill.height).coerceAtLeast(0)).toInt()
-            // 오른쪽 반에 두었으면 오른쪽 기준(글이 길어지면 왼쪽으로 늘어나게, 잘리지 않게)
-            if (f.first > 0.5f) { g = Gravity.TOP or Gravity.END; rm = ((1f - f.first) * freeW).toInt(); l = 0 }
-            else { g = Gravity.TOP or Gravity.START; rm = 0; l = (f.first * freeW).toInt() }
+            // v0.16.6: 옮겨 둔 자리는 여백이 아니라 이동(translation)으로 둔다 — 여백이면 자리에 따라 쓸 수 있는 폭이 바뀌어
+            // 줄 바꿈이 달라지고(크기 변화) 다시 자리를 계산하는 일이 매 화면 되풀이돼 카드가 떨렸다(실차 2026-11-14)
+            g = Gravity.TOP or Gravity.START; tm = 0; rm = 0
+            tx = f.first * (mapFrame.width - pill.width).coerceAtLeast(0)
+            ty = f.second * (mapFrame.height - pill.height).coerceAtLeast(0)
         }
+        pill.translationX = tx; pill.translationY = ty
         if (lp.gravity == g && lp.leftMargin == l && lp.topMargin == tm && lp.rightMargin == rm) return
         lp.gravity = g; lp.leftMargin = l; lp.topMargin = tm; lp.rightMargin = rm; lp.bottomMargin = 0
         pill.layoutParams = lp
@@ -673,7 +680,8 @@ class MainActivity : AppCompatActivity() {
             val v = target ?: return@Runnable
             val lp = v.layoutParams as? FrameLayout.LayoutParams ?: return@Runnable
             dragging = true
-            startL = v.left; startT = v.top
+            startL = (v.left + v.translationX).toInt(); startT = (v.top + v.translationY).toInt()
+            v.translationX = 0f; v.translationY = 0f
             lp.gravity = Gravity.TOP or Gravity.START; lp.leftMargin = startL; lp.topMargin = startT; lp.rightMargin = 0; lp.bottomMargin = 0
             v.layoutParams = lp
             v.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
@@ -706,6 +714,9 @@ class MainActivity : AppCompatActivity() {
                         // 놓으면 바로 고정(다음에도 이 자리)
                         Prefs.setCamCardPos(this@MainActivity, pillMode(), (lp.leftMargin.toFloat() / fw).coerceIn(0f, 1f), (lp.topMargin.toFloat() / fh).coerceIn(0f, 1f))
                         Toast.makeText(this@MainActivity, "카메라 카드 자리를 고정했습니다", Toast.LENGTH_SHORT).show()
+                        // 여백으로 끌던 자리를 이동 방식으로 바꿔 둔다
+                        lp.leftMargin = 0; lp.topMargin = 0; v.layoutParams = lp
+                        placeCamCard()
                     }
                 }
             }
@@ -1281,6 +1292,9 @@ class MainActivity : AppCompatActivity() {
         val autoOn = Prefs.autoStart(this)
         val slowed = st?.slowed == true
         val gpsLost = running && !sim && age != null && age >= 15
+        // v0.16.6 감시를 켜고 아직 GPS를 한 번도 못 잡음
+        val gpsSearching = running && !sim && age == null
+        val gpsBlink = (SystemClock.uptimeMillis() / 1000) % 2 == 0L
         val car = DriveState.carProfile
         val prog = S3xyButton.progress
         val progKind = S3xyButton.progressKind
@@ -1317,8 +1331,8 @@ class MainActivity : AppCompatActivity() {
         statusView.text = when {
             !running -> "○ 꺼짐 · " + (if (autoOn) "${Prefs.autoDeviceName(this).ifEmpty { "차" }}에 연결되면 자동 시작" else "아래 [감시 켜기]")
             sim -> "가상 주행 중"
-            st == null -> "GPS 대기 중"
-            gpsLost -> "● GPS 없음 ${age}초" + (if (DriveState.drActive) " · 추측 항법" else "")
+            st == null || gpsSearching -> if (gpsBlink) "● GPS 찾는 중" else "○ GPS 찾는 중"
+            gpsLost -> (if (gpsBlink) "● " else "○ ") + "GPS 없음 ${age}초" + (if (DriveState.drActive) " · 추측 항법" else "")
             slowed && prog != null && progKind == S3xyButton.Press.SINGLE -> "▼ ${out.slow.label}로 내리는 중 · 클릭 ${prog.first}/${prog.second}"
             prog != null && progKind == S3xyButton.Press.DOUBLE -> "▲ ${out.usual.label}으로 복귀 중"
             else -> CamCard.statusLine(mode, following, out.slow.label, DriveState.overLimit, over)
@@ -1400,7 +1414,8 @@ class MainActivity : AppCompatActivity() {
             (st.target == null && st.zone != null) || (car != null && car != out.usual))
         // 큰 카드는 감시 중이고 카카오 화면이 없을 때(예비 지도)만. 꺼져 있을 때 첫 화면엔 안 띄움
         cardsBox.visibility = if (navi || !running) View.GONE else View.VISIBLE
-        val showPill = navi && running && (camJob || gpsLost)
+        val gpsState = gpsLost || gpsSearching
+        val showPill = navi && running && (camJob || gpsState)
         pill.visibility = if (showPill) View.VISIBLE else View.GONE
         if (showPill) {
             // 감속 시작 지점에 가까워지거나 클릭을 보내는 중이면 1초마다 반짝
@@ -1424,6 +1439,17 @@ class MainActivity : AppCompatActivity() {
                 else -> ""
             }
             pillSub.text = listOf(sub, if (kakaoDown) "⚠ 카카오 끊김 · 내장 판단" else "").filter { it.isNotEmpty() }.joinToString("\n")
+            // v0.16.6 GPS 찾는 중(회색)·없음(빨강): 위성 그림 + 글씨, 1초마다 깜빡. GPS가 없으면 카메라를 못 보니 카메라 안내보다 앞
+            pillSat.visibility = if (gpsState) View.VISIBLE else View.GONE
+            if (gpsState) {
+                pillSat.lost = gpsLost
+                pill.background = rounded(if (gpsLost) 0xFFC62828.toInt() else 0xFF5B6470.toInt(), 22f)
+                pill.alpha = if (gpsBlink) 1f else 0.55f
+                pillSign.visibility = View.GONE
+                pillDist.visibility = View.VISIBLE
+                pillDist.text = if (gpsLost) "GPS 없음 ${age}초" else "GPS 찾는 중"
+                pillSub.text = if (gpsLost) (if (DriveState.drActive) "추측 항법 · 복귀는 GPS가 돌아온 뒤" else "카메라를 감지하지 못합니다") else "잡히면 카메라 감시 시작"
+            } else pill.alpha = 1f
         }
         recenterChip?.visibility = if (navi) View.GONE else View.VISIBLE
         updateRouteChooser(running)
@@ -1696,3 +1722,25 @@ class MainActivity : AppCompatActivity() {
     }
 }
 
+/** v0.16.6 위성 그림(GPS 찾는 중·없음 알림). lost면 사선을 긋는다. */
+class SatIcon(ctx: android.content.Context) : View(ctx) {
+    var lost = false
+        set(v) { if (field != v) { field = v; invalidate() } }
+    private val p = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND; color = Color.WHITE }
+    override fun onDraw(c: Canvas) {
+        val s = minOf(width, height) / 48f
+        c.save(); c.scale(s, s)
+        p.strokeWidth = 3.2f; p.color = Color.WHITE
+        c.save(); c.rotate(45f, 24f, 24f); c.drawRoundRect(18f, 18f, 30f, 30f, 2f, 2f, p); c.restore()
+        val a = Path().apply { moveTo(13f, 13f); lineTo(7f, 19f); lineTo(11f, 23f); lineTo(17f, 17f); close() }
+        val b = Path().apply { moveTo(35f, 35f); lineTo(41f, 29f); lineTo(37f, 25f); lineTo(31f, 31f); close() }
+        c.drawPath(a, p); c.drawPath(b, p)
+        c.drawArc(20f, 20f, 40f, 40f, 0f, 90f, false, p)
+        p.alpha = 140; c.drawArc(14f, 14f, 46f, 46f, 0f, 90f, false, p); p.alpha = 255
+        if (lost) {
+            p.strokeWidth = 7f; p.color = 0xFFC62828.toInt(); c.drawLine(7f, 41f, 41f, 7f, p)
+            p.strokeWidth = 3.6f; p.color = Color.WHITE; c.drawLine(7f, 41f, 41f, 7f, p)
+        }
+        c.restore()
+    }
+}

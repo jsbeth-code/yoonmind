@@ -549,6 +549,8 @@ class DriveService : Service(), LocationListener {
     private var repairSaid = false
     private var lastReadvertise = 0L
     private var cmdHelpShown = false
+    /** v0.16.6 이번 감시에서 "커맨더 연결됨"을 말했는지(처음 붙을 때 한 번). */
+    private var cmdAnnounced = false
     private fun checkCommander() {
         if (DriveState.simulating || !outputs.settings.ble) { cmdLostAt = 0L; cmdWarned = false; return }
         val now = SystemClock.elapsedRealtime()
@@ -557,7 +559,8 @@ class DriveService : Service(), LocationListener {
             outputs.say("커맨더 다시 페어링이 필요합니다. 엔하우토에서 버튼을 다시 추가하세요")
         } else if (!S3xyButton.repairNeeded) repairSaid = false
         if (S3xyButton.ready) {
-            if (cmdWarned) { DriveState.log("커맨더 연결됨 — 감속 신호를 보낼 수 있습니다"); outputs.say("커맨더 연결됨") }
+            if (cmdWarned || !cmdAnnounced) { DriveState.log("커맨더 연결됨 — 감속 신호를 보낼 수 있습니다"); outputs.say("커맨더 연결됨") }
+            cmdAnnounced = true
             cmdLostAt = 0L; cmdWarned = false; return
         }
         if (cmdLostAt == 0L) { cmdLostAt = now; return }
@@ -577,11 +580,12 @@ class DriveService : Service(), LocationListener {
         if (cmdWarned && S3xyButton.idle && !cmdHelpShown && now - cmdLostAt >= (if (freshButton) CMD_WARN_MS else 3 * CMD_WARN_MS)) {
             cmdHelpShown = true; DriveState.cmdHelpAt = System.currentTimeMillis(); DriveState.changed()
         }
-        if (!cmdWarned && now - cmdLostAt >= CMD_WARN_MS) {
+        // v0.16.6 첫 경고는 30초(그 뒤 반복은 설정 ⑥ 간격)
+        if (!cmdWarned && now - cmdLostAt >= 30_000L) {
             cmdWarned = true; cmdWarnAt = now
             DriveState.log("⚠ 커맨더가 1분 넘게 연결되지 않음 (${S3xyButton.status}) — 감속 신호가 나가지 않습니다. " +
                 if (S3xyButton.viaBoard) "보드 전원·보드 불빛을 확인하세요" else "계속되면 [페어링하기] 후 enhauto에서 버튼 다시 추가")
-            outputs.say("커맨더가 연결되지 않았습니다. 감속 신호가 나가지 않습니다")
+            outputs.say("커맨더 연결 안 됨. 감속 신호가 나가지 않습니다")
             S3xyButton.logBond("커맨더 1분 넘게 안 옴")
         }
     }
@@ -819,7 +823,7 @@ class DriveService : Service(), LocationListener {
             DriveState.lastFixAt = 0L
             gpsWarned = false
             lastFix = null; DriveState.drActive = false
-            cmdLostAt = 0L; cmdWarned = false; cmdHelpShown = false
+            cmdLostAt = 0L; cmdWarned = false; cmdHelpShown = false; cmdAnnounced = false
             startedAt = SystemClock.elapsedRealtime(); firstFixSeen = false; kakaoLive = null; kakaoFailSaid = false; kakaoLostAt = 0L; kakaoLostSaid = false
             alerts.reset(); simpleAlerts.reset(); simpleSaid = false
             if (!screenReceiverOn) runCatching {
@@ -834,8 +838,9 @@ class DriveService : Service(), LocationListener {
             val s = outputs.settings
             DriveState.log("주행 감시 시작 — 카메라 ${e.cameraCount}개, ${s.describe()}" + (if (e.hasRoads) ", 도로망 맵매칭" else ", 도로망 없음(GPS 방향 판단)"))
             if (e.hasRoads && CameraRepo.directionNote.isNotEmpty()) DriveState.log("카메라 ${CameraRepo.directionNote}")
-            if (e.cameraCount == 0) { DriveState.log("카메라 데이터가 없습니다 — CSV를 불러오세요"); outputs.say("카메라 데이터가 없습니다") }
-            else outputs.say("감시 시작. 카메라 ${"%,d".format(e.cameraCount)}개" + (if (e.hasRoads) ", 도로망 있음" else ", 도로망 없음"))
+            // v0.16.6: 정상이면 "감시 시작"만. 카메라 데이터·도로망이 없을 때만 따로 알림(카메라 개수·도로망 있음은 말하지 않음)
+            if (e.cameraCount == 0) DriveState.log("카메라 데이터가 없습니다 — CSV를 불러오세요")
+            outputs.say("감시 시작" + (if (e.cameraCount == 0) ". 카메라 데이터 없음" else "") + (if (e.hasRoads) "" else ". 도로망 없음"))
             if (e.config.schoolZoneOn && e.zoneCount == 0) DriveState.log("어린이보호구역 감속이 켜져 있지만 보호구역 파일이 없습니다")
             if (s.ble && !S3xyButton.ready) DriveState.log("BLE 켜짐, 커맨더 대기 중 (${S3xyButton.status}) — 커맨더가 붙어야 신호가 나갑니다")
             // 카카오내비 안전 운행(시험): 연결 결과와 앞 카메라를 기록에만 남긴다
@@ -989,7 +994,7 @@ class DriveService : Service(), LocationListener {
         if (!DriveState.simulating && !fix.estimated) {
             if (!firstFixSeen) {
                 firstFixSeen = true
-                if (now - startedAt > 4_000) { DriveState.log("GPS 잡힘 — 감시 시작"); outputs.say("GPS 잡힘. 감시를 시작합니다") }
+                if (now - startedAt > 4_000) { DriveState.log("GPS 잡힘 — 감시 시작"); outputs.say("GPS 잡힘") }
             }
             // 목적지 전환으로 카카오 안내를 다시 시작하는 동안은 끊김·재연결을 알리지 않는다(전환 뒤 상태로 한 번만)
             if (KakaoSafety.hasKey && !KakaoSafety.switching) {
@@ -1018,7 +1023,7 @@ class DriveService : Service(), LocationListener {
                         DriveState.log("카카오 끊김 30초 넘음 (${KakaoSafety.status})")
                         outputs.say("카카오 끊김. 내장 데이터로 판단합니다")
                     }
-                    !live && prev == null && !kakaoFailSaid && now - startedAt > 20_000 -> {
+                    !live && prev == null && !kakaoFailSaid && now - startedAt > 30_000 -> {
                         kakaoFailSaid = true; kakaoLostAt = now; kakaoLostSaid = true; kakaoLostSaidAt = now
                         DriveState.log("카카오 연결 안 됨 — 내장 데이터로 판단 (${KakaoSafety.status})")
                         outputs.say("카카오 연결 안 됨. 내장 데이터로 판단합니다")
