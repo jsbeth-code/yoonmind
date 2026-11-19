@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- v0.16.8 설정: 아래 3/4 시트(반투명 창, 위에 메인 화면이 비침). 밤이면 SettingsSheetDark -->
+    <style name="SettingsSheet" parent="Theme.AppCompat.Light.NoActionBar">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowAnimationStyle">@null</item>
+        <item name="android:backgroundDimEnabled">false</item>
+        <item name="colorAccent">#2457E6</item>
+        <item name="android:colorAccent">#2457E6</item>
+    </style>
+    <style name="SettingsSheetDark" parent="Theme.AppCompat.NoActionBar">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowAnimationStyle">@null</item>
+        <item name="android:backgroundDimEnabled">false</item>
+        <item name="colorAccent">#5B8CFF</item>
+        <item name="android:colorAccent">#5B8CFF</item>
+    </style>
+</resources>

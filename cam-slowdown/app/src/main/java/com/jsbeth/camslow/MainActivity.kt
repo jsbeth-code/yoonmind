@@ -130,6 +130,11 @@ class MainActivity : AppCompatActivity() {
     private lateinit var checkView: TextView
     private lateinit var logHead: TextView
     private lateinit var logView: TextView
+    /** v0.16.8 메뉴 점검 띠·기록 상자, 카드의 [▲ 복귀](펼친 화면은 윗줄 오른쪽, 접은 화면은 맨 아래 줄). */
+    private lateinit var checkBoxView: LinearLayout
+    private lateinit var logBoxView: LinearLayout
+    private lateinit var retInline: TextView
+    private lateinit var retBottom: TextView
     private var wide = false
     private var bigScreen = false
     private var sheetOpen = false
@@ -170,6 +175,15 @@ class MainActivity : AppCompatActivity() {
 
     private fun handleIntent(intent: Intent?) {
         if (intent?.getBooleanExtra(AutoStart.EXTRA_AUTOSTART, false) == true) startDrive()
+        // v0.16.8 설정 › 데이터·도구에서 누른 것(파일 고르기·가상 주행 등은 이 화면이 처리)
+        intent?.getStringExtra(EXTRA_TOOL)?.let { tool ->
+            intent?.removeExtra(EXTRA_TOOL)
+            when (tool) {
+                "csv" -> onTool(M_CSV); "kec_sections" -> onTool(M_KEC_SECTIONS); "kec_points" -> onTool(M_KEC_POINTS)
+                "zones" -> onTool(M_ZONES); "roads" -> onTool(M_ROADS); "sim" -> onTool(M_SIM); "scan" -> onTool(M_SCAN)
+            }
+            return
+        }
         // 테슬라 로그인 뒤 fsdslow://tesla?session=…
         val session = TeslaLink.sessionFrom(intent?.data) ?: return
         val done = {
@@ -414,9 +428,19 @@ class MainActivity : AppCompatActivity() {
         statusRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(dp(2), dp(6), 0, 0) }
         (destSub.parent as? ViewGroup)?.removeView(destSub)
         statusRow.addView(destSub, LinearLayout.LayoutParams(0, -2, 1f))
+        // v0.16.8 지금 복귀: 메뉴 대신 카드에(내려가 있을 때만)
+        fun retPill() = tv(14f, 0xFF1A1206.toInt(), font = jua).apply {
+            text = "▲ 복귀"; gravity = Gravity.CENTER; setPadding(dp(10), 0, dp(10), 0); visibility = View.GONE
+            background = rounded(0xFFF2A54A.toInt(), 17f)
+            setOnClickListener { DriveService.send(this@MainActivity, DriveService.ACTION_RELEASE) }
+        }
+        retInline = retPill()
+        statusRow.addView(retInline, LinearLayout.LayoutParams(-2, dp(34)).apply { leftMargin = dp(6) })
         statusRow.addView(smallToggle, LinearLayout.LayoutParams(dp(34), dp(34)).apply { leftMargin = dp(6) })
         statusRow.setOnClickListener { setSheet(!sheetOpen) }
         sheet.addView(statusRow)
+        retBottom = retPill()
+        sheet.addView(retBottom, LinearLayout.LayoutParams(-1, dp(32)).apply { topMargin = dp(6) })
 
         // 접힘 줄: "Mad Max → 컴포트 ▴" + 작은 끄기
         collapsedRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
@@ -434,55 +458,69 @@ class MainActivity : AppCompatActivity() {
         collapsedRow.addView(recenterChip, LinearLayout.LayoutParams(-2, -2).apply { rightMargin = dp(8) })
         sheet.addView(collapsedRow)
 
-        // 펼침 내용
+        // 펼침 내용 (v0.16.8 순서: 점검 → 평소→카메라 앞 → [목적지·카카오·커맨더 다시] → 음성 → [기록·설정] → 지금 도로·GPS)
         expanded = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        val prof = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(6), 0, dp(2)) }
-        usualChip = chip { pickProfile(usual = true) }.apply { setTextColor(M_FG); (background as GradientDrawable).setColor(M_ITEM) }
-        slowChip = chip { pickProfile(usual = false) }.apply { setTextColor(M_FG); (background as GradientDrawable).setColor(M_ITEM) }
+        fun foldBox(): LinearLayout = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; background = rounded(M_ITEM, 12f) }
+        // 점검: 테두리만 있는 둥근 띠(색은 상태에 따라 render에서)
+        val checkBox = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; background = GradientDrawable().apply { cornerRadius = dpf(20f); setColor(Color.TRANSPARENT); setStroke(dp(1), M_LINE) } }
+        checkHead = TextView(this).apply {
+            textSize = 13f; setTextColor(M_FG); setPadding(dp(14), dp(10), dp(14), dp(10)); maxLines = 1; ellipsize = TextUtils.TruncateAt.END
+            setOnClickListener { checkExpanded = !checkExpanded; render() }
+        }
+        checkView = TextView(this).apply { textSize = 12.5f; setTextColor(M_FG); setPadding(dp(14), 0, dp(14), dp(10)); setLineSpacing(0f, 1.25f) }
+        checkBox.addView(checkHead); checkBox.addView(checkView)
+        checkBoxView = checkBox
+        expanded.addView(checkBox, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(6) })
+        // 평소 → 카메라 앞: 파랑→주황으로 이어진 띠 하나
+        val prof = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(dp(4), dp(4), dp(4), dp(4))
+            background = GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT, intArrayOf(0xFF2A3352.toInt(), 0xFF3A2E2A.toInt())).apply { cornerRadius = dpf(16f) }
+        }
+        usualChip = chip { pickProfile(usual = true) }.apply { setTextColor(M_FG); (background as GradientDrawable).setColor(Color.TRANSPARENT) }
+        slowChip = chip { pickProfile(usual = false) }.apply { setTextColor(M_FG); (background as GradientDrawable).setColor(Color.TRANSPARENT) }
         prof.addView(usualChip, LinearLayout.LayoutParams(0, -2, 1f))
-        prof.addView(tv(20f, M_MUTED).apply { text = "→"; setPadding(dp(8), 0, dp(8), 0) })
+        prof.addView(tv(20f, M_MUTED).apply { text = "→"; setPadding(dp(6), 0, dp(6), 0) })
         prof.addView(slowChip, LinearLayout.LayoutParams(0, -2, 1f))
-        expanded.addView(prof)
+        expanded.addView(prof, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
+        // 지금 복귀는 메뉴에서 빼고 카드 윗줄·아랫줄에(render). 예전 큰 버튼·감시 버튼은 만들기만 하고 붙이지 않는다.
         releaseBtn = bigButton(t.bandProblem) { DriveService.send(this, DriveService.ACTION_RELEASE) }
-        expanded.addView(releaseBtn, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
         toggleBtn = bigButton(t.toggleOn) { toggleDrive() }
-        expanded.addView(toggleBtn, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
-        nowView = tv(12f, M_MUTED).apply { setPadding(dp(2), dp(6), dp(2), dp(2)) }
-        expanded.addView(nowView)
+        // 다시 연결 세 칸(아이콘 위, 글자 두 줄)
+        fun tile(icon: String, label: String, onClick: () -> Unit) = tv(12f, M_FG).apply {
+            gravity = Gravity.CENTER; setLineSpacing(0f, 1.15f); setPadding(dp(4), dp(9), dp(4), dp(9))
+            text = SpannableStringBuilder().apply {
+                append(icon); setSpan(RelativeSizeSpan(1.6f), 0, length, 0); setSpan(ForegroundColorSpan(0xFF9DB8FF.toInt()), 0, length, 0)
+                append("\n").append(label)
+            }
+            background = rounded(M_ITEM, 14f); setOnClickListener { onClick() }
+        }
+        val tiles = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        tiles.addView(tile("◎", "목적지\n다시 확인") { checkDestNow() }, LinearLayout.LayoutParams(0, -2, 1f).apply { rightMargin = dp(6) })
+        tiles.addView(tile("↻", "카카오\n다시 붙이기") { reattachNavi() }, LinearLayout.LayoutParams(0, -2, 1f).apply { rightMargin = dp(6) })
+        tiles.addView(tile("⇄", "커맨더\n다시 연결") { reconnectCommander() }, LinearLayout.LayoutParams(0, -2, 1f))
+        expanded.addView(tiles, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
         // v0.16.0 소리 크기(카카오 길안내 음성 / 앱 안내 음성). 0%면 끔, 바꾸면 바로 적용(감시 중에도)
         expanded.addView(volumeBox(), LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
-
-        // 점검·기록: 평소엔 한 줄로 접어 두고 누르면 펼친다
-        fun foldBox(): LinearLayout = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; background = rounded(M_ITEM, 12f) }
-        val headStyle: TextView.() -> Unit = { textSize = 13f; setTextColor(M_FG); setPadding(dp(12), dp(10), dp(12), dp(10)); maxLines = 1; ellipsize = TextUtils.TruncateAt.END }
-        val checkBox = foldBox()
-        checkHead = TextView(this).apply { headStyle(); setOnClickListener { checkExpanded = !checkExpanded; render() } }
-        checkView = TextView(this).apply { textSize = 12.5f; setTextColor(M_FG); setPadding(dp(12), 0, dp(12), dp(10)); setLineSpacing(0f, 1.25f) }
-        checkBox.addView(checkHead); checkBox.addView(checkView)
-        expanded.addView(checkBox, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
-        val logBox = foldBox()
-        logHead = TextView(this).apply { headStyle(); setOnClickListener { logExpanded = !logExpanded; render() } }
-        logView = TextView(this).apply { textSize = 12f; setTextColor(M_FG); setPadding(dp(12), 0, dp(12), dp(10)) }
-        logBox.addView(logHead); logBox.addView(logView)
-        expanded.addView(logBox, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
-        // 데이터·테스트 도구(예전 ⋮ 메뉴)
-        // 설정·지도 맞추기(예전엔 지도 위 떠 있는 버튼) — 아래 판을 펼쳤을 때만 보인다
-        val btnRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, dp(8), 0, 0) }
+        // [기록 | 설정] 한 줄, 기록을 누르면 그 아래로 펼침
         fun smallBtn(label: String, onClick: () -> Unit) = tv(14f, M_FG, font = jua).apply {
             text = label; gravity = Gravity.CENTER; setPadding(dp(10), dp(11), dp(10), dp(11))
             background = rounded(M_ITEM, 12f); setOnClickListener { onClick() }
         }
-        btnRow.addView(smallBtn("⚙ 설정") { startActivity(Intent(this, SettingsActivity::class.java)) }, LinearLayout.LayoutParams(0, -2, 1f).apply { rightMargin = dp(8) })
-        btnRow.addView(smallBtn("◎ 지도 내 위치로") { recenterMap() },
-            LinearLayout.LayoutParams(0, -2, 1f))
+        val btnRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, dp(8), 0, 0) }
+        logHead = smallBtn("☰ 기록 ▾") { logExpanded = !logExpanded; render() }
+        btnRow.addView(logHead, LinearLayout.LayoutParams(0, -2, 1f).apply { rightMargin = dp(8) })
+        lateinit var setBtn: TextView
+        setBtn = smallBtn("⚙ 설정") { openSettings(setBtn) }
+        btnRow.addView(setBtn, LinearLayout.LayoutParams(0, -2, 1f))
         expanded.addView(btnRow)
-        // v0.13.9: ↻ 목적지 다시 확인은 메뉴 맨 위(알약에서는 뺌)
-        expanded.addView(smallBtn("↻ 테슬라 목적지 다시 확인") { checkDestNow() }, 0, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(4) })
-        // v0.13.4: 카카오 화면이 멈추거나(간이 지도로 바뀜) 이상할 때 바로 다시 붙인다
-        expanded.addView(smallBtn("↻ 카카오 화면 다시 붙이기") { reattachNavi() }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
-        val tools = tv(13f, M_MUTED).apply { text = "데이터·테스트 도구 ⋮"; setPadding(dp(4), dp(12), dp(4), dp(4)) }
-        tools.setOnClickListener { showTools(it) }
-        expanded.addView(tools)
+        val logBox = foldBox()
+        logView = TextView(this).apply { textSize = 12f; setTextColor(M_FG); setPadding(dp(12), dp(10), dp(12), dp(10)) }
+        logBox.addView(logView)
+        logBoxView = logBox
+        expanded.addView(logBox, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
+        // 맨 아래 작은 글씨: 지금 도로 · GPS 정확도
+        nowView = tv(11f, M_MUTED).apply { setPadding(dp(4), dp(8), dp(4), dp(0)) }
+        expanded.addView(nowView)
         if (wide) sheet.addView(expanded) else {
             // 펼친 내용이 길면(기록 펼침) 화면의 60%까지만, 나머지는 스크롤
             val sv = object : ScrollView(this) {
@@ -526,6 +564,28 @@ class MainActivity : AppCompatActivity() {
         slider("앱 안내 음성 (감속합니다·복귀합니다 등)", { Prefs.appVolume(this) }) { Prefs.setAppVolume(this, it) }
         box.addView(tv(11f, M_MUTED).apply { text = "소리 채널(설정 ⑦) 음량 안에서의 크기 · 0%면 끔" + if (!Prefs.alertsOn(this@MainActivity)) "\n지금 설정 ⑦ 음성·효과음이 꺼져 있어 모두 무음" else "" })
         return box
+    }
+
+    /** v0.16.8 설정을 연다 — 누른 버튼 자리에서 시트가 퍼지듯(설정 화면이 애니메이션). */
+    private fun openSettings(from: View?) {
+        val i = Intent(this, SettingsActivity::class.java)
+        if (from != null && from.isAttachedToWindow) {
+            val loc = IntArray(2); from.getLocationOnScreen(loc)
+            i.putExtra(SettingsActivity.EXTRA_FROM, intArrayOf(loc[0], loc[1], from.width, from.height))
+        }
+        startActivity(i)
+        @Suppress("DEPRECATION") overridePendingTransition(0, 0)
+    }
+
+    /** v0.16.8 [커맨더 다시 연결]: 보드 경유면 보드에 바로 다시 접속, 폰 직접이면 같은 광고를 바로 다시 켬. */
+    private fun reconnectCommander() {
+        val msg = when {
+            !Prefs.bleOn(this) -> "설정 ⑥ 'S3XY 커맨더로 차 휠 조작'이 꺼져 있습니다"
+            !S3xyButton.running -> "감시를 켜면 커맨더에 연결합니다"
+            else -> S3xyButton.reconnectNow()
+        }
+        Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
+        render()
     }
 
     private fun recenterMap() {
@@ -914,27 +974,7 @@ class MainActivity : AppCompatActivity() {
             .setNegativeButton("취소", null).show()
     }
 
-    // ---- 데이터·테스트 도구(아래 판 "도구 ⋮"). 설정은 지도 위 ⚙ 버튼.
-    private fun showTools(anchor: View) {
-        val pm = PopupMenu(this, anchor)
-        val m = pm.menu
-        m.add(0, M_HELP, 0, "도움말 (처음 설치·문제 해결)")
-        m.add(0, M_SETTINGS, 0, "설정")
-        m.add(0, M_CSV, 1, "카메라 데이터 (경찰청 전국 CSV)")
-        m.add(0, M_KEC_SECTIONS, 2, "도로공사 구간단속 CSV")
-        m.add(0, M_KEC_POINTS, 3, "도로공사 이정좌표 CSV")
-        m.add(0, M_ZONES, 4, "어린이보호구역 CSV")
-        m.add(0, M_ROADS, 5, "도로망 데이터 (OSM kr-roads.zip)")
-        m.add(0, M_TEST_SOUND, 6, "테스트: 안내 소리")
-        m.add(0, M_TEST_DOWN, 7, "테스트: 감속 신호")
-        m.add(0, M_TEST_UP, 8, "테스트: 복귀 신호")
-        m.add(0, M_SIM, 9, "가상 주행 테스트 (주차 중)")
-        m.add(0, M_PAIR, 10, "커맨더 페어링 모드 켜기/끄기")
-        m.add(0, M_SCAN, 11, "BLE 스캔 (진단용)")
-        pm.setOnMenuItemClickListener { onTool(it.itemId); true }
-        pm.show()
-    }
-
+    // ---- 데이터·테스트 도구: v0.16.8부터 설정 › 데이터·도구에서 EXTRA_TOOL로 들어온다(메뉴의 ⋮는 뺌)
     private fun onTool(id: Int) {
         when (id) {
             M_SETTINGS -> startActivity(Intent(this, SettingsActivity::class.java))
@@ -992,7 +1032,7 @@ class MainActivity : AppCompatActivity() {
             askPermissions(); return
         }
         if (CameraRepo.cachedCount() == 0) {
-            Toast.makeText(this, "카메라 데이터가 없습니다 — 메뉴에서 경찰청 전국 CSV를 먼저 불러오세요", Toast.LENGTH_LONG).show(); return
+            Toast.makeText(this, "카메라 데이터가 없습니다 — 설정 › 데이터·도구에서 경찰청 전국 CSV를 먼저 불러오세요", Toast.LENGTH_LONG).show(); return
         }
         DriveService.send(this, DriveService.ACTION_START)
     }
@@ -1558,6 +1598,9 @@ class MainActivity : AppCompatActivity() {
         chipText(slowChip, "카메라 앞", slow.label, highlight = running && car != null && car == slow && slow != usual)
         val showRelease = running && !sim && (slowed || (car != null && car != out.usual))
         releaseBtn.visibility = if (showRelease) View.VISIBLE else View.GONE
+        retInline.visibility = if (showRelease && !narrow) View.VISIBLE else View.GONE
+        retBottom.visibility = if (showRelease && narrow) View.VISIBLE else View.GONE
+        if (showRelease && narrow) destName.maxLines = 1
         releaseBtn.text = "▲ 지금 복귀 → ${out.usual.label}"
         toggleBtn.text = if (running) "■ 감시 끄기" else "▶ 감시 켜기"
         (toggleBtn.background as GradientDrawable).setColor(if (running) t.toggleOff else t.toggleOn)
@@ -1584,12 +1627,12 @@ class MainActivity : AppCompatActivity() {
         }
         val dataLine = when (camCount) {
             null -> "–  카메라 데이터 읽는 중"
-            0 -> "✖  카메라 데이터 없음 — 도구 ⋮에서 경찰청 전국 CSV"
+            0 -> "✖  카메라 데이터 없음 — 설정 › 데이터·도구에서 경찰청 전국 CSV"
             else -> "✔  ${CameraRepo.summaryLine}"
         }
         val roadsLine = when {
             !Prefs.useRoads(this) -> if (CameraRepo.hasRoads(this)) "–  도로망 꺼짐(설정) — GPS 방향으로 판단" else null
-            !CameraRepo.hasRoads(this) -> "✖  도로망 없음 — 도구 ⋮에서 kr-roads.zip (옆 도로·반대편 오탐 거름)"
+            !CameraRepo.hasRoads(this) -> "✖  도로망 없음 — 설정 › 데이터·도구에서 kr-roads.zip (옆 도로·반대편 오탐 거름)"
             running && !sim && st?.road != null -> (if (st.road.startsWith("도로 미확인")) "△  " else "✔  ") + st.road
             else -> "✔  도로망 ${CameraRepo.roadsInfo.ifEmpty { "있음" }}"
         }
@@ -1611,7 +1654,7 @@ class MainActivity : AppCompatActivity() {
             if (missing.isEmpty()) "✔  자동 시작: ${Prefs.autoDeviceName(this)} 연결 시" else "✖  자동 시작에 필요: ${missing.joinToString(", ")}"
         }
         val zoneLine = if (!Prefs.schoolZoneOn(this)) null else when (zoneCount) {
-            null -> "–  보호구역 읽는 중"; 0 -> "✖  어린이보호구역 파일 없음 — 도구 ⋮에서 불러오기"; else -> "✔  어린이보호구역 ${zoneCount}곳 · 반경 ${Prefs.schoolZoneRadiusM(this)}m"
+            null -> "–  보호구역 읽는 중"; 0 -> "✖  어린이보호구역 파일 없음 — 설정 › 데이터·도구에서 불러오기"; else -> "✔  어린이보호구역 ${zoneCount}곳 · 반경 ${Prefs.schoolZoneRadiusM(this)}m"
         }
         val kakaoAge = KakaoSafety.ageS()
         val kakaoLine = when {
@@ -1644,12 +1687,13 @@ class MainActivity : AppCompatActivity() {
         checkHead.text = foldHead("점검",
             if (bad.isEmpty()) "✔ 모두 정상" else bad.first().replace(Regex("^✖\\s+"), "✖ ") + (if (bad.size > 1) " 외 ${bad.size - 1}" else ""),
             if (bad.isEmpty()) t.bandOn else t.bandProblem, checkExpanded)
+        (checkBoxView.background as? GradientDrawable)?.setStroke(dp(1), if (bad.isEmpty()) 0x734ADE80 else 0x99FF8A80.toInt())
 
         // ---- 기록
         val lines = DriveState.log
-        logHead.text = foldHead("기록", lines.firstOrNull() ?: "아직 없음", t.muted, logExpanded)
-        logView.text = lines.joinToString("\n")
-        logView.visibility = if (logExpanded) View.VISIBLE else View.GONE
+        logHead.text = if (logExpanded) "☰ 기록 ▴" else "☰ 기록 ▾"
+        logView.text = lines.joinToString("\n").ifEmpty { "아직 없음" }
+        logBoxView.visibility = if (logExpanded) View.VISIBLE else View.GONE
     }
 
     @Deprecated("Deprecated in Java")
@@ -1697,6 +1741,8 @@ class MainActivity : AppCompatActivity() {
         private const val M_ZONES = 104
         private const val M_TEST_DOWN = 105
         private const val M_TEST_UP = 106
+        /** v0.16.8 설정 › 데이터·도구 → 이 화면이 처리할 도구 이름. */
+        const val EXTRA_TOOL = "tool"
         private const val M_SIM = 107
         private const val M_PAIR = 108
         private const val M_SCAN = 109

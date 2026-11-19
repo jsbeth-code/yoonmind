@@ -142,6 +142,14 @@ object S3xyButton {
     val idle: Boolean get() = server != null && device == null
 
     /** 커맨더가 안 올 때 광고를 다시 켠다. v0.14.4: 광고를 새로 만들지 않고 같은 광고를 다시 켠다(새로 만들면 폰 주소가 바뀌어 커맨더가 못 알아보는 것으로 추정). */
+    /** v0.16.8 [커맨더 다시 연결]. 돌려주는 글은 짧은 알림용. */
+    fun reconnectNow(): String = when {
+        BoardLink.active -> { BoardLink.reconnectNow(); "보드에 다시 접속합니다" }
+        server == null -> "커맨더 버튼이 꺼져 있습니다"
+        device != null -> "커맨더가 이미 접속해 있습니다"
+        else -> { log("커맨더 다시 연결 — 같은 광고를 바로 다시 켬(주소 유지)"); reEnableAdvertising(); "광고를 다시 켰습니다 — 커맨더를 기다립니다" }
+    }
+
     fun readvertise() {
         if (server == null || device != null) return
         log("커맨더가 안 와서 같은 광고를 다시 켬(주소 유지)")

@@ -522,7 +522,7 @@ object CameraRepo {
     fun summary(ctx: Context): String {
         val cams = load(ctx).cameras
         val zones = loadZones(ctx).cameras.size
-        if (cams.isEmpty()) return "카메라 데이터 없음 — 메뉴에서 경찰청 전국 CSV를 불러오세요"
+        if (cams.isEmpty()) return "카메라 데이터 없음 — 설정 › 데이터·도구에서 경찰청 전국 CSV를 불러오세요"
         val sec = cams.count { it.kind == CamKind.SECTION_START }
         val secDir = cams.count { it.kind == CamKind.SECTION_START && it.bearingDeg != null }
         val sig = cams.count { it.signalOnly }

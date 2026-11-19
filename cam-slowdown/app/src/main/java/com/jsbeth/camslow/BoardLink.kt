@@ -174,6 +174,17 @@ object BoardLink {
 
     private val reconnect = Runnable { if (active) connect() }
 
+    /** v0.16.8 [커맨더 다시 연결]: 1분을 기다리지 않고 지금 처음부터 다시 접속. */
+    fun reconnectNow() {
+        main.post {
+            if (!active) return@post
+            quiet = false; lastOkAt = android.os.SystemClock.elapsedRealtime()
+            main.removeCallbacks(reconnect)
+            log("보드 다시 연결(직접 누름)")
+            connect()
+        }
+    }
+
     /** 마지막으로 정상(인증됨)이었거나 새로 접속을 시작한 시각. */
     @Volatile private var lastOkAt = 0L
     @Volatile private var quiet = false

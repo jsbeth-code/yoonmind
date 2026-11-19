@@ -51,7 +51,7 @@
                 <data android:scheme="fsdslow" android:host="tesla" />
             </intent-filter>
         </activity>
-        <activity android:name=".SettingsActivity" android:exported="false" />
+        <activity android:name=".SettingsActivity" android:exported="false" android:theme="@style/SettingsSheet" />
         <activity android:name=".HelpActivity" android:exported="false" android:label="도움말" />
         <activity android:name=".CaptureActivity" android:exported="false" />
 

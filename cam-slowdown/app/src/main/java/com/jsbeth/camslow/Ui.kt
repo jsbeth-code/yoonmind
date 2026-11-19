@@ -39,6 +39,14 @@ class Ui(private val act: Activity) {
         private val CIRCLED = listOf("①", "②", "③", "④", "⑤", "⑥", "⑦", "⑧", "⑨", "⑩")
     }
 
+    /** v0.16.8 설정 시트 밤 색(어두운 바탕). 글자 기본색은 화면 테마가 정한다. */
+    var dark = false
+    val muted: Int get() = if (dark) 0xB3FFFFFF.toInt() else MUTED
+    val line: Int get() = if (dark) 0x26FFFFFF else 0x24000000
+    val accent: Int get() = if (dark) 0xFF5B8CFF.toInt() else 0xFF2457E6.toInt()
+    val cardColor: Int get() = if (dark) 0xFF262A33.toInt() else Color.WHITE
+    private val summaries = ArrayList<() -> Unit>()
+
     val root = LinearLayout(act).apply {
         orientation = LinearLayout.VERTICAL
         val p = dp(16)
@@ -60,7 +68,7 @@ class Ui(private val act: Activity) {
 
     fun section(title: String) = text(title, 18f, bold = true)
     fun question(n: Int, q: String) = text("${CIRCLED.getOrElse(n - 1) { "$n." }} $q", 16f, bold = true).apply { setPadding(0, dp(14), 0, dp(2)) }
-    fun hint(s: String) = text(s, 12.5f, color = MUTED)
+    fun hint(s: String) = text(s, 12.5f, color = muted)
 
     /** 색 띠: 큰 글자 + 작은 설명. */
     fun band(): TextView = TextView(act).apply {
@@ -109,13 +117,60 @@ class Ui(private val act: Activity) {
         val box = LinearLayout(act).apply {
             orientation = LinearLayout.VERTICAL
             val p = dp(10); setPadding(dp(12), p, dp(12), p)
-            background = GradientDrawable().apply { cornerRadius = dp(6).toFloat(); setStroke(dp(1), 0x24000000); setColor(Color.TRANSPARENT) }
+            background = GradientDrawable().apply { cornerRadius = dp(10).toFloat(); setStroke(dp(1), line); setColor(Color.TRANSPARENT) }
         }
         parent.addView(box, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(6); bottomMargin = dp(6) })
         val prev = parent; parent = box
         try { block() } finally { parent = prev }
         return box
     }
+
+    /**
+     * v0.16.8 설정 섹션 카드: 번호 동그라미 + 제목 + 요약 한 줄 + ▾. 누르면 펼침(여러 개 같이 펼칠 수 있고, 처음엔 모두 접힘).
+     * 요약은 refreshSummaries()로 다시 계산한다.
+     */
+    fun section(n: String, title: String, summary: () -> String, block: () -> Unit): LinearLayout {
+        val card = LinearLayout(act).apply {
+            orientation = LinearLayout.VERTICAL
+            background = GradientDrawable().apply { cornerRadius = dp(14).toFloat(); setColor(cardColor) }
+        }
+        parent.addView(card, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(6) })
+        val head = LinearLayout(act).apply {
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(12), dp(10), dp(12), dp(10)); minimumHeight = dp(56)
+        }
+        val badge = TextView(act).apply {
+            text = n; textSize = 13f; gravity = Gravity.CENTER; setTypeface(typeface, Typeface.BOLD)
+            background = GradientDrawable().apply { cornerRadius = dp(10).toFloat() }
+        }
+        head.addView(badge, LinearLayout.LayoutParams(dp(32), dp(32)))
+        val texts = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(12), 0, dp(8), 0) }
+        texts.addView(TextView(act).apply { text = title; textSize = 15f; setTypeface(typeface, Typeface.BOLD) })
+        val sum = TextView(act).apply { textSize = 12f; setTextColor(muted); maxLines = 2; ellipsize = android.text.TextUtils.TruncateAt.END }
+        texts.addView(sum)
+        head.addView(texts, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        val chev = TextView(act).apply { textSize = 14f; setTextColor(muted) }
+        head.addView(chev)
+        card.addView(head)
+        val body = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(14), 0, dp(14), dp(12)); visibility = View.GONE }
+        card.addView(body)
+        fun paint() {
+            val open = body.visibility == View.VISIBLE
+            chev.text = if (open) "▴" else "▾"
+            (badge.background as GradientDrawable).setColor(if (open) accent else (accent and 0x00FFFFFF) or 0x24000000)
+            badge.setTextColor(if (open) Color.WHITE else accent)
+            sum.text = runCatching { summary() }.getOrDefault("")
+            sum.visibility = if (sum.text.isNullOrEmpty()) View.GONE else View.VISIBLE
+        }
+        summaries += { paint() }
+        head.setOnClickListener { body.visibility = if (body.visibility == View.VISIBLE) View.GONE else View.VISIBLE; paint() }
+        val prev = parent; parent = body
+        try { block() } finally { parent = prev }
+        paint()
+        return body
+    }
+
+    fun refreshSummaries() { summaries.forEach { it() } }
 
     /** 접었다 펴는 묶음. 제목 줄을 누르면 토글. */
     fun collapsible(title: String, expanded: Boolean = false, block: Ui.() -> Unit): LinearLayout {
@@ -145,7 +200,7 @@ class Ui(private val act: Activity) {
         val texts = LinearLayout(act).apply {
             orientation = LinearLayout.VERTICAL
             addView(TextView(act).apply { text = label; textSize = 14f })
-            if (sub.isNotEmpty()) addView(TextView(act).apply { text = sub; textSize = 12f; setTextColor(MUTED) })
+            if (sub.isNotEmpty()) addView(TextView(act).apply { text = sub; textSize = 12f; setTextColor(muted) })
         }
         val edit = EditText(act).apply {
             setText(value); textSize = 15f; gravity = Gravity.END
@@ -174,7 +229,7 @@ class Ui(private val act: Activity) {
         val texts = LinearLayout(act).apply {
             orientation = LinearLayout.VERTICAL
             addView(TextView(act).apply { text = label; textSize = 15f })
-            if (sub.isNotEmpty()) addView(TextView(act).apply { text = sub; textSize = 12f; setTextColor(MUTED) })
+            if (sub.isNotEmpty()) addView(TextView(act).apply { text = sub; textSize = 12f; setTextColor(muted) })
         }
         val sw = Switch(act).apply { isChecked = checked; setOnCheckedChangeListener { _, v -> onChange(v) } }
         LinearLayout(act).apply {
