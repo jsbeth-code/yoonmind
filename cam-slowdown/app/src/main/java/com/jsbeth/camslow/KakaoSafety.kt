@@ -31,6 +31,7 @@ import com.kakaomobility.knsdk.guidance.knguidance.KNGuidance_GuideStateDelegate
 import com.kakaomobility.knsdk.guidance.knguidance.citsguide.KNGuide_Cits
 import com.kakaomobility.knsdk.guidance.knguidance.common.KNLocation
 import com.kakaomobility.knsdk.guidance.knguidance.routeguide.objects.KNMultiRouteInfo
+import com.kakaomobility.knsdk.ui.component.KNComponentCurPositionView
 import com.kakaomobility.knsdk.ui.view.KNNaviView
 import com.kakaomobility.knsdk.ui.view.KNNaviView_GuideStateDelegate
 import java.util.UUID
@@ -324,6 +325,8 @@ object KakaoSafety : KNGuidance_SafetyGuideDelegate, KNGuidance_LocationGuideDel
                 // 화면이 나중에 콜백을 가져가거나 안내를 안 시작하면: 다시 붙이고, 그래도 정보가 없으면 직접 시작
                 val started = beganAt
                 main.postDelayed({ ensureDelegates() }, 1_000)
+                // v0.16.9 목적지를 바꾸면 경로선이 [현위치로]를 누를 때까지 안 그려지던 것(실차 2026-11-19) — 같은 동작을 대신 한다
+                if (trip != null) for (ms in longArrayOf(1_500, 4_000)) main.postDelayed({ if (beganAt == started) recenterView("경로 시작") }, ms)
                 main.postDelayed({
                     // GPS가 잡혀 있는데도(시작 뒤 실제 위치를 받음) 카카오 정보가 없을 때만
                     if (running && guidance === g && beganAt == started && updatedAt < started && lastHereAt > started) {
@@ -340,6 +343,25 @@ object KakaoSafety : KNGuidance_SafetyGuideDelegate, KNGuidance_LocationGuideDel
             }
         }
         g.startWithTrip(trip, prio(routeOpt), avoid(routeOpt))
+    }
+
+    /** v0.16.9 카카오 화면의 [현위치로] 버튼과 같은 동작(지도를 내 위치·주행 시점으로 되돌리며 경로선을 다시 그림). 메인 스레드. */
+    private var recenterFailLogged = false
+    fun recenterView(why: String) {
+        val v = naviView?.takeIf { it === initedView } ?: return
+        try {
+            val cp = findCurPos(v)
+            if (cp == null) { if (!recenterFailLogged) { recenterFailLogged = true; log("카카오 [현위치로]를 못 찾음($why)") }; return }
+            cp.delegate?.curPositionViewToCurLocation()
+        } catch (e: Throwable) {
+            if (!recenterFailLogged) { recenterFailLogged = true; log("카카오 [현위치로] 실패($why): ${e.javaClass.simpleName}") }
+        }
+    }
+
+    private fun findCurPos(v: android.view.View): KNComponentCurPositionView? {
+        if (v is KNComponentCurPositionView) return v
+        if (v is android.view.ViewGroup) for (i in 0 until v.childCount) findCurPos(v.getChildAt(i))?.let { return it }
+        return null
     }
 
     /** 메인 화면이 카카오내비 화면을 붙인다. 안내가 돌고 있으면 화면으로 다시 시작한다(지금 위치에서 새 경로). 메인 스레드. */
