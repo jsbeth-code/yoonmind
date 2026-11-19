@@ -62,7 +62,7 @@ object AutoStart {
     fun isBatteryExempt(ctx: Context): Boolean =
         ctx.getSystemService(PowerManager::class.java).isIgnoringBatteryOptimizations(ctx.packageName)
 
-    /** v0.16.1 자동 시작용 차(설정 ⑥)의 블루투스가 지금 연결돼 있는지(이 프로세스가 본 연결·끊김 기준). 보드 끊김 자동 정지·보드 자동 시작 조용히 정지 판단에 쓴다. */
+    /** v0.16.1 자동 시작용 차(설정 ④)의 블루투스가 지금 연결돼 있는지(이 프로세스가 본 연결·끊김 기준). 보드 끊김 자동 정지·보드 자동 시작 조용히 정지 판단에 쓴다. */
     @Volatile var carLinked = false
     /** 차가 지금 연결돼 있는지: 이 프로세스가 본 연결·끊김, 모르면(앱이 다시 뜬 뒤) 기기의 연결 상태를 직접 묻는다(숨은 API, 실패하면 false). */
     @android.annotation.SuppressLint("MissingPermission")

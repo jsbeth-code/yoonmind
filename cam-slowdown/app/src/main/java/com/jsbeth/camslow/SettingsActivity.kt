@@ -46,16 +46,16 @@ class SettingsActivity : Activity() {
         ui = Ui(this).apply { dark = night }
         if (DriveState.running) ui.banner("감시 중입니다. 바꾼 설정은 다음에 켤 때부터 적용됩니다.")
         ui.row(ui.button("도움말 — 처음 설치·커맨더 연결·문제 해결") { startActivity(android.content.Intent(this, HelpActivity::class.java)) })
-        // ①② 프로필은 메인 화면 카드 메뉴에서 고른다(v0.16.8 설정에서 뺌)
+        // 프로필(평소·카메라 앞)은 메인 화면 카드 메뉴에서 고른다(v0.16.8 설정에서 뺌, v0.16.10 번호 ①~⑧로 다시 매김)
 
         // 3 복귀
-        ui.section("3", "지나면 복귀", { if (Prefs.autoRestore(this)) "자동으로 평소 프로필로 올림" else "직접 올림(음성만)" }) {
+        ui.section("1", "지나면 복귀", { if (Prefs.autoRestore(this)) "자동으로 평소 프로필로 올림" else "직접 올림(음성만)" }) {
             ui.switchRow("자동으로 평소 프로필로 올리기", "끄면 \"카메라 통과\" 음성만 나오고 휠은 직접 올립니다", Prefs.autoRestore(this)) { Prefs.setAutoRestore(this, it) }
 
         }
 
         // 4 시점
-        ui.section("4", "미리 줄이기", { timingSummary() }) {
+        ui.section("2", "미리 줄이기", { timingSummary() }) {
             val timings = Timing.values()
             ui.radioGroup(timings.map { it.label }, Prefs.timing(this).ordinal) { i ->
                 Prefs.setTiming(this, timings[i]); fixedEdit?.visibility = if (timings[i] == Timing.FIXED) View.VISIBLE else View.GONE
@@ -67,7 +67,7 @@ class SettingsActivity : Activity() {
         }
 
         // 5 카메라 선별
-        ui.section("5", "반응할 카메라", { cameraSummary() }) {
+        ui.section("3", "반응할 카메라", { cameraSummary() }) {
             val minLimit = Prefs.minLimitKmh(this)
             val sel = when (minLimit) { 0 -> 0; 80 -> 1; else -> 2 }
             ui.radioGroup(listOf("모든 과속 카메라", "고속도로·자동차전용도로만 (제한속도 80 이상)", "제한속도가 아래 값 이상인 것만"), sel) { i ->
@@ -85,7 +85,7 @@ class SettingsActivity : Activity() {
         }
 
         // 6 차와 연결
-        ui.section("6", "차와 연결", { carSummary() }) {
+        ui.section("4", "차와 연결", { carSummary() }) {
             ui.group {
                 switchRow("S3XY 커맨더로 차 휠 조작", "끄면 음성 안내만", Prefs.bleOn(this@SettingsActivity)) { Prefs.setBleOn(this@SettingsActivity, it); BoardScan.update(this@SettingsActivity, "설정"); refreshStatus() }
                 text("커맨더 연결", 14f, bold = true)
@@ -132,7 +132,7 @@ class SettingsActivity : Activity() {
         }
 
         // 7 안내
-        ui.section("7", "안내·화면", { guideSummary() }) {
+        ui.section("5", "안내·화면", { guideSummary() }) {
             ui.text("간단 모드 (폰 화면을 끄고 달릴 때)", 14f)
             val simpleModes = listOf("AUTO", "ON", "OFF")
             ui.radioGroup(listOf("화면이 꺼지면 자동 (기본)", "항상", "끔"), simpleModes.indexOf(Prefs.simpleMode(this)).coerceAtLeast(0)) { i ->
@@ -168,7 +168,7 @@ class SettingsActivity : Activity() {
         }
 
         // 8 어린이보호구역
-        ui.section("8", "어린이보호구역", { if (Prefs.schoolZoneOn(this)) "켬 · 반경 ${Prefs.schoolZoneRadiusM(this)}m" else "끔" }) {
+        ui.section("6", "어린이보호구역", { if (Prefs.schoolZoneOn(this)) "켬 · 반경 ${Prefs.schoolZoneRadiusM(this)}m" else "끔" }) {
             ui.switchRow("보호구역 시설 반경 안에 들어가면 내리기", "카메라가 없어도. 데이터·도구에서 '어린이보호구역 CSV'를 넣어야 동작", Prefs.schoolZoneOn(this)) { Prefs.setSchoolZoneOn(this, it); refreshStatus() }
             ui.numberRow("반경(m)", "법적 보호구역은 시설 정문 300m 안. 큰길 오탐이 잦으면 줄이세요", Prefs.schoolZoneRadiusM(this).toString(), false) { Prefs.setSchoolZoneRadiusM(this, it.toInt()) }
             zoneStatus = ui.text("", 13f)
@@ -176,7 +176,7 @@ class SettingsActivity : Activity() {
         }
 
         // 9 테슬라 내비 목적지
-        ui.section("9", "테슬라 목적지", { if (!TeslaLink.connected(this)) "연결 안 됨" else if (Prefs.teslaFollow(this)) "따라가기 켬 · 연결됨" else "따라가기 꺼짐 · 연결됨" }) {
+        ui.section("7", "테슬라 목적지", { if (!TeslaLink.connected(this)) "연결 안 됨" else if (Prefs.teslaFollow(this)) "따라가기 켬 · 연결됨" else "따라가기 꺼짐 · 연결됨" }) {
             ui.hint("테슬라 내비에 목적지를 찍으면 카카오가 그 경로로 안내하고 경로 위 카메라만 봅니다(갈림길 오탐 감소). 확인 방식은 아래에서 고릅니다(확인 한 번마다 테슬라 유료 API를 부름). 차가 자면 깨우지 않고 건너뛰고, 연달아 실패·잠들면 간격을 5·10분으로 늘립니다. 길안내·카메라 음성은 카카오가, 감속·복귀 음성은 이 앱이 합니다.")
             ui.switchRow("목적지 따라가기", "끄면 지금처럼 목적지 없이(안전 운행)", Prefs.teslaFollow(this)) { Prefs.setTeslaFollow(this, it); refreshStatus(); notifyDrive() }
             ui.radioGroup(TeslaPoll.values().map { it.label }, Prefs.teslaPoll(this).ordinal) { i -> Prefs.setTeslaPoll(this, TeslaPoll.values()[i]) }
@@ -197,7 +197,7 @@ class SettingsActivity : Activity() {
         }
 
         // 10 업데이트
-        ui.section("10", "앱 업데이트", { "지금 v${BuildConfig.VERSION_NAME}" }) {
+        ui.section("8", "앱 업데이트", { "지금 v${BuildConfig.VERSION_NAME}" }) {
             ui.hint("지금 v${BuildConfig.VERSION_NAME} (빌드 ${BuildConfig.VERSION_CODE}" + (if (BuildConfig.GIT_SHA.isNotBlank()) ", ${BuildConfig.GIT_SHA.take(7)}" else "") + "). 앱을 열 때·감시 시작 때 30분에 한 번 자동으로도 확인합니다.")
             ui.row(ui.button("업데이트 확인") { checkUpdateNow() })
 
@@ -301,9 +301,12 @@ class SettingsActivity : Activity() {
     private lateinit var sheet: android.widget.LinearLayout
     private var closing = false
     private var dragY = 0f
+    /** v0.16.10 폴드 펼친 화면(폭 600dp 이상): 오른쪽 반 너비 · 아래 3/4, 오른쪽에서 밀려 나옴 */
+    private var sideSheet = false
 
     private fun buildSheet() {
         val night = ui.dark
+        sideSheet = resources.configuration.screenWidthDp >= 600
         val frame = android.widget.FrameLayout(this)
         scrim = View(this).apply { setBackgroundColor(0x47000000); setOnClickListener { close() } }
         frame.addView(scrim, android.widget.FrameLayout.LayoutParams(-1, -1))
@@ -351,25 +354,40 @@ class SettingsActivity : Activity() {
         handle.setOnTouchListener(drag)
         head.setOnTouchListener(drag)
         val h = (resources.displayMetrics.heightPixels * 0.75f).toInt()
-        frame.addView(sheet, android.widget.FrameLayout.LayoutParams(-1, h, android.view.Gravity.BOTTOM))
+        val w = if (sideSheet) resources.displayMetrics.widthPixels / 2 else -1
+        frame.addView(sheet, android.widget.FrameLayout.LayoutParams(w, h, android.view.Gravity.BOTTOM or android.view.Gravity.END))
+        // v0.16.10 첫 화면에 다 펼친 시트가 한 번 그려진 뒤 작아졌다 퍼져 깜빡이던 것 — 그리기 전에 숨기고, 첫 그리기 직전에 애니메이션 시작 자세를 잡는다
+        scrim.alpha = 0f
+        sheet.alpha = 0f
         setContentView(frame)
-        frame.post { animateIn() }
+        frame.viewTreeObserver.addOnPreDrawListener(object : android.view.ViewTreeObserver.OnPreDrawListener {
+            override fun onPreDraw(): Boolean {
+                if (sheet.width == 0 || sheet.height == 0) return true
+                frame.viewTreeObserver.removeOnPreDrawListener(this)
+                animateIn()
+                return true
+            }
+        })
     }
 
     private fun fromRect(): IntArray? = intent.getIntArrayExtra(EXTRA_FROM)?.takeIf { it.size == 4 && it[2] > 0 && it[3] > 0 }
 
     /** 누른 버튼 자리에서 퍼지듯(약 0.25초). 버튼 자리를 모르면 아래에서 올라온다. */
     private fun animateIn() {
-        if (sheet.width == 0 || sheet.height == 0) return
         scrim.alpha = 0f
         scrim.animate().alpha(1f).setDuration(ANIM_MS).start()
         val from = fromRect()
         val interp = android.view.animation.DecelerateInterpolator()
-        if (from != null) {
+        if (sideSheet) {
+            sheet.alpha = 1f
+            sheet.translationX = sheet.width.toFloat()
+            sheet.animate().translationX(0f).setDuration(ANIM_MS).setInterpolator(interp).start()
+        } else if (from != null) {
             pivotTo(from)
             sheet.alpha = 0f
             sheet.animate().scaleX(1f).scaleY(1f).alpha(1f).setDuration(ANIM_MS).setInterpolator(interp).start()
         } else {
+            sheet.alpha = 1f
             sheet.translationY = sheet.height.toFloat()
             sheet.animate().translationY(0f).setDuration(ANIM_MS).setInterpolator(interp).start()
         }
@@ -394,7 +412,7 @@ class SettingsActivity : Activity() {
         val from = fromRect()
         val a = sheet.animate().setDuration(ANIM_MS).setInterpolator(android.view.animation.AccelerateInterpolator())
         when {
-            toRight -> a.translationX(sheet.width.toFloat())
+            toRight || (sideSheet && !down) -> a.translationX(sheet.width.toFloat())
             down || from == null -> a.translationY(sheet.height.toFloat())
             else -> {
                 val sx = (from[2].toFloat() / sheet.width).coerceIn(0.05f, 1f); val sy = (from[3].toFloat() / sheet.height).coerceIn(0.05f, 1f)

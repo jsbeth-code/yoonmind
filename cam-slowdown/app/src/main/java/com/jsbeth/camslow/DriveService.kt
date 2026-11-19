@@ -525,7 +525,7 @@ class DriveService : Service(), LocationListener {
         DriveState.log("보드 연결이 끊기고 60초 — 자동 정지(차 꺼짐으로 봄)")
         stopAll(); stopAfterSpeech()
     } }
-    /** 보드는 차가 깨어 있을 때만 켜진다: 감시 중 보드 연결이 끊기고 60초 지나면 자동 정지(설정 ⑥ 자동 정지 + 보드 자동 시작이 켜져 있을 때). */
+    /** 보드는 차가 깨어 있을 때만 켜진다: 감시 중 보드 연결이 끊기고 60초 지나면 자동 정지(설정 ④ 자동 정지 + 보드 자동 시작이 켜져 있을 때). */
     private fun checkBoardLink() {
         if (DriveState.simulating || !outputs.settings.ble || !S3xyButton.viaBoard) return
         if (BoardLink.connected) {
@@ -580,7 +580,7 @@ class DriveService : Service(), LocationListener {
         if (cmdWarned && S3xyButton.idle && !cmdHelpShown && now - cmdLostAt >= (if (freshButton) CMD_WARN_MS else 3 * CMD_WARN_MS)) {
             cmdHelpShown = true; DriveState.cmdHelpAt = System.currentTimeMillis(); DriveState.changed()
         }
-        // v0.16.6 첫 경고는 30초(그 뒤 반복은 설정 ⑥ 간격)
+        // v0.16.6 첫 경고는 30초(그 뒤 반복은 설정 ④ 간격)
         if (!cmdWarned && now - cmdLostAt >= 30_000L) {
             cmdWarned = true; cmdWarnAt = now
             DriveState.log("⚠ 커맨더가 1분 넘게 연결되지 않음 (${S3xyButton.status}) — 감속 신호가 나가지 않습니다. " +
@@ -707,7 +707,7 @@ class DriveService : Service(), LocationListener {
         return START_STICKY
     }
 
-    /** 감시를 꺼도 커맨더 버튼을 계속 켜 둘지(설정 ⑥, 커맨더 사용 중일 때). */
+    /** 감시를 꺼도 커맨더 버튼을 계속 켜 둘지(설정 ④, 커맨더 사용 중일 때). */
     private fun keepButton() = Prefs.bleOn(this) && Prefs.keepButton(this) && !Prefs.viaBoard(this) // 보드 경유는 유지할 게 없음(보드 주소가 고정)
 
     /** 감시가 꺼진 뒤: 커맨더 버튼을 유지하면 작은 알림으로 서비스를 남기고, 아니면 끝낸다. */
@@ -716,7 +716,7 @@ class DriveService : Service(), LocationListener {
             try {
                 val nm = getSystemService(NotificationManager::class.java)
                 nm.createNotificationChannel(NotificationChannel(CHANNEL, "주행 감시", NotificationManager.IMPORTANCE_LOW))
-                startForeground(NOTI_ID, notification("커맨더 버튼 유지 중 · 감시 꺼짐 (설정 ⑥에서 끌 수 있음)"))
+                startForeground(NOTI_ID, notification("커맨더 버튼 유지 중 · 감시 꺼짐 (설정 ④에서 끌 수 있음)"))
                 return
             } catch (e: Exception) {
                 DriveState.log("커맨더 버튼 유지 실패: ${e.javaClass.simpleName} — 버튼 끔")
@@ -846,7 +846,7 @@ class DriveService : Service(), LocationListener {
             // 카카오내비 안전 운행(시험): 연결 결과와 앞 카메라를 기록에만 남긴다
             KakaoSafety.start(application) { msg -> DriveState.log(msg) }
             UpdateCheck.maybeCheck(this)
-            // 테슬라 내비 목적지(설정 9번): 2분마다
+            // 테슬라 내비 목적지(설정 ⑦): 2분마다
             appliedDest = null; teslaErrSaid = null; teslaOfflineSaid = false; DriveState.teslaDest = null
             teslaMiss = 0; teslaParked = false; lastMovingAt = SystemClock.elapsedRealtime()
             main.removeCallbacks(teslaPoll)
@@ -1012,7 +1012,7 @@ class DriveService : Service(), LocationListener {
                         kakaoLostAt = now; kakaoLostSaid = false
                         DriveState.log("카카오 끊김 — 내장 데이터로 판단 (속도 ${(fix.speedMps * 3.6).toInt()} km/h, 카카오 마지막 정보 ${KakaoSafety.ageS() ?: -1}초 전)")
                     }
-                    // v0.16.3 끊긴 채면 커맨더 경고와 같은 간격(설정 ⑥ 한 번만/1분/3분)으로 다시 알린다
+                    // v0.16.3 끊긴 채면 커맨더 경고와 같은 간격(설정 ④ 한 번만/1분/3분)으로 다시 알린다
                     !live && kakaoLostSaid && kakaoLostAt > 0 && Prefs.cmdWarnRepeatMin(this).let { m -> m > 0 && now - kakaoLostSaidAt >= m * 60_000L } -> {
                         kakaoLostSaidAt = now
                         DriveState.log("카카오 아직 끊김 (${KakaoSafety.status})")

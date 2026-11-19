@@ -60,10 +60,10 @@ object BoardLink {
             val ctx = app
             return when {
                 !active -> "꺼짐"
-                ctx != null && Prefs.boardAddr(ctx).isEmpty() -> "보드 페어링 안 됨 — 설정 ⑥ [보드 페어링]"
+                ctx != null && Prefs.boardAddr(ctx).isEmpty() -> "보드 페어링 안 됨 — 설정 ④ [보드 페어링]"
                 oldFirmware -> "보드 프로그램이 옛 버전 — 보드에 새 프로그램을 넣으세요"
                 !linkUp -> "보드 찾는 중 — 보드 전원(차 USB)·거리 확인"
-                authRejected -> "보드가 이 폰을 모름 — 보드 BOOT 3초 후 설정 ⑥ [보드 페어링]"
+                authRejected -> "보드가 이 폰을 모름 — 보드 BOOT 3초 후 설정 ④ [보드 페어링]"
                 !authed -> "보드 인증 중"
                 cmdState == 2 -> "보드 경유 · 커맨더 준비"
                 cmdState == 1 -> "보드 연결됨 · 커맨더 접속만(준비 전)"
@@ -202,7 +202,7 @@ object BoardLink {
     private fun connect() {
         val ctx = app ?: return
         val addr = Prefs.boardAddr(ctx)
-        if (addr.isEmpty()) { if (!quiet) log("보드 경유: 보드 페어링이 안 됨 — 설정 ⑥ [보드 페어링]"); DriveState.changed(); return }
+        if (addr.isEmpty()) { if (!quiet) log("보드 경유: 보드 페어링이 안 됨 — 설정 ④ [보드 페어링]"); DriveState.changed(); return }
         val adapter = ctx.getSystemService(BluetoothManager::class.java)?.adapter
         if (adapter == null || !adapter.isEnabled) { log("블루투스가 꺼져 있음 — 10초 뒤 다시"); main.postDelayed(reconnect, 10_000); return }
         closeGatt()
@@ -243,7 +243,7 @@ object BoardLink {
         DriveState.changed()
         val ctx = app ?: return@execute
         val tok = hexToBytes(Prefs.boardToken(ctx))
-        if (tok == null || tok.size != 16) { authRejected = true; if (!quiet) log("보드 토큰 없음 — 보드 BOOT 3초 후 설정 ⑥ [보드 페어링]"); DriveState.changed(); return@execute }
+        if (tok == null || tok.size != 16) { authRejected = true; if (!quiet) log("보드 토큰 없음 — 보드 BOOT 3초 후 설정 ④ [보드 페어링]"); DriveState.changed(); return@execute }
         for (attempt in 1..6) {
             if (gatt !== g || !active) return@execute
             val w = writeCmd(byteArrayOf(0x01) + tok)
@@ -261,7 +261,7 @@ object BoardLink {
                 authed = v.size >= 2 && v[1].toInt() == 1
                 authRejected = !authed
                 if (authed) { quiet = false; lastOkAt = android.os.SystemClock.elapsedRealtime() }
-                if (authed || !quiet) log(if (authed) "보드 연결·인증됨" else "⚠ 보드가 이 폰을 거절 — 보드 BOOT 3초 후 설정 ⑥ [보드 페어링]")
+                if (authed || !quiet) log(if (authed) "보드 연결·인증됨" else "⚠ 보드가 이 폰을 거절 — 보드 BOOT 3초 후 설정 ④ [보드 페어링]")
                 DriveState.changed()
             }
             0x83 -> if (v.size >= 2) {
@@ -309,7 +309,7 @@ object BoardLink {
         }
     }
 
-    // ---- 페어링(설정 ⑥ [보드 페어링]) ----
+    // ---- 페어링(설정 ④ [보드 페어링]) ----
 
     /**
      * ENH_BTN을 10초 찾아, 폰 서비스가 있는 보드에 페어링을 요청한다(보드 BOOT 3초로 창이 열려 있어야 함).

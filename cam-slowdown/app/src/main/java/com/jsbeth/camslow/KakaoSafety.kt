@@ -686,7 +686,7 @@ object KakaoSafety : KNGuidance_SafetyGuideDelegate, KNGuidance_LocationGuideDel
         val info = describeVoice(voiceGuide)
         main.post { log("카카오 음성 정보: $info") }
         if (!voiceNoted) { voiceNoted = true; main.post { log("카카오 음성 첫 안내: 조각 ${data?.size ?: 0}개 · 화면 ${if (naviView != null) "있음" else "없음"}") } }
-        // v0.16.0: 카카오 음성 크기 0%이거나 설정 ⑦ 음성·효과음이 꺼져 있으면 아무 데서도 내지 않는다(대기 줄에도 넣지 않음)
+        // v0.16.0: 카카오 음성 크기 0%이거나 설정 ⑤ 음성·효과음이 꺼져 있으면 아무 데서도 내지 않는다(대기 줄에도 넣지 않음)
         if (voiceVolume() <= 0f) return false
         // 직접 재생은 메인 스레드에서 차례로. 한 번 실패한 형식이면 그 뒤로는 카카오에 맡긴다.
         if (data != null && !voiceFailed && app != null) { main.post { playVoice(data) }; return false }
@@ -715,12 +715,12 @@ object KakaoSafety : KNGuidance_SafetyGuideDelegate, KNGuidance_LocationGuideDel
     @Volatile var voiceFailed = false
         private set
     private var voiceFileSeq = 0
-    /** 우리 소리 경로(설정 7의 채널). DriveService가 넣는다. */
+    /** 우리 소리 경로(설정 ⑤의 채널). DriveService가 넣는다. */
     @Volatile var voiceUsage = android.media.AudioAttributes.USAGE_ALARM
     private val voiceQueue = ArrayDeque<ByteArray>()
     private var voicePlayer: android.media.MediaPlayer? = null
 
-    /** v0.16.0 카카오 길안내 음성 크기(0~1): 메인 화면 메뉴의 "카카오 길안내 음성" × 설정 ⑦ 음성·효과음(끄면 0). 소리 채널 음량 안에서의 비율. */
+    /** v0.16.0 카카오 길안내 음성 크기(0~1): 메인 화면 메뉴의 "카카오 길안내 음성" × 설정 ⑤ 음성·효과음(끄면 0). 소리 채널 음량 안에서의 비율. */
     @Volatile private var volCtx: android.content.Context? = null
     /** 감시 전(안내가 아직 안 돎)에도 크기 설정을 읽을 수 있게 화면이 넣는다. */
     fun bindContext(c: android.content.Context) { volCtx = c.applicationContext }

@@ -19,7 +19,7 @@
 // 보드 조작:
 //  - BOOT 짧게(1초 미만) = 클릭(감속 시험), 1~3초 = 더블클릭(복귀 시험)
 //  - BOOT 3초 넘게 누름 = 페어링 창 1분(파란 불 두 번씩 깜빡). 새 기기(커맨더·폰)는 이때만 페어링된다(창 밖 새 페어링은 지우고 끊음).
-//    커맨더는 엔하우토 Add S3XY Button, 폰은 앱 설정 ⑥ [보드 페어링]
+//    커맨더는 엔하우토 Add S3XY Button, 폰은 앱 설정 ④ [보드 페어링]
 //  - BOOT 10초 넘게 누름 = 저장된 페어링 모두 지우고 다시 시작(커맨더·폰 모두)
 //  - 암호화(페어링된 키) 안 된 접속은 커맨더로 보지 않고 30초 뒤 끊는다
 //  - 파란 불: 켜져 있음 = 커맨더 연결·준비 / 빠르게 깜빡 = 접속은 됐지만 준비 전 / 2초마다 짧게 = 커맨더 기다리는 중
@@ -607,7 +607,7 @@ void loop() {
     longFired = true;
     pairWindowUntil = millis() + PAIR_WINDOW_MS;
     if (pairWindowUntil == 0) pairWindowUntil = 1;
-    logf("페어링 창 열림(1분) — 엔하우토 Add S3XY Button 또는 앱 설정 ⑥ [보드 페어링]. 10초까지 누르고 있으면 페어링 모두 지움");
+    logf("페어링 창 열림(1분) — 엔하우토 Add S3XY Button 또는 앱 설정 ④ [보드 페어링]. 10초까지 누르고 있으면 페어링 모두 지움");
   }
   if (!down && wasDown && !longFired) {
     unsigned long held = millis() - downAt;

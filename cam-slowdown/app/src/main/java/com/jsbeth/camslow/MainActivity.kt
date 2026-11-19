@@ -196,7 +196,7 @@ class MainActivity : AppCompatActivity() {
         if (TeslaLink.loginRecent(this)) done()
         else AlertDialog.Builder(this)
             .setTitle("테슬라 연결 링크")
-            .setMessage("테슬라 연결 링크를 받았습니다(세션 ${TeslaDest.mask(session)}).\n설정 ⑨에서 직접 '테슬라 연결'을 누른 게 아니라면 취소하세요.")
+            .setMessage("테슬라 연결 링크를 받았습니다(세션 ${TeslaDest.mask(session)}).\n설정 ⑦에서 직접 '테슬라 연결'을 누른 게 아니라면 취소하세요.")
             .setPositiveButton("연결") { _, _ -> done() }
             .setNegativeButton("취소", null).show()
     }
@@ -536,7 +536,7 @@ class MainActivity : AppCompatActivity() {
         return sheet
     }
 
-    /** v0.16.0 메뉴의 소리 크기 막대 둘. 소리 채널(설정 ⑦, 기본 알람) 음량 안에서의 비율로, 0이면 끔(따로 켬·끔 없음). */
+    /** v0.16.0 메뉴의 소리 크기 막대 둘. 소리 채널(설정 ⑤, 기본 알람) 음량 안에서의 비율로, 0이면 끔(따로 켬·끔 없음). */
     private fun volumeBox(): LinearLayout {
         val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; background = rounded(M_ITEM, 12f); setPadding(dp(12), dp(8), dp(12), dp(8)) }
         fun slider(label: String, get: () -> Int, set: (Int) -> Unit) {
@@ -562,7 +562,7 @@ class MainActivity : AppCompatActivity() {
         }
         slider("카카오 길안내 음성", { Prefs.kakaoVolume(this) }) { Prefs.setKakaoVolume(this, it); KakaoSafety.applyVolume() }
         slider("앱 안내 음성 (감속합니다·복귀합니다 등)", { Prefs.appVolume(this) }) { Prefs.setAppVolume(this, it) }
-        box.addView(tv(11f, M_MUTED).apply { text = "소리 채널(설정 ⑦) 음량 안에서의 크기 · 0%면 끔" + if (!Prefs.alertsOn(this@MainActivity)) "\n지금 설정 ⑦ 음성·효과음이 꺼져 있어 모두 무음" else "" })
+        box.addView(tv(11f, M_MUTED).apply { text = "소리 채널(설정 ⑤) 음량 안에서의 크기 · 0%면 끔" + if (!Prefs.alertsOn(this@MainActivity)) "\n지금 설정 ⑤ 음성·효과음이 꺼져 있어 모두 무음" else "" })
         return box
     }
 
@@ -580,7 +580,7 @@ class MainActivity : AppCompatActivity() {
     /** v0.16.8 [커맨더 다시 연결]: 보드 경유면 보드에 바로 다시 접속, 폰 직접이면 같은 광고를 바로 다시 켬. */
     private fun reconnectCommander() {
         val msg = when {
-            !Prefs.bleOn(this) -> "설정 ⑥ 'S3XY 커맨더로 차 휠 조작'이 꺼져 있습니다"
+            !Prefs.bleOn(this) -> "설정 ④ 'S3XY 커맨더로 차 휠 조작'이 꺼져 있습니다"
             !S3xyButton.running -> "감시를 켜면 커맨더에 연결합니다"
             else -> S3xyButton.reconnectNow()
         }
@@ -904,8 +904,8 @@ class MainActivity : AppCompatActivity() {
     /** 테슬라 목적지를 지금 확인. 감시 중이면 서비스가 확인·적용(결과는 기록), 아니면 확인만 하고 결과를 토스트로. */
     private fun checkDestNow() {
         when {
-            !TeslaLink.connected(this) -> { Toast.makeText(this, "테슬라 연결이 필요합니다 — 설정 ⑨", Toast.LENGTH_LONG).show(); startActivity(Intent(this, SettingsActivity::class.java)); return }
-            !Prefs.teslaFollow(this) -> { Toast.makeText(this, "설정 ⑨ '목적지 따라가기'가 꺼져 있습니다", Toast.LENGTH_LONG).show(); startActivity(Intent(this, SettingsActivity::class.java)); return }
+            !TeslaLink.connected(this) -> { Toast.makeText(this, "테슬라 연결이 필요합니다 — 설정 ⑦", Toast.LENGTH_LONG).show(); startActivity(Intent(this, SettingsActivity::class.java)); return }
+            !Prefs.teslaFollow(this) -> { Toast.makeText(this, "설정 ⑦ '목적지 따라가기'가 꺼져 있습니다", Toast.LENGTH_LONG).show(); startActivity(Intent(this, SettingsActivity::class.java)); return }
         }
         Toast.makeText(this, "테슬라 목적지 확인 중…", Toast.LENGTH_SHORT).show()
         if (DriveState.running && !DriveState.simulating) { DriveService.send(this, DriveService.ACTION_TESLA_CHECK); return }
@@ -950,7 +950,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * 프로필 고르기. 설정 1·2번과 같은 값. 평소 프로필은 감시 중이어도 바로 적용된다(서비스가 설정을 다시 읽음).
+     * 프로필 고르기. 카드 메뉴 평소·카메라 앞과 같은 값. 평소 프로필은 감시 중이어도 바로 적용된다(서비스가 설정을 다시 읽음).
      * 감속 중이 아니면 차가 새 평소 프로필에 있다고 보고, 감속 중이면 복귀 때 내린 만큼 올려 새 평소 프로필로 간다.
      */
     private fun pickProfile(usual: Boolean, after: (() -> Unit)? = null) {
@@ -1003,14 +1003,14 @@ class MainActivity : AppCompatActivity() {
         AlertDialog.Builder(this).setTitle("커맨더가 안 붙습니다")
             .setMessage("앱을 다시 켜면 폰 블루투스 주소가 바뀌어 커맨더가 폰을 못 알아볼 때가 있습니다.\n\n" +
                 "차를 세운 뒤:\n1. 아래 [페어링 모드 켜기]\n2. enhauto 앱 → Buttons → Add S3XY Button\n3. 폰에 뜨는 페어링 요청 [승인]\n4. (필요하면) 버튼 기능: 클릭 = 크루징 속도 내림, 더블클릭 = 올림\n\n" +
-                "설정 ⑥ \"감시를 꺼도 커맨더 버튼 유지\"를 켜 두면 이런 일이 줄어듭니다.")
+                "설정 ④ \"감시를 꺼도 커맨더 버튼 유지\"를 켜 두면 이런 일이 줄어듭니다.")
             .setPositiveButton("페어링 모드 켜기") { _, _ -> S3xyButton.beginPairing(); DriveState.log("페어링 모드 켬 — enhauto에서 Add S3XY Button"); render() }
             .setNegativeButton("닫기", null)
             .show()
     }
 
     private fun togglePairing() {
-        if (Prefs.viaBoard(this)) { Toast.makeText(this, "보드 경유 중입니다 — 보드는 엔하우토에 보드를 등록하고, 폰은 설정 ⑥ [보드 페어링]", Toast.LENGTH_LONG).show(); return }
+        if (Prefs.viaBoard(this)) { Toast.makeText(this, "보드 경유 중입니다 — 보드는 엔하우토에 보드를 등록하고, 폰은 설정 ④ [보드 페어링]", Toast.LENGTH_LONG).show(); return }
         if (S3xyButton.running && S3xyButton.pairingMode) { S3xyButton.stop(); render(); return }
         if (S3xyButton.running) { Toast.makeText(this, "주행 감시가 켜 둔 상태입니다 — 이미 광고 중", Toast.LENGTH_SHORT).show(); return }
         val ok = S3xyButton.start(this, { DriveState.log(it) }, Prefs.renameAdapter(this))
@@ -1183,7 +1183,7 @@ class MainActivity : AppCompatActivity() {
                 nv.useDarkMode = t.night
                 nv.useJcImg = true      // 교차로 확대 그림
                 // v0.14.0: 카카오 화면 효과음(반복 삐)이 시끄러워 끔. 길안내 음성은 우리가 직접 틀고, 직접 재생이 실패해 카카오에 맡길 때만 켠다
-                nv.sndVolume = KakaoSafety.viewVolume() // v0.16.0: 맡길 때는 카카오 음성 크기(설정 ⑦ 끄면 0)
+                nv.sndVolume = KakaoSafety.viewVolume() // v0.16.0: 맡길 때는 카카오 음성 크기(설정 ⑤ 끄면 0)
                 mapFrame.addView(nv, FrameLayout.LayoutParams(-1, -1))
                 pill.bringToFront()
                 naviView = nv
@@ -1522,7 +1522,7 @@ class MainActivity : AppCompatActivity() {
         } else {
             destName.text = "목적지 없음 · 카메라만 감시"
             destSub.text = when {
-                !teslaOn -> "테슬라 목적지 따라가기 꺼짐 (설정 ⑨)"
+                !teslaOn -> "테슬라 목적지 따라가기 꺼짐 (설정 ⑦)"
                 running -> "마지막 확인: " + Prefs.teslaLastNote(this).ifEmpty { "아직" } + " · ↻로 바로 확인"
                 else -> "감시를 켜면 테슬라 목적지를 확인합니다"
             }
@@ -1651,7 +1651,7 @@ class MainActivity : AppCompatActivity() {
         val overlayLine = when {
             !Prefs.overlayOn(this) -> "–  다른 앱 위 알약 창 꺼짐"
             OverlayWindow.canDraw(this) -> "✔  다른 앱 위 알약 창 (감시 중 앱을 벗어나면 뜸)"
-            else -> "✖  알약 창에 '다른 앱 위에 표시' 권한 필요 — 설정 7번"
+            else -> "✖  알약 창에 '다른 앱 위에 표시' 권한 필요 — 설정 ⑤"
         }
         val autoLine = if (!autoOn) "–  자동 시작 꺼짐" else {
             val missing = AutoStart.missing(this)
@@ -1680,7 +1680,7 @@ class MainActivity : AppCompatActivity() {
         val mapLine = if (mapPane.usingKakao) "✔  지도: 카카오맵" else "–  지도: 간이 지도" + (if (!KakaoSafety.hasKey) "(앱 키 없음)" else "(인터넷·지도 로드 확인)")
         val teslaLine = when {
             !Prefs.teslaFollow(this) -> "–  테슬라 목적지 따라가기 꺼짐"
-            !TeslaLink.connected(this) -> "✖  테슬라 연결 필요 — 설정 ⑨"
+            !TeslaLink.connected(this) -> "✖  테슬라 연결 필요 — 설정 ⑦"
             else -> "✔  테슬라 연결됨 · " + Prefs.teslaLastNote(this).ifEmpty { "확인 전" }
         }
         val checks = listOfNotNull(gpsLine, kakaoLine, naviLine, mapLine, teslaLine, dataLine, roadsLine, cmdLine, soundLine, overlayLine, autoLine, zoneLine) +
