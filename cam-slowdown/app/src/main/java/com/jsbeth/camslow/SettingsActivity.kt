@@ -146,6 +146,7 @@ class SettingsActivity : Activity() {
         ui.hint("테슬라는 미디어 소스가 블루투스(폰)일 때만 폰의 미디어 소리를 틀어 줍니다. 그래서 기본은 폰 스피커(알람 채널)입니다. 차 스피커(통화 채널)는 차에서 테스트 버튼으로 직접 들어 보고 고르세요.")
         ui.row(ui.button("안내 소리 테스트") { outputs.test(); refreshStatus() })
         ttsStatus = ui.text("", 13f)
+        ui.switchRow("교통정보 표시", "카카오 화면에 막히는 길을 색으로. 바꾸면 다음 감시 시작이나 경로가 새로 잡힐 때부터", Prefs.kakaoTraffic(this)) { Prefs.setKakaoTraffic(this, it) }
         ui.switchRow("감시 중 화면 켜 두기", "거치대에 올려 두고 볼 때", Prefs.keepScreenOn(this)) { Prefs.setKeepScreenOn(this, it) }
         val themes = listOf("AUTO", "DAY", "NIGHT")
         ui.radioGroup(listOf("낮·밤 자동 (폰 다크 모드를 따라감 — 폰 설정에서 일몰 예약 가능)", "항상 낮 (파스텔)", "항상 밤 (네온)"), themes.indexOf(Prefs.theme(this)).coerceAtLeast(0)) { i -> Prefs.setTheme(this, themes[i]) }

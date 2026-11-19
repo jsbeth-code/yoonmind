@@ -316,6 +316,8 @@ object KakaoSafety : KNGuidance_SafetyGuideDelegate, KNGuidance_LocationGuideDel
         val v = naviView
         if (v != null) {
             try {
+                // v0.16.7 교통정보(막히는 길 색) 표시 — 화면 준비 때만 읽히므로 그 직전에
+                app?.let { runCatching { v.trafficMode = Prefs.kakaoTraffic(it) } }
                 v.initWithGuidance(g, trip, prio(routeOpt), avoid(routeOpt))
                 initedView = v
                 setDelegates(g) // 화면이 바꿨을 수 있으니 다시
