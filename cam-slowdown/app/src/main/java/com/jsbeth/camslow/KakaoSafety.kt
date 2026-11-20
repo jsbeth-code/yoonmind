@@ -326,7 +326,8 @@ object KakaoSafety : KNGuidance_SafetyGuideDelegate, KNGuidance_LocationGuideDel
                 val started = beganAt
                 main.postDelayed({ ensureDelegates() }, 1_000)
                 // v0.16.9 목적지를 바꾸면 경로선이 [현위치로]를 누를 때까지 안 그려지던 것(실차 2026-11-19) — 같은 동작을 대신 한다
-                if (trip != null) for (ms in longArrayOf(1_500, 4_000)) main.postDelayed({ if (beganAt == started) recenterView("경로 시작") }, ms)
+                // v0.16.11 처음 목적지에서도 안 나오던 것(실차 2026-11-20) — 8·15초 뒤에도 한 번 더
+                if (trip != null) for (ms in longArrayOf(1_500, 4_000, 8_000, 15_000)) main.postDelayed({ if (beganAt == started) recenterView("경로 시작") }, ms)
                 main.postDelayed({
                     // GPS가 잡혀 있는데도(시작 뒤 실제 위치를 받음) 카카오 정보가 없을 때만
                     if (running && guidance === g && beganAt == started && updatedAt < started && lastHereAt > started) {
@@ -347,15 +348,30 @@ object KakaoSafety : KNGuidance_SafetyGuideDelegate, KNGuidance_LocationGuideDel
 
     /** v0.16.9 카카오 화면의 [현위치로] 버튼과 같은 동작(지도를 내 위치·주행 시점으로 되돌리며 경로선을 다시 그림). 메인 스레드. */
     private var recenterFailLogged = false
+    private var recenterHowLogged = false
     fun recenterView(why: String) {
         val v = naviView?.takeIf { it === initedView } ?: return
         try {
             val cp = findCurPos(v)
             if (cp == null) { if (!recenterFailLogged) { recenterFailLogged = true; log("카카오 [현위치로]를 못 찾음($why)") }; return }
-            cp.delegate?.curPositionViewToCurLocation()
+            // v0.16.11 손가락으로 누른 것과 똑같이 버튼을 누름 처리(버튼 자체나 그 안의 누를 수 있는 것). 없으면 예전처럼 연결된 동작을 직접
+            val btn = findClickable(cp)
+            val how = when {
+                btn != null -> { btn.performClick(); "누름" }
+                cp.delegate != null -> { cp.delegate?.curPositionViewToCurLocation(); "동작 직접" }
+                else -> null
+            }
+            if (how == null) { if (!recenterFailLogged) { recenterFailLogged = true; log("카카오 [현위치로]: 누를 곳·연결된 동작 모두 없음($why)") } }
+            else if (!recenterHowLogged) { recenterHowLogged = true; log("카카오 [현위치로] 대신 $how($why)") }
         } catch (e: Throwable) {
             if (!recenterFailLogged) { recenterFailLogged = true; log("카카오 [현위치로] 실패($why): ${e.javaClass.simpleName}") }
         }
+    }
+
+    private fun findClickable(v: android.view.View): android.view.View? {
+        if (v.isClickable && v.isEnabled) return v
+        if (v is android.view.ViewGroup) for (i in 0 until v.childCount) findClickable(v.getChildAt(i))?.let { return it }
+        return null
     }
 
     private fun findCurPos(v: android.view.View): KNComponentCurPositionView? {
