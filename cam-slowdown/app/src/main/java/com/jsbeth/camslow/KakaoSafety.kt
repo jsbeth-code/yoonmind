@@ -815,6 +815,10 @@ object KakaoSafety : KNGuidance_SafetyGuideDelegate, KNGuidance_LocationGuideDel
     override fun guidanceOutOfRoute(guidance: KNGuidance) { fwd { it.guidanceOutOfRoute(guidance) } }
     override fun guidanceRouteChanged(guidance: KNGuidance, fromRoute: KNRoute, fromLocation: KNLocation, toRoute: KNRoute, toLocation: KNLocation, changeReason: KNGuideRouteChangeReason) {
         fwd { it.guidanceRouteChanged(guidance) }
+        // v0.16.12 카카오가 경로를 바꾸면(재탐색 등) 경로선이 회색이 되거나 사라졌다가 늦게 돌아오던 것(실차 2026-11-22) — [현위치로]를 대신 누름
+        log("카카오 경로 바뀜: $changeReason")
+        val at = beganAt
+        for (ms in longArrayOf(1_500, 4_000)) main.postDelayed({ if (running && beganAt == at) recenterView("경로 바뀜") }, ms)
     }
     override fun guidanceGuideEnded(guidance: KNGuidance) {
         fwd { it.guidanceGuideEnded(guidance) }
