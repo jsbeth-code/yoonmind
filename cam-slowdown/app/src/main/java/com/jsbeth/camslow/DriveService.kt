@@ -983,7 +983,7 @@ class DriveService : Service(), LocationListener {
             // 정차로 쉬던 테슬라 확인을 다시 움직이면 곧바로
             if (teslaParked) { teslaParked = false; main.removeCallbacks(teslaPoll); main.postDelayed(teslaPoll, 1_000) }
         }
-        if (!fix.estimated && !DriveState.simulating) KakaoSafety.setHere(fix.lat, fix.lon)
+        if (!fix.estimated && !DriveState.simulating) KakaoSafety.setHere(fix.lat, fix.lon, fix.speedMps)
         // 카카오 안전 운행이 신선하면 그 앞 카메라로, 아니면 내장 판단(가상 주행은 늘 내장)
         val slowNow = !fix.estimated && fix.speedMps * 3.6 < 10.0
         e.external = if (DriveState.simulating) null else KakaoSafety.feed(Prefs.includeMobile(this), slowNow)

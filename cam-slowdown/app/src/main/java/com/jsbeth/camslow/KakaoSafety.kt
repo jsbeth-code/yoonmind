@@ -185,9 +185,36 @@ object KakaoSafety : KNGuidance_SafetyGuideDelegate, KNGuidance_LocationGuideDel
         routeOpt = Prefs.routeOpt(app)
         if (!hasKey) { status = "카카오 앱 키 없음(빌드에 안 들어감)"; log(status); return }
         wanted = true
+        watchNetwork(app)
         if (running) return
         retryN = 0
         connect()
+    }
+
+    // v0.16.14 처음엔 인터넷이 없어 카카오가 끊겨 있는 일이 많다 — 인터넷이 들어오면 1~5분 기다리지 않고 바로 다시 붙이고 경로를 찾는다
+    private var netCb: android.net.ConnectivityManager.NetworkCallback? = null
+    private fun watchNetwork(app: Application) {
+        if (netCb != null) return
+        val cm = app.getSystemService(android.net.ConnectivityManager::class.java) ?: return
+        val cb = object : android.net.ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: android.net.Network) { main.post { onNetworkBack() } }
+        }
+        try { cm.registerDefaultNetworkCallback(cb); netCb = cb } catch (e: Throwable) { log("인터넷 감시 등록 실패: ${e.javaClass.simpleName}") }
+    }
+    private fun unwatchNetwork() {
+        val cb = netCb ?: return
+        netCb = null
+        runCatching { app?.getSystemService(android.net.ConnectivityManager::class.java)?.unregisterNetworkCallback(cb) }
+    }
+    private fun onNetworkBack() {
+        if (!wanted) return
+        if (!running && initPendingSince == 0L) { log("인터넷 연결됨 — 카카오 바로 다시 연결"); retryN++; connect(); return }
+        val d = destination
+        if (running && ready && guidance != null && d != null && d !== endedDest && !following && !tripPending) {
+            log("인터넷 연결됨 — 경로 바로 다시 찾기")
+            tripFails = 0; lastTripTry = 0L
+            setDestination(d)
+        }
     }
 
     /** 연결 실패: 감시 중이면 1분 뒤 다시. */
@@ -329,18 +356,14 @@ object KakaoSafety : KNGuidance_SafetyGuideDelegate, KNGuidance_LocationGuideDel
                 // v0.16.13 [현위치로] 대신 누르기(v0.16.9~v0.16.12)는 뺌 — 경로선이 없던 원인은 경로를 3초 안에 두 번 시작하며 "안내 끝"이 화면에 간 것(실차 2026-11-22, [카카오 다시 붙이기]로 나옴)
                 main.postDelayed({
                     // GPS가 잡혀 있는데도(시작 뒤 실제 위치를 받음) 카카오 정보가 없을 때만
-                    if (running && guidance === g && beganAt == started && updatedAt < started && lastHereAt > started) {
+                    // v0.16.14 서 있으면(시속 10 km 미만) 카카오가 정보를 안 보내는 것이라 하지 않음. 직접 시작(화면을 거치지 않음 — 경로선이 사라짐)은 뺌
+                    if (running && guidance === g && beganAt == started && updatedAt < started && lastHereAt > started && movingFor(3_000)) {
                         ensureDelegates()
                         if (retry == 0 && naviView === v) {
-                            // v0.16.13 화면이 모르는 안내가 되지 않게 먼저 화면을 통해 한 번 더
                             log("카카오 화면으로 시작했지만 정보가 안 옴 — 화면으로 한 번 더 시작")
                             selfStop(g)
                             runCatching { begin(g, trip, retry = 1) }
-                        } else {
-                            log("카카오 화면으로 시작했지만 정보가 안 옴 — 안내를 직접 시작")
-                            lastSelfStop = System.currentTimeMillis(); beganAt = lastSelfStop // 재시작의 "끝" 알림을 도착으로 보지 않게
-                            runCatching { g.startWithTrip(trip, prio(routeOpt), avoid(routeOpt)) }
-                        }
+                        } else log("카카오 화면으로 다시 시작했지만 여전히 정보가 안 옴 — 1분 뒤 다시 붙이기에 맡김")
                     }
                 }, 6_000)
                 return
@@ -463,6 +486,7 @@ object KakaoSafety : KNGuidance_SafetyGuideDelegate, KNGuidance_LocationGuideDel
         if (!running || !ready || tripPending || switching) return
         val last = if (updatedAt > 0) updatedAt else beganAt
         if (last == 0L || now - last < 60_000 || now - lastRevive < 300_000) return
+        if (!movingFor(20_000)) return // v0.16.14 서 있으면 카카오가 정보를 안 보내는 것(끊김 아님)
         lastRevive = now
         log("카카오 정보가 1분 넘게 없음 — 안내를 다시 붙입니다")
         val d = destination; val wasFollowing = following
@@ -484,6 +508,7 @@ object KakaoSafety : KNGuidance_SafetyGuideDelegate, KNGuidance_LocationGuideDel
     /** 주행 감시 정지 때. */
     fun stop() {
         wanted = false
+        unwatchNetwork()
         main.removeCallbacks(retryRun); main.removeCallbacks(stallRun)
         if (initPendingSince > 0L) { initSeq++; initPendingSince = 0L }
         retryN = 0
@@ -506,6 +531,11 @@ object KakaoSafety : KNGuidance_SafetyGuideDelegate, KNGuidance_LocationGuideDel
     @Volatile private var lastLat = 0.0
     @Volatile private var lastLon = 0.0
     private var lastTripTry = 0L
+    /** v0.16.14 시속 10 km 넘게 계속 움직이기 시작한 시각(느려지면 0) */
+    @Volatile private var movingSince = 0L
+    private const val MOVING_KMH = 10.0
+    /** 지금 움직이는 중인지(움직인 지 ms 넘게) */
+    private fun movingFor(ms: Long): Boolean = movingSince != 0L && System.currentTimeMillis() - movingSince >= ms
     @Volatile private var tripPending = false
     /** 경로선 위 진행(경로 이탈 판단용). 경로선이 바뀌면 처음부터. */
     private var progRoute: DoubleArray? = null
@@ -515,9 +545,11 @@ object KakaoSafety : KNGuidance_SafetyGuideDelegate, KNGuidance_LocationGuideDel
     @Volatile var offRoute = false
         private set
 
-    fun setHere(lat: Double, lon: Double) {
+    fun setHere(lat: Double, lon: Double, speedMps: Double = 0.0) {
         lastLat = lat; lastLon = lon
         lastHereAt = System.currentTimeMillis()
+        // v0.16.14 서 있거나 아주 느리면(시속 10 km 미만) 카카오가 정보를 안 보내는 것을 끊김으로 보지 않도록
+        if (speedMps * 3.6 >= MOVING_KMH) { if (movingSince == 0L) movingSince = lastHereAt } else movingSince = 0L
         val r = routeLine
         if (following && r != null) {
             if (r !== progRoute) { progRoute = r; progSeg = 0; offMisses = 0; offRoute = false }
