@@ -31,7 +31,6 @@ import com.kakaomobility.knsdk.guidance.knguidance.KNGuidance_GuideStateDelegate
 import com.kakaomobility.knsdk.guidance.knguidance.citsguide.KNGuide_Cits
 import com.kakaomobility.knsdk.guidance.knguidance.common.KNLocation
 import com.kakaomobility.knsdk.guidance.knguidance.routeguide.objects.KNMultiRouteInfo
-import com.kakaomobility.knsdk.ui.component.KNComponentCurPositionView
 import com.kakaomobility.knsdk.ui.view.KNNaviView
 import com.kakaomobility.knsdk.ui.view.KNNaviView_GuideStateDelegate
 import java.util.UUID
@@ -310,11 +309,13 @@ object KakaoSafety : KNGuidance_SafetyGuideDelegate, KNGuidance_LocationGuideDel
     private fun avoid(o: RouteOpt) = if (o == RouteOpt.FREE) KNRouteAvoidOption.KNRouteAvoidOption_Fare.value else 0
 
     /** 안내 시작(trip이 null이면 안전 운행). 화면이 붙어 있으면 화면을 통해 시작한다(화면이 안내를 그린다). */
-    private fun begin(g: KNGuidance, trip: KNTrip?) {
+    private fun begin(g: KNGuidance, trip: KNTrip?, retry: Int = 0) {
         curTrip = trip
         lastSelfStop = System.currentTimeMillis() // 시작이 앞 안내를 끝내며 보내는 "끝" 알림은 무시
         beganAt = lastSelfStop
         val v = naviView
+        // v0.16.13 진단: 안내를 시작할 때마다 화면·경로 유무
+        log("카카오 안내 시작: " + (if (trip != null) "경로" else "안전 운행") + " · " + (if (v != null) "화면 있음" else "화면 없음") + (if (retry > 0) " · 다시 시도 $retry" else ""))
         if (v != null) {
             try {
                 // v0.16.7 교통정보(막히는 길 색) 표시 — 화면 준비 때만 읽히므로 그 직전에
@@ -325,16 +326,21 @@ object KakaoSafety : KNGuidance_SafetyGuideDelegate, KNGuidance_LocationGuideDel
                 // 화면이 나중에 콜백을 가져가거나 안내를 안 시작하면: 다시 붙이고, 그래도 정보가 없으면 직접 시작
                 val started = beganAt
                 main.postDelayed({ ensureDelegates() }, 1_000)
-                // v0.16.9 목적지를 바꾸면 경로선이 [현위치로]를 누를 때까지 안 그려지던 것(실차 2026-11-19) — 같은 동작을 대신 한다
-                // v0.16.11 처음 목적지에서도 안 나오던 것(실차 2026-11-20) — 8·15초 뒤에도 한 번 더
-                if (trip != null) for (ms in longArrayOf(1_500, 4_000, 8_000, 15_000)) main.postDelayed({ if (beganAt == started) recenterView("경로 시작") }, ms)
+                // v0.16.13 [현위치로] 대신 누르기(v0.16.9~v0.16.12)는 뺌 — 경로선이 없던 원인은 경로를 3초 안에 두 번 시작하며 "안내 끝"이 화면에 간 것(실차 2026-11-22, [카카오 다시 붙이기]로 나옴)
                 main.postDelayed({
                     // GPS가 잡혀 있는데도(시작 뒤 실제 위치를 받음) 카카오 정보가 없을 때만
                     if (running && guidance === g && beganAt == started && updatedAt < started && lastHereAt > started) {
-                        log("카카오 화면으로 시작했지만 정보가 안 옴 — 안내를 직접 시작")
                         ensureDelegates()
-                        lastSelfStop = System.currentTimeMillis(); beganAt = lastSelfStop // 재시작의 "끝" 알림을 도착으로 보지 않게
-                        runCatching { g.startWithTrip(trip, prio(routeOpt), avoid(routeOpt)) }
+                        if (retry == 0 && naviView === v) {
+                            // v0.16.13 화면이 모르는 안내가 되지 않게 먼저 화면을 통해 한 번 더
+                            log("카카오 화면으로 시작했지만 정보가 안 옴 — 화면으로 한 번 더 시작")
+                            selfStop(g)
+                            runCatching { begin(g, trip, retry = 1) }
+                        } else {
+                            log("카카오 화면으로 시작했지만 정보가 안 옴 — 안내를 직접 시작")
+                            lastSelfStop = System.currentTimeMillis(); beganAt = lastSelfStop // 재시작의 "끝" 알림을 도착으로 보지 않게
+                            runCatching { g.startWithTrip(trip, prio(routeOpt), avoid(routeOpt)) }
+                        }
                     }
                 }, 6_000)
                 return
@@ -344,40 +350,6 @@ object KakaoSafety : KNGuidance_SafetyGuideDelegate, KNGuidance_LocationGuideDel
             }
         }
         g.startWithTrip(trip, prio(routeOpt), avoid(routeOpt))
-    }
-
-    /** v0.16.9 카카오 화면의 [현위치로] 버튼과 같은 동작(지도를 내 위치·주행 시점으로 되돌리며 경로선을 다시 그림). 메인 스레드. */
-    private var recenterFailLogged = false
-    private var recenterHowLogged = false
-    fun recenterView(why: String) {
-        val v = naviView?.takeIf { it === initedView } ?: return
-        try {
-            val cp = findCurPos(v)
-            if (cp == null) { if (!recenterFailLogged) { recenterFailLogged = true; log("카카오 [현위치로]를 못 찾음($why)") }; return }
-            // v0.16.11 손가락으로 누른 것과 똑같이 버튼을 누름 처리(버튼 자체나 그 안의 누를 수 있는 것). 없으면 예전처럼 연결된 동작을 직접
-            val btn = findClickable(cp)
-            val how = when {
-                btn != null -> { btn.performClick(); "누름" }
-                cp.delegate != null -> { cp.delegate?.curPositionViewToCurLocation(); "동작 직접" }
-                else -> null
-            }
-            if (how == null) { if (!recenterFailLogged) { recenterFailLogged = true; log("카카오 [현위치로]: 누를 곳·연결된 동작 모두 없음($why)") } }
-            else if (!recenterHowLogged) { recenterHowLogged = true; log("카카오 [현위치로] 대신 $how($why)") }
-        } catch (e: Throwable) {
-            if (!recenterFailLogged) { recenterFailLogged = true; log("카카오 [현위치로] 실패($why): ${e.javaClass.simpleName}") }
-        }
-    }
-
-    private fun findClickable(v: android.view.View): android.view.View? {
-        if (v.isClickable && v.isEnabled) return v
-        if (v is android.view.ViewGroup) for (i in 0 until v.childCount) findClickable(v.getChildAt(i))?.let { return it }
-        return null
-    }
-
-    private fun findCurPos(v: android.view.View): KNComponentCurPositionView? {
-        if (v is KNComponentCurPositionView) return v
-        if (v is android.view.ViewGroup) for (i in 0 until v.childCount) findCurPos(v.getChildAt(i))?.let { return it }
-        return null
     }
 
     /** 메인 화면이 카카오내비 화면을 붙인다. 안내가 돌고 있으면 화면으로 다시 시작한다(지금 위치에서 새 경로). 메인 스레드. */
@@ -569,6 +541,13 @@ object KakaoSafety : KNGuidance_SafetyGuideDelegate, KNGuidance_LocationGuideDel
      * 경로 안내 중에도 카카오 음성은 계속 끈다(shouldPlayVoiceGuide = false).
      */
     fun setDestination(d: TeslaDest.Dest?) {
+        // v0.16.13 같은 목적지로 이미 안내 중(또는 경로 찾는 중)이면 다시 시작하지 않는다 — 3초 안 두 번 시작하면 화면 경로선이 지워졌음(실차 2026-11-22)
+        val cur = destination
+        if (d != null && cur != null && !TeslaDest.changed(cur, d) && (following || (tripPending && System.currentTimeMillis() - lastTripTry < 60_000)) && running && ready && guidance != null) {
+            destination = d
+            log("같은 목적지로 이미 안내 중 — 다시 시작하지 않음")
+            return
+        }
         if (d !== destination) endedDest = null
         destination = d
         val g = guidance
@@ -808,23 +787,24 @@ object KakaoSafety : KNGuidance_SafetyGuideDelegate, KNGuidance_LocationGuideDel
 
     override fun didUpdateCitsGuide(guidance: KNGuidance, citsGuide: KNGuide_Cits) { fwd { it.didUpdateCitsGuide(guidance, citsGuide) } }
 
-    override fun guidanceGuideStarted(guidance: KNGuidance) { fwd { it.guidanceGuideStarted(guidance) } }
+    override fun guidanceGuideStarted(guidance: KNGuidance) { log("카카오 안내 시작 신호"); fwd { it.guidanceGuideStarted(guidance) } }
     override fun guidanceCheckingRouteChange(guidance: KNGuidance) { fwd { it.guidanceCheckingRouteChange(guidance) } }
     override fun guidanceRouteUnchanged(guidance: KNGuidance) { fwd { it.guidanceRouteUnchanged(guidance) } }
     override fun guidanceRouteUnchangedWithError(guidance: KNGuidance, error: KNError) { fwd { it.guidanceRouteUnchangedWithError(guidance, error) } }
     override fun guidanceOutOfRoute(guidance: KNGuidance) { fwd { it.guidanceOutOfRoute(guidance) } }
     override fun guidanceRouteChanged(guidance: KNGuidance, fromRoute: KNRoute, fromLocation: KNLocation, toRoute: KNRoute, toLocation: KNLocation, changeReason: KNGuideRouteChangeReason) {
         fwd { it.guidanceRouteChanged(guidance) }
-        // v0.16.12 카카오가 경로를 바꾸면(재탐색 등) 경로선이 회색이 되거나 사라졌다가 늦게 돌아오던 것(실차 2026-11-22) — [현위치로]를 대신 누름
         log("카카오 경로 바뀜: $changeReason")
-        val at = beganAt
-        for (ms in longArrayOf(1_500, 4_000)) main.postDelayed({ if (running && beganAt == at) recenterView("경로 바뀜") }, ms)
     }
     override fun guidanceGuideEnded(guidance: KNGuidance) {
-        fwd { it.guidanceGuideEnded(guidance) }
+        // v0.16.13 우리가 경로를 바꾸려고 멈춘 "끝"(3초 안·경로 찾는 중)은 화면에 넘기지 않는다 — 넘기면 화면이 새 경로선을 지움
+        val ours = System.currentTimeMillis() - lastSelfStop < 3_000 || tripPending
+        log("카카오 안내 끝 신호" + if (ours) "(우리가 멈춤 — 화면에 안 넘김)" else "")
+        if (!ours) fwd { it.guidanceGuideEnded(guidance) }
         guideEnded("도착")
     }
     override fun guidanceDidUpdateRoutes(guidance: KNGuidance, routes: List<KNRoute>, multiRouteInfo: KNMultiRouteInfo?) {
+        log("카카오 경로 받음: ${routes.size}개")
         fwd { it.guidanceDidUpdateRoutes(guidance, routes, multiRouteInfo) }
     }
     override fun guidanceDidUpdateIndoorRoute(guidance: KNGuidance, route: KNRoute?) {

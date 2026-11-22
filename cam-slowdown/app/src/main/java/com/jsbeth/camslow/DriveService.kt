@@ -852,6 +852,12 @@ class DriveService : Service(), LocationListener {
             main.removeCallbacks(teslaPoll)
             // 감시 중에 테슬라를 연결·켜도 따라가도록 늘 돈다(꺼져 있거나 연결 전이면 checkTesla가 건너뜀)
             main.postDelayed(teslaPoll, 3_000)
+            // v0.16.13 처음 확인에 차가 자는 중·실패면 2분을 기다리지 않고 15초·30초·1분 뒤 다시(목적지를 받거나 차가 응답하면 그만)
+            teslaFirstOk = false
+            val seq = ++teslaStartSeq
+            for (ms in longArrayOf(15_000, 30_000, 60_000)) main.postDelayed({
+                if (DriveState.running && seq == teslaStartSeq && !teslaFirstOk && Prefs.teslaPoll(this) != TeslaPoll.MANUAL) checkTesla(quick = true)
+            }, ms)
             notify("GPS 대기")
         }
     }
@@ -920,7 +926,11 @@ class DriveService : Service(), LocationListener {
         return true
     }
 
-    private fun checkTesla(force: Boolean = false) {
+    /** v0.16.13 감시 시작 뒤 차가 처음 응답했는지(빠른 재확인을 멈춤) */
+    private var teslaFirstOk = false
+    private var teslaStartSeq = 0
+
+    private fun checkTesla(force: Boolean = false, quick: Boolean = false) {
         if (!DriveState.running || DriveState.simulating) return
         if (dropDestIfOff() && !(force && TeslaLink.connected(this))) return
         TeslaLink.fetch(this) { r ->
@@ -930,7 +940,9 @@ class DriveService : Service(), LocationListener {
                 is TeslaDest.Reply.Online -> r.dest?.let { TeslaDest.label(it) } ?: "내비 목적지 없음"
                 is TeslaDest.Reply.Error -> "실패 — ${r.message}"
             })
-            teslaMiss = if (r is TeslaDest.Reply.Online) 0 else teslaMiss + 1
+            if (r is TeslaDest.Reply.Online) teslaFirstOk = true
+            // 시작 직후 빠른 재확인의 실패는 간격 늘리기(2회 5분·3회 10분)에 세지 않는다
+            if (!quick || r is TeslaDest.Reply.Online) teslaMiss = if (r is TeslaDest.Reply.Online) 0 else teslaMiss + 1
             when (r) {
                 is TeslaDest.Reply.Offline -> if (!teslaOfflineSaid) { teslaOfflineSaid = true; DriveState.log("테슬라: 차가 자는 중 — 목적지 확인 건너뜀") }
                 is TeslaDest.Reply.Error -> if (teslaErrSaid != r.message) { teslaErrSaid = r.message; DriveState.log("테슬라 목적지 확인 실패: ${r.message}") }
@@ -1126,7 +1138,7 @@ class DriveService : Service(), LocationListener {
         if (DriveState.simple) { DriveState.simple = false; KakaoSafety.applyVolume() }
         main.removeCallbacks(watchdog)
         main.removeCallbacks(drRunnable)
-        main.removeCallbacks(teslaPoll); appliedDest = null; DriveState.teslaDest = null
+        main.removeCallbacks(teslaPoll); appliedDest = null; DriveState.teslaDest = null; teslaStartSeq++
         DriveState.drActive = false
         main.removeCallbacks(autoStopRunnable); autoStopPending = false
         main.removeCallbacks(boardStopRunnable); boardStopPending = false

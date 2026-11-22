@@ -1259,14 +1259,12 @@ class MainActivity : AppCompatActivity() {
     }
 
     /** 새 목적지 경로가 시작되면 10초 동안 경로 종류 고르기 창. 안 누르면 그대로(설정의 기본값). */
-    /** v0.16.9 경로 고르기 화면이 닫힌 뒤 카카오 지도가 경로선 없이 남지 않게 [현위치로]와 같은 동작. */
-    private fun recenterAfterChooser() { main.postDelayed({ KakaoSafety.recenterView("경로 고르기 닫힘") }, 600) }
 
     private fun updateRouteChooser(running: Boolean) {
         val left = KakaoSafety.askRouteUntil - System.currentTimeMillis()
         if (!running || left <= 0 || !resumed) {
             routeDialog?.dismiss(); routeDialog = null
-            if (routeChooser != null) { routeChooser?.dismiss(); routeChooser = null; recenterAfterChooser() }
+            if (routeChooser != null) { routeChooser?.dismiss(); routeChooser = null }
             return
         }
         // 카메라 가까이·감속·구간 유지 중이면 전체 화면 창이 카메라 알림을 가리므로, 지나간 뒤에 띄운다(대기 시간 연장)
@@ -1292,7 +1290,6 @@ class MainActivity : AppCompatActivity() {
                 val n = RouteChooser(this, name, ch, KakaoSafety.routeOpt) { o ->
                     routeChooser = null
                     if (o != null) KakaoSafety.chooseRoute(o) else KakaoSafety.askRouteUntil = 0L
-                    recenterAfterChooser()
                 }
                 routeChooser = n
                 DriveState.log("경로 고르기 화면 — $name")
