@@ -185,6 +185,7 @@ object KakaoSafety : KNGuidance_SafetyGuideDelegate, KNGuidance_LocationGuideDel
         routeOpt = Prefs.routeOpt(app)
         if (!hasKey) { status = "카카오 앱 키 없음(빌드에 안 들어감)"; log(status); return }
         wanted = true
+        voiceKindsLogged.clear()
         watchNetwork(app)
         if (running) return
         retryN = 0
@@ -709,9 +710,18 @@ object KakaoSafety : KNGuidance_SafetyGuideDelegate, KNGuidance_LocationGuideDel
     override fun shouldPlayVoiceGuide(guidance: KNGuidance, voiceGuide: KNGuide_Voice, strings: MutableList<ByteArray>): Boolean {
         // v0.11.7: 카카오가 직접 내면 소리가 안 나와서(실차) 음성 데이터를 우리 소리 경로(알람 채널 등)로 직접 튼다
         val data = runCatching { voiceGuide.data }.getOrNull()?.takeIf { it.isNotEmpty() }?.map { it.copyOf() }
-        // v0.14.3 조사: 안내 종류별로 끌 수 있는지 보려고 음성에 붙은 정보를 기록(동작은 그대로)
-        val info = describeVoice(voiceGuide)
-        main.post { log("카카오 음성 정보: $info") }
+        // v0.16.15 안내 종류: 들은 종류를 모으고(설정 ⑤ 목록), 끈 종류는 내지 않는다. 기록은 종류마다 이번 감시에서 처음 한 번만
+        val kind = runCatching { KakaoVoice.kind(voiceGuide) }.getOrDefault("?")
+        val a = app
+        val muted = a != null && kind in Prefs.voiceMuted(a)
+        if (voiceKindsLogged.add(kind)) {
+            val info = describeVoice(voiceGuide)
+            main.post {
+                a?.let { Prefs.addVoiceSeen(it, kind) }
+                log("카카오 음성 종류: ${KakaoVoice.label(kind)}" + (if (muted) " — 끔(설정 ⑤)" else "") + " · $info")
+            }
+        }
+        if (muted) return false
         if (!voiceNoted) { voiceNoted = true; main.post { log("카카오 음성 첫 안내: 조각 ${data?.size ?: 0}개 · 화면 ${if (naviView != null) "있음" else "없음"}") } }
         // v0.16.0: 카카오 음성 크기 0%이거나 설정 ⑤ 음성·효과음이 꺼져 있으면 아무 데서도 내지 않는다(대기 줄에도 넣지 않음)
         if (voiceVolume() <= 0f) return false
@@ -721,6 +731,8 @@ object KakaoSafety : KNGuidance_SafetyGuideDelegate, KNGuidance_LocationGuideDel
         return try { v.shouldPlayVoiceGuide(guidance, voiceGuide, strings) } catch (e: Throwable) { true }
     }
     private var voiceNoted = false
+    /** v0.16.15 이번 감시에서 기록한 음성 종류(종류마다 처음 한 번만 기록) */
+    private val voiceKindsLogged: MutableSet<String> = java.util.Collections.synchronizedSet(HashSet())
     /** 음성 안내 객체의 값들을 글로(get·is 메서드 이름=값). 음성 데이터는 크기만. */
     private fun describeVoice(v: Any): String = runCatching {
         val parts = v.javaClass.methods

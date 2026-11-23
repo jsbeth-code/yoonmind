@@ -151,6 +151,16 @@ class SettingsActivity : Activity() {
             ui.row(ui.button("안내 소리 테스트") { outputs.test(); refreshStatus() })
             ttsStatus = ui.text("", 13f)
             ui.switchRow("교통정보 표시", "카카오 화면에 막히는 길을 색으로. 바꾸면 다음 감시 시작이나 경로가 새로 잡힐 때부터", Prefs.kakaoTraffic(this)) { Prefs.setKakaoTraffic(this, it) }
+            // v0.16.15 카카오 안내 종류별 끄기 — 주행 중 들은 종류가 저절로 쌓인다
+            ui.text("카카오 안내 종류별 끄기", 14f)
+            val seenKinds = Prefs.voiceSeen(this)
+            if (seenKinds.isEmpty()) ui.hint("아직 들은 카카오 안내가 없습니다. 주행하면 카카오가 말한 종류가 여기 하나씩 생깁니다.")
+            else {
+                ui.hint("주행 중 카카오가 말한 종류입니다(처음 듣는 종류는 그때 생김). 끄면 그 안내만 소리가 안 나고, 감시 중에도 바로 적용됩니다.")
+                val mutedKinds = Prefs.voiceMuted(this)
+                for (k in seenKinds.sortedBy { KakaoVoice.label(it) })
+                    ui.switchRow(KakaoVoice.label(k), if (KakaoVoice.risky(k)) "⚠ 끄면 길·카메라를 놓칠 수 있음" else "", k !in mutedKinds) { on -> Prefs.setVoiceMuted(this, k, !on) }
+            }
             ui.switchRow("감시 중 화면 켜 두기", "거치대에 올려 두고 볼 때", Prefs.keepScreenOn(this)) { Prefs.setKeepScreenOn(this, it) }
             val themes = listOf("AUTO", "DAY", "NIGHT")
             ui.radioGroup(listOf("낮·밤 자동 (폰 다크 모드를 따라감 — 폰 설정에서 일몰 예약 가능)", "항상 낮 (파스텔)", "항상 밤 (네온)"), themes.indexOf(Prefs.theme(this)).coerceAtLeast(0)) { i -> Prefs.setTheme(this, themes[i]) }
@@ -460,7 +470,8 @@ class SettingsActivity : Activity() {
 
     private fun guideSummary(): String {
         val simple = when (Prefs.simpleMode(this)) { "ON" -> "간단 모드 항상"; "OFF" -> "간단 모드 끔"; else -> "간단 모드 자동" }
-        return simple + (if (Prefs.alertsOn(this)) "" else " · 소리 끔") + " · 교통정보 " + (if (Prefs.kakaoTraffic(this)) "켬" else "끔")
+        val off = Prefs.voiceMuted(this).size
+        return simple + (if (Prefs.alertsOn(this)) "" else " · 소리 끔") + " · 교통정보 " + (if (Prefs.kakaoTraffic(this)) "켬" else "끔") + (if (off > 0) " · 안내 ${off}종 끔" else "")
     }
 
     override fun onResume() {

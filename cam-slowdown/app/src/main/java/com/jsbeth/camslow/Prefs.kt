@@ -202,6 +202,11 @@ object Prefs {
     /** v0.16.7 카카오 화면 교통정보(막히는 길 색) 표시. 카카오 화면을 준비할 때(initWithGuidance) 읽힌다. */
     fun kakaoTraffic(ctx: Context) = sp(ctx).getBoolean("kakaoTraffic", true)
     fun setKakaoTraffic(ctx: Context, v: Boolean) = put(ctx) { putBoolean("kakaoTraffic", v) }
+    /** v0.16.15 주행 중 들은 카카오 안내 종류(KakaoVoice.kind)와 끈 종류. */
+    fun voiceSeen(ctx: Context): Set<String> = sp(ctx).getStringSet("voiceSeen", null)?.toSet() ?: emptySet()
+    fun addVoiceSeen(ctx: Context, kind: String) { val cur = voiceSeen(ctx); if (kind !in cur) put(ctx) { putStringSet("voiceSeen", cur + kind) } }
+    fun voiceMuted(ctx: Context): Set<String> = sp(ctx).getStringSet("voiceMuted", null)?.toSet() ?: emptySet()
+    fun setVoiceMuted(ctx: Context, kind: String, muted: Boolean) { val cur = voiceMuted(ctx); put(ctx) { putStringSet("voiceMuted", if (muted) cur + kind else cur - kind) } }
     /** v0.16.3 간단 모드: OFF / AUTO(화면이 꺼지면) / ON. 카카오 음성 끔, 우리 안내는 카메라 500·200 m + 감속·복귀 + 안전 안내. */
     fun simpleMode(ctx: Context) = sp(ctx).getString("simpleMode", "AUTO") ?: "AUTO"
     fun setSimpleMode(ctx: Context, v: String) = put(ctx) { putString("simpleMode", v) }
