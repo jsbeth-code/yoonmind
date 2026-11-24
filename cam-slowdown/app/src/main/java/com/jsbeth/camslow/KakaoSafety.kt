@@ -713,12 +713,12 @@ object KakaoSafety : KNGuidance_SafetyGuideDelegate, KNGuidance_LocationGuideDel
         // v0.16.15 안내 종류: 들은 종류를 모으고(설정 ⑤ 목록), 끈 종류는 내지 않는다. 기록은 종류마다 이번 감시에서 처음 한 번만
         val kind = runCatching { KakaoVoice.kind(voiceGuide) }.getOrDefault("?")
         val a = app
-        val muted = a != null && kind in Prefs.voiceMuted(a)
+        val muted = a != null && KakaoVoice.group(kind) in Prefs.voiceMutedGroups(a)
         if (voiceKindsLogged.add(kind)) {
             val info = describeVoice(voiceGuide)
             main.post {
                 a?.let { Prefs.addVoiceSeen(it, kind) }
-                log("카카오 음성 종류: ${KakaoVoice.label(kind)}" + (if (muted) " — 끔(설정 ⑤)" else "") + " · $info")
+                log("카카오 음성 종류: ${KakaoVoice.label(kind)} [${KakaoVoice.groupLabel(KakaoVoice.group(kind))}]" + (if (muted) " — 끔(설정 ⑤)" else "") + " · $info")
             }
         }
         if (muted) return false

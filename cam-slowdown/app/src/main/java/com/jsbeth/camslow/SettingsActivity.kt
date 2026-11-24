@@ -156,10 +156,10 @@ class SettingsActivity : Activity() {
             val seenKinds = Prefs.voiceSeen(this)
             if (seenKinds.isEmpty()) ui.hint("아직 들은 카카오 안내가 없습니다. 주행하면 카카오가 말한 종류가 여기 하나씩 생깁니다.")
             else {
-                ui.hint("주행 중 카카오가 말한 종류입니다(처음 듣는 종류는 그때 생김). 끄면 그 안내만 소리가 안 나고, 감시 중에도 바로 적용됩니다.")
-                val mutedKinds = Prefs.voiceMuted(this)
-                for (k in seenKinds.sortedBy { KakaoVoice.label(it) })
-                    ui.switchRow(KakaoVoice.label(k), if (KakaoVoice.risky(k)) "⚠ 끄면 길·카메라를 놓칠 수 있음" else "", k !in mutedKinds) { on -> Prefs.setVoiceMuted(this, k, !on) }
+                ui.hint("주행 중 카카오가 말한 종류를 비슷한 것끼리 묶었습니다(처음 듣는 종류는 그때 생김). 끄면 그 묶음 안내만 소리가 안 나고, 감시 중에도 바로 적용됩니다.")
+                val mutedGroups = Prefs.voiceMutedGroups(this)
+                for (g in seenKinds.map { KakaoVoice.group(it) }.distinct().sortedWith(compareBy<String>({ KakaoVoice.groupOrder(it) }, { KakaoVoice.groupLabel(it) })))
+                    ui.switchRow(KakaoVoice.groupLabel(g), if (KakaoVoice.groupRisky(g)) "⚠ 끄면 길·카메라를 놓칠 수 있음" else "", g !in mutedGroups) { on -> Prefs.setVoiceGroupMuted(this, g, !on) }
             }
             ui.switchRow("감시 중 화면 켜 두기", "거치대에 올려 두고 볼 때", Prefs.keepScreenOn(this)) { Prefs.setKeepScreenOn(this, it) }
             val themes = listOf("AUTO", "DAY", "NIGHT")
@@ -470,7 +470,7 @@ class SettingsActivity : Activity() {
 
     private fun guideSummary(): String {
         val simple = when (Prefs.simpleMode(this)) { "ON" -> "간단 모드 항상"; "OFF" -> "간단 모드 끔"; else -> "간단 모드 자동" }
-        val off = Prefs.voiceMuted(this).size
+        val off = Prefs.voiceMutedGroups(this).size
         return simple + (if (Prefs.alertsOn(this)) "" else " · 소리 끔") + " · 교통정보 " + (if (Prefs.kakaoTraffic(this)) "켬" else "끔") + (if (off > 0) " · 안내 ${off}종 끔" else "")
     }
 

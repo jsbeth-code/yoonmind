@@ -105,6 +105,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var sheet: LinearLayout
     /** v0.13.7 알약: 메뉴 손잡이, T 옆 상태 점, 목적지 글 묶음, 접힌 알약 크기, 모드별 지금 자리(비율). */
     private lateinit var handleView: View
+    /** v0.16.16 펼친 메뉴 맨 아래 손잡이(위로 쓸거나 누르면 닫힘). 폴드 펼친 화면엔 없음 */
+    private var bottomHandleView: View? = null
     private lateinit var tBadge: View
     private lateinit var tBoxView: FrameLayout
     private lateinit var dcol: LinearLayout
@@ -532,6 +534,14 @@ class MainActivity : AppCompatActivity() {
             sv.addView(expanded)
             sheet.addView(sv)
             (sheet as FloatSheet).scroller = sv
+            // v0.16.16 맨 아래 손잡이: 스크롤 목록 밖에 고정. 위로 쓸면 알약이 쓸기로 닫고(목록 밖이라 스크롤과 안 겹침), 누르면 닫힘
+            val grip = FrameLayout(this).apply {
+                setPadding(0, dp(6), 0, dp(2)); setOnClickListener { setSheet(false) }
+                contentDescription = "메뉴 닫기"
+                addView(View(this@MainActivity).apply { background = rounded(M_LINE, 3f) }, FrameLayout.LayoutParams(dp(44), dp(5), Gravity.CENTER))
+            }
+            bottomHandleView = grip
+            sheet.addView(grip, LinearLayout.LayoutParams(-1, dp(22)))
         }
         return sheet
     }
@@ -1562,6 +1572,7 @@ class MainActivity : AppCompatActivity() {
         destCheck.visibility = View.GONE
         destEta.visibility = View.GONE
         handleView.visibility = if (open) View.VISIBLE else View.GONE
+        bottomHandleView?.visibility = if (open) View.VISIBLE else View.GONE
         dcol.visibility = View.VISIBLE
         tBadge.visibility = View.GONE
         destName.maxLines = if (narrow) 2 else 1

@@ -207,6 +207,16 @@ object Prefs {
     fun addVoiceSeen(ctx: Context, kind: String) { val cur = voiceSeen(ctx); if (kind !in cur) put(ctx) { putStringSet("voiceSeen", cur + kind) } }
     fun voiceMuted(ctx: Context): Set<String> = sp(ctx).getStringSet("voiceMuted", null)?.toSet() ?: emptySet()
     fun setVoiceMuted(ctx: Context, kind: String, muted: Boolean) { val cur = voiceMuted(ctx); put(ctx) { putStringSet("voiceMuted", if (muted) cur + kind else cur - kind) } }
+    /** v0.16.16 끈 묶음(KakaoVoice.group). 처음 읽을 때 v0.16.15의 종류별 끔을 옮긴다 — 묶음 안 들은 종류가 모두 꺼져 있었으면 묶음 끔. */
+    fun voiceMutedGroups(ctx: Context): Set<String> {
+        sp(ctx).getStringSet("voiceMutedG", null)?.let { return it.toSet() }
+        val oldMuted = voiceMuted(ctx)
+        val byGroup = voiceSeen(ctx).groupBy { KakaoVoice.group(it) }
+        val migrated = byGroup.filter { (_, kinds) -> kinds.all { it in oldMuted } && kinds.isNotEmpty() }.keys
+        put(ctx) { putStringSet("voiceMutedG", migrated) }
+        return migrated
+    }
+    fun setVoiceGroupMuted(ctx: Context, group: String, muted: Boolean) { val cur = voiceMutedGroups(ctx); put(ctx) { putStringSet("voiceMutedG", if (muted) cur + group else cur - group) } }
     /** v0.16.3 간단 모드: OFF / AUTO(화면이 꺼지면) / ON. 카카오 음성 끔, 우리 안내는 카메라 500·200 m + 감속·복귀 + 안전 안내. */
     fun simpleMode(ctx: Context) = sp(ctx).getString("simpleMode", "AUTO") ?: "AUTO"
     fun setSimpleMode(ctx: Context, v: String) = put(ctx) { putString("simpleMode", v) }
