@@ -341,6 +341,21 @@ object KakaoSafety : KNGuidance_SafetyGuideDelegate, KNGuidance_LocationGuideDel
         curTrip = trip
         lastSelfStop = System.currentTimeMillis() // 시작이 앞 안내를 끝내며 보내는 "끝" 알림은 무시
         beganAt = lastSelfStop
+        val v0 = naviView
+        // v0.16.17 이미 한 번 쓴 카카오 화면에 경로를 다시 넣으면 경로선이 안 그려짐(실차: [카카오 다시 붙이기]로 새 화면이면 나옴) —
+        // 경로 안내는 새 화면을 만들어 거기에 넣는다(메인 화면이 [카카오 다시 붙이기]와 같은 방법으로 바꿔 줌)
+        if (v0 != null && trip != null && retry == 0 && initedView === v0 && !swapping) {
+            val sw = swapView
+            if (sw != null) {
+                pendingTrip = trip; swapping = true
+                log("카카오 화면 새로 붙임 — 쓰던 화면에 경로를 넣으면 경로선이 안 그려져서")
+                val ok = runCatching { sw() }.getOrDefault(false)
+                swapping = false
+                if (ok && pendingTrip == null) return // 새 화면으로 시작됨(attachView에서)
+                pendingTrip = null
+                log("카카오 화면 새로 붙이기 실패 — 쓰던 화면에 경로")
+            }
+        }
         val v = naviView
         // v0.16.13 진단: 안내를 시작할 때마다 화면·경로 유무
         log("카카오 안내 시작: " + (if (trip != null) "경로" else "안전 운행") + " · " + (if (v != null) "화면 있음" else "화면 없음") + (if (retry > 0) " · 다시 시도 $retry" else ""))
@@ -381,6 +396,9 @@ object KakaoSafety : KNGuidance_SafetyGuideDelegate, KNGuidance_LocationGuideDel
         naviView = v
         runCatching { v.guideStateDelegate = viewGuideState }
         val g = guidance ?: return
+        // v0.16.17 경로 안내를 새 화면에 넣으려고 바꾼 것이면, 받아 둔 경로로 바로 시작(다시 찾지 않음)
+        val pt = pendingTrip
+        if (pt != null) { pendingTrip = null; runCatching { begin(g, pt) }; return }
         if (!running || !ready) return
         cams = emptyList(); updatedAt = 0L
         switchingUntil = System.currentTimeMillis() + SWITCH_GRACE_MS
@@ -532,6 +550,10 @@ object KakaoSafety : KNGuidance_SafetyGuideDelegate, KNGuidance_LocationGuideDel
     @Volatile private var lastLat = 0.0
     @Volatile private var lastLon = 0.0
     private var lastTripTry = 0L
+    /** v0.16.17 메인 화면이 카카오 화면을 새로 만들어 붙인다(성공하면 true). 메인 화면이 없으면 null */
+    @Volatile var swapView: (() -> Boolean)? = null
+    private var pendingTrip: KNTrip? = null
+    private var swapping = false
     /** v0.16.14 시속 10 km 넘게 계속 움직이기 시작한 시각(느려지면 0) */
     @Volatile private var movingSince = 0L
     private const val MOVING_KMH = 10.0

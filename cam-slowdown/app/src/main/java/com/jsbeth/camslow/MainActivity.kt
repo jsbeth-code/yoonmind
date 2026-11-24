@@ -162,6 +162,7 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         outputs = Outputs(this)
         KakaoSafety.bindContext(this)
+        KakaoSafety.swapView = swapNaviCb
         // v0.16.0 보드 자동 시작 검색(블루투스를 껐다 켜면 사라지므로 앱을 열 때마다 다시 등록)
         if (!DriveState.running) BoardScan.update(this)
         build()
@@ -1092,6 +1093,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        if (KakaoSafety.swapView === swapNaviCb) KakaoSafety.swapView = null
         naviView?.let {
             KakaoSafety.detachView(it)
             if (DriveState.running) DriveState.log("카카오 화면 뗌 — 앱 화면이 닫힘" + if (isChangingConfigurations) "(화면 다시 만듦)" else "")
@@ -1128,6 +1130,20 @@ class MainActivity : AppCompatActivity() {
         setSpan(ForegroundColorSpan(if (kakao) 0xFF3A2F00.toInt() else 0xFF8A4B12.toInt()), start, length, 0)
         setSpan(android.text.style.RelativeSizeSpan(0.85f), start, length, 0)
         setSpan(android.text.style.StyleSpan(Typeface.BOLD), start, length, 0)
+    }
+
+    /** v0.16.17 경로 안내를 시작할 때 쓰던 카카오 화면을 새것으로 바꾼다([카카오 다시 붙이기]와 같은 방법). 새 화면이 붙으면 true. */
+    private val swapNaviCb: () -> Boolean = {
+        val old = naviView
+        if (old == null || !DriveState.running || DriveState.simulating) false
+        else {
+            detachNavi(old)
+            naviFailed = false
+            naviForce = true
+            updateNavi(DriveState.running, DriveState.simulating)
+            naviForce = false
+            naviView != null
+        }
     }
 
     /** v0.13.4: [카카오 화면 다시 붙이기] — 지금 화면을 떼고 바로 새로 붙인다(감속·구간 유지 중이어도 기다리지 않음). */
