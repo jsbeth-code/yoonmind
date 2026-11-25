@@ -482,7 +482,7 @@ object KakaoSafety : KNGuidance_SafetyGuideDelegate, KNGuidance_LocationGuideDel
         restartPosted = true
         val arrived = following && destination != null
         log("카카오 안내 끝($why) — " + (if (arrived) "목적지 없이 감시" else "안전 운행 다시 시작"))
-        if (arrived) endedDest = destination
+        if (arrived) { endedDest = destination; lastArrived = destination }
         following = false; turn = null; nextTurn = null; routeLine = null; routeRef = null
         val seq = ++tripSeq
         main.post {
@@ -540,6 +540,7 @@ object KakaoSafety : KNGuidance_SafetyGuideDelegate, KNGuidance_LocationGuideDel
         guidance = null
         tripSeq++
         destination = null; following = false; turn = null; nextTurn = null; routeLine = null; routeRef = null
+        lastArrived = null
         switchingUntil = 0L; tripFails = 0; tripPending = false
         askRouteUntil = 0L; askedDest = null; endedDest = null; curTrip = null; choices = emptyList(); previewSeq++
         cams = emptyList(); logged.clear()
@@ -550,6 +551,9 @@ object KakaoSafety : KNGuidance_SafetyGuideDelegate, KNGuidance_LocationGuideDel
     @Volatile private var lastLat = 0.0
     @Volatile private var lastLon = 0.0
     private var lastTripTry = 0L
+    /** v0.16.18 이번 감시에서 마지막으로 도착한 목적지(테슬라가 도착 뒤 남기는 이름 없는 좌표를 거르는 데 씀). 감시를 끄면 비움 */
+    @Volatile var lastArrived: TeslaDest.Dest? = null
+        private set
     /** v0.16.17 메인 화면이 카카오 화면을 새로 만들어 붙인다(성공하면 true). 메인 화면이 없으면 null */
     @Volatile var swapView: (() -> Boolean)? = null
     private var pendingTrip: KNTrip? = null

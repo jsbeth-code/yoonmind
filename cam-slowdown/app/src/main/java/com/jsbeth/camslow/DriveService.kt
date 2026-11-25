@@ -929,6 +929,8 @@ class DriveService : Service(), LocationListener {
     /** v0.16.13 감시 시작 뒤 차가 처음 응답했는지(빠른 재확인을 멈춤) */
     private var teslaFirstOk = false
     private var teslaStartSeq = 0
+    /** v0.16.18 같은 좌표를 무시했다는 기록을 2분마다 되풀이하지 않게 */
+    private var teslaIgnoreNote: String? = null
 
     private fun checkTesla(force: Boolean = false, quick: Boolean = false) {
         if (!DriveState.running || DriveState.simulating) return
@@ -948,7 +950,23 @@ class DriveService : Service(), LocationListener {
                 is TeslaDest.Reply.Error -> if (teslaErrSaid != r.message) { teslaErrSaid = r.message; DriveState.log("테슬라 목적지 확인 실패: ${r.message}") }
                 is TeslaDest.Reply.Online -> {
                     teslaErrSaid = null; teslaOfflineSaid = false
-                    val d = if (Prefs.teslaFollow(this)) r.dest else null
+                    var d = if (Prefs.teslaFollow(this)) r.dest else null
+                    // v0.16.18 도착 뒤 테슬라가 이름 없이 좌표만 남긴 경로(실차 2026-11-25: 도착 43초 뒤 차에서 20 m 좌표로 혼자 경로 시작)는 목적지로 보지 않는다 —
+                    // 이름이 비었고, 방금 도착한 곳이나 지금 차 위치에서 50 m 안일 때만(이름 있는 근처 새 목적지·다른 곳의 핀은 따라감)
+                    if (d != null && d.name.isBlank()) {
+                        val dd = d
+                        val fromArrived = KakaoSafety.lastArrived?.let { Geo.distance(it.lat, it.lon, dd.lat, dd.lon) }
+                        val fromCar = lastFix?.let { Geo.distance(it.lat, it.lon, dd.lat, dd.lon) }
+                        if ((fromArrived != null && fromArrived <= 50.0) || (fromCar != null && fromCar <= 50.0)) {
+                            val note = TeslaDest.label(dd)
+                            if (teslaIgnoreNote != note) {
+                                teslaIgnoreNote = note
+                                DriveState.log("테슬라 목적지 무시 — 이름 없음, " + listOfNotNull(fromArrived?.let { "도착한 곳에서 ${it.toInt()}m" }, fromCar?.let { "차 위치에서 ${it.toInt()}m" }).joinToString(", ") +
+                                    " (남은 " + (dd.km?.let { "%.2fkm".format(it) } ?: "거리 모름") + " · " + (dd.minutes?.let { "${it.toInt()}분" } ?: "시간 모름") + ")")
+                            }
+                            d = null
+                        }
+                    }
                     DriveState.teslaDest = d
                     if (TeslaDest.changed(appliedDest, d)) {
                         appliedDest = d
